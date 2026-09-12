@@ -37,8 +37,3 @@ def wb_search(query: str, limit: int = 20):
 
     # fallback если WB полностью заблокировал
     return []
-
-
-        return products
-
-    return []
