@@ -4,7 +4,7 @@ from flask import Flask
 from telegram.ext import Application, CommandHandler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"  # сюда вставь реальный токен бота
+TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65lsН"  # вставь свой токен
 
 # ------------------ FLASK ------------------
 
@@ -13,6 +13,10 @@ app = Flask(__name__)
 @app.route("/")
 def home():
     return "Mini App is working!"
+
+
+def run_flask():
+    app.run(host="0.0.0.0", port=5000)
 
 
 # ------------------ TELEGRAM BOT ------------------
@@ -37,17 +41,11 @@ async def bot_main():
     await application.run_polling()
 
 
-def run_bot_in_thread():
-    asyncio.run(bot_main())
-
-
 # ------------------ RUN BOTH ------------------
 
 if __name__ == "__main__":
-    # бот в отдельном потоке
-    t = threading.Thread(target=run_bot_in_thread, daemon=True)
-    t.start()
+    # Flask в отдельном потоке
+    threading.Thread(target=run_flask, daemon=True).start()
 
-    # Flask в основном потоке
-    app.run(host="0.0.0.0", port=5000)
-
+    # Бот в главном потоке — это важно!
+    asyncio.run(bot_main())
