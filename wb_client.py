@@ -6,16 +6,15 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
-def wb_search(query: str, limit: int = 20):
+def wb_search(limit: int = 20):
     url = (
-        "https://search.wb.ru/exactmatch/ru/common/v4/search"
-        f"?query={query}"
+        "https://catalog.wb.ru/catalog/women_clothes/v4/list"
+        "?appType=1&curr=rub&dest=-1257786"
     )
 
     for attempt in range(5):
         resp = requests.get(url, headers=HEADERS, timeout=10)
 
-        # WB режет запросы → обходим 429
         if resp.status_code == 429:
             time.sleep(0.5 + random.random())
             continue
