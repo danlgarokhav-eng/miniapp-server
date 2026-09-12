@@ -1,15 +1,15 @@
-from kazan_client import ke_category
+from aliexpress_client import ali_search
 
 def get_feed():
     try:
-        items = ke_category(205, limit=20)
+        items = ali_search("women clothes", limit=20)
     except Exception:
         items = []
 
     if not items:
         return [{
             "id": "error",
-            "title": "Источник временно недоступен",
+            "title": "Нет данных",
             "price": 0,
             "image": "https://i.imgur.com/0ZfQZQh.jpeg",
             "source": "system"
