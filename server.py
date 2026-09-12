@@ -4,7 +4,7 @@ from flask import Flask
 from telegram.ext import Application, CommandHandler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"  # вставь сюда реальный токен бота
+TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"  # сюда вставь реальный токен бота
 
 # ------------------ FLASK ------------------
 
@@ -44,9 +44,10 @@ def run_bot_in_thread():
 # ------------------ RUN BOTH ------------------
 
 if __name__ == "__main__":
-    # запускаем бота в отдельном потоке
+    # бот в отдельном потоке
     t = threading.Thread(target=run_bot_in_thread, daemon=True)
     t.start()
 
-    # запускаем Flask (он блокирует основной поток — это ок)
+    # Flask в основном потоке
     app.run(host="0.0.0.0", port=5000)
+
