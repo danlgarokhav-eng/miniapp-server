@@ -1,4 +1,8 @@
-﻿from flask import Flask, jsonify
+import asyncio
+from flask import Flask
+from telegram.ext import Application, CommandHandler
+
+TELEGRAM_TOKEN = "ТВОЙ_ТОКЕН"
 
 app = Flask(__name__)
 
@@ -6,13 +10,17 @@ app = Flask(__name__)
 def home():
     return "Mini App is working!"
 
-@app.route("/api/items")
-def items():
-    return jsonify([
-        {"id": 1, "name": "Товар 1", "price": 100},
-        {"id": 2, "name": "Товар 2", "price": 200},
-        {"id": 3, "name": "Товар 3", "price": 300}
-    ])
+async def start(update, context):
+    await update.message.reply_text("Открываю мини-приложение...")
+
+def run_bot():
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(application.run_polling())
+    return loop
 
 if __name__ == "__main__":
+    loop = run_bot()
     app.run(host="0.0.0.0", port=5000)
