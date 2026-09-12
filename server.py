@@ -1,9 +1,10 @@
 import asyncio
+import threading
 from flask import Flask
 from telegram.ext import Application, CommandHandler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"  # вставь свой токен
+TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"  # вставь сюда реальный токен бота
 
 # ------------------ FLASK ------------------
 
@@ -36,10 +37,16 @@ async def bot_main():
     await application.run_polling()
 
 
+def run_bot_in_thread():
+    asyncio.run(bot_main())
+
+
 # ------------------ RUN BOTH ------------------
 
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.create_task(bot_main())
+    # запускаем бота в отдельном потоке
+    t = threading.Thread(target=run_bot_in_thread, daemon=True)
+    t.start()
+
+    # запускаем Flask (он блокирует основной поток — это ок)
     app.run(host="0.0.0.0", port=5000)
