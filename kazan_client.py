@@ -1,6 +1,6 @@
 import requests
 
-def ke_category(category_id: int, limit: int = 20):
+def ke_category(category_id: int = 205, limit: int = 20):
     url = f"https://api.kazanexpress.ru/api/v1/product/list?categoryId={category_id}"
 
     resp = requests.get(url, timeout=10)
