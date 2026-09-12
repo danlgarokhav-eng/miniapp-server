@@ -4,7 +4,7 @@ from flask import Flask
 from telegram.ext import Application, CommandHandler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65lsН"  # вставь свой токен
+TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"  # вставь свой токен
 
 # ------------------ FLASK ------------------
 
