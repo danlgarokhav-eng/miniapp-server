@@ -1,27 +1,37 @@
 import requests
+import random
+import time
 
-def get_wb_dresses(limit=50):
-    url = "https://catalog.wb.ru/catalog/women_clothes/catalog"
-    params = {
-        "cat": 8129,  # категория Платья
-        "page": 1
-    }
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+}
 
-    r = requests.get(url, params=params).json()
-    items = r["data"]["products"][:limit]
+def wb_search(query: str, limit: int = 20):
+    url = (
+        "https://catalog.wb.ru/catalog/0/v4/search"
+        f"?appType=1&curr=rub&dest=-1257786&query={query}"
+    )
 
-    result = []
-    for item in items:
-        result.append({
-            "id": f"wb-{item['id']}",
-            "title": item["name"],
-            "price": item["salePriceU"] // 100,
-            "image": f"https://images.wbstatic.net/c516x688/{item['id']}.jpg",
-            "brand": item["brand"],
-            "category": "dress",
-            "source": "WB",
-            "rating": item.get("rating", 0),
-            "discount": item.get("sale", 0)
-        })
+    for attempt in range(5):
+        resp = requests.get(url, headers=HEADERS, timeout=10)
 
-    return result
+        if resp.status_code == 429:
+            time.sleep(0.5 + random.random())
+            continue
+
+        resp.raise_for_status()
+        data = resp.json()
+
+        products = []
+        for item in data.get("data", {}).get("products", [])[:limit]:
+            products.append({
+                "source": "wb",
+                "id": f"wb-{item['id']}",
+                "title": item.get("name", "Без названия"),
+                "price": item.get("salePriceU", item.get("priceU", 0)) // 100,
+                "image": f"https://images.wbstatic.net/c246x328/new/{item['id']}-1.jpg",
+            })
+
+        return products
+
+    return []
