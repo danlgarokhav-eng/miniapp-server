@@ -1,3 +1,22 @@
-<body>
-    <div id="app"></div>
+<body style="background:black; color:white;">
+    <div id="feed"></div>
+
+    <script>
+        fetch("/api/feed")
+            .then(r => r.json())
+            .then(items => {
+                const feed = document.getElementById("feed");
+                feed.innerHTML = items.map(item => `
+                    <div style="padding:20px; border-bottom:1px solid #333;">
+                        <img src="${item.image}" width="120">
+                        <h3>${item.title}</h3>
+                        <p>${item.price} ₽</p>
+                    </div>
+                `).join("");
+            })
+            .catch(err => {
+                document.body.innerHTML = "<h1>Ошибка загрузки</h1>";
+                console.error(err);
+            });
+    </script>
 </body>
