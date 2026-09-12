@@ -1,7 +1,7 @@
 from wb_client import wb_search
 
 def get_feed():
-    wb_items = wb_search("платье", limit=20)
+    wb_items = wb_search(limit=20)
 
     if not wb_items:
         return [{
