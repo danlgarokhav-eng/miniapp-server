@@ -2,7 +2,7 @@ import asyncio
 from flask import Flask
 from telegram.ext import Application, CommandHandler
 
-TELEGRAM_TOKEN = "ТВОЙ_ТОКЕН"
+TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"
 
 app = Flask(__name__)
 
