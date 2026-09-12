@@ -1,16 +1,19 @@
 from kazan_client import ke_category
 
 def get_feed():
-    ke_items = ke_category(205, limit=20)
+    try:
+        items = ke_category(205, limit=20)
+    except Exception:
+        items = []
 
-    if not ke_items:
+    if not items:
         return [{
             "id": "error",
-            "title": "Нет данных",
+            "title": "Источник временно недоступен",
             "price": 0,
             "image": "https://i.imgur.com/0ZfQZQh.jpeg",
             "source": "system"
         }]
 
-    ke_items.sort(key=lambda x: x["price"])
-    return ke_items
+    items.sort(key=lambda x: x["price"])
+    return items
