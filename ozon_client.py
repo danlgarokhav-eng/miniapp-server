@@ -1,37 +1,27 @@
 import requests
 
-OZON_API_KEY = "ТВОЙ_КЛЮЧ"
-OZON_CLIENT_ID = "ТВОЙ_CLIENT_ID"
+def ozon_category(url: str, limit: int = 20):
+    api_url = f"https://api.ozon.ru/composer-api.bx/page/json/v2?url={url}"
 
-def get_ozon_dresses(limit=50):
-    url = "https://api-seller.ozon.ru/v2/product/list"
-    headers = {
-        "Client-Id": OZON_CLIENT_ID,
-        "Api-Key": OZON_API_KEY
-    }
+    resp = requests.get(api_url, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
 
-    data = {
-        "filter": {
-            "category_id": 170000000
-        },
-        "limit": limit
-    }
+    products = []
 
-    r = requests.post(url, json=data, headers=headers).json()
-    items = r["result"]["items"]
+    for widget in data.get("widgetStates", []):
+        items = widget.get("state", {}).get("items", [])
+        for item in items[:limit]:
+            image = item.get("image") or item.get("imageUrl") or ""
+            if image.startswith("//"):
+                image = "https:" + image
 
-    result = []
-    for item in items:
-        result.append({
-            "id": f"ozon-{item['product_id']}",
-            "title": item["name"],
-            "price": item["price"],
-            "image": item["primary_image"],
-            "brand": item.get("brand", ""),
-            "category": "dress",
-            "source": "OZON",
-            "rating": item.get("rating", 0),
-            "discount": item.get("discount", 0)
-        })
+            products.append({
+                "source": "ozon",
+                "id": f"ozon-{item.get('id')}",
+                "title": item.get("title", "Без названия"),
+                "price": item.get("price", 0),
+                "image": image,
+            })
 
-    return result
+    return products
