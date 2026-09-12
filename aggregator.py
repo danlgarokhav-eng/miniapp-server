@@ -1,9 +1,10 @@
-from wb_client import wb_search
+from kazan_client import ke_category
 
 def get_feed():
-    wb_items = wb_search(limit=20)
+    # категория 123 — пример, можно заменить
+    ke_items = ke_category(123, limit=20)
 
-    if not wb_items:
+    if not ke_items:
         return [{
             "id": "error",
             "title": "Нет данных",
@@ -12,5 +13,5 @@ def get_feed():
             "source": "system"
         }]
 
-    wb_items.sort(key=lambda x: x["price"])
-    return wb_items
+    ke_items.sort(key=lambda x: x["price"])
+    return ke_items
