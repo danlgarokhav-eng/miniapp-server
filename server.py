@@ -3,9 +3,9 @@ from flask import Flask
 from telegram.ext import Application, CommandHandler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65lsН"  # вставь свой токен
+TELEGRAM_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"  # вставь свой токен
 
-# ------------------ FLASK (Mini App) ------------------
+# ------------------ FLASK ------------------
 
 app = Flask(__name__)
 
@@ -36,9 +36,11 @@ async def run_bot():
     await application.run_polling()
 
 
-# ------------------ ЗАПУСК ОБОИХ ------------------
+# ------------------ RUN BOTH ------------------
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()      # ← ВАЖНО
+    asyncio.set_event_loop(loop)         # ← ВАЖНО
     loop.create_task(run_bot())
     app.run(host="0.0.0.0", port=5000)
+
