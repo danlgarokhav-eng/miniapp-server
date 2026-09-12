@@ -15,6 +15,7 @@ def wb_search(query: str, limit: int = 20):
     for attempt in range(5):
         resp = requests.get(url, headers=HEADERS, timeout=10)
 
+        # WB режет запросы → обходим 429
         if resp.status_code == 429:
             time.sleep(0.5 + random.random())
             continue
@@ -31,6 +32,12 @@ def wb_search(query: str, limit: int = 20):
                 "price": item.get("salePriceU", item.get("priceU", 0)) // 100,
                 "image": f"https://images.wbstatic.net/c246x328/new/{item['id']}-1.jpg",
             })
+
+        return products
+
+    # fallback если WB полностью заблокировал
+    return []
+
 
         return products
 
