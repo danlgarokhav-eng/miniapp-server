@@ -1,5 +1,4 @@
-from flask import Flask, jsonify
-from aggregator import get_feed
+from flask import Flask
 
 app = Flask(__name__)
 
@@ -9,5 +8,4 @@ def root():
 
 @app.route("/api/feed")
 def feed():
-    data = get_feed()
-    return jsonify(data)
+    return {"status": "OK"}
