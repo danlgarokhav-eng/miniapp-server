@@ -1,6 +1,7 @@
 import time
 import requests
 import telebot
+import threading
 
 BOT_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"
 CHAT_ID = "5052523892"
@@ -26,7 +27,7 @@ def start(message):
         reply_markup=markup
     )
 
-# Функция проверки обновлений
+# Форматирование товаров
 def format_feed(feed):
     if not feed:
         return "❗ Пока нет новых товаров."
@@ -39,6 +40,7 @@ def format_feed(feed):
 
     return text
 
+# Фоновая проверка обновлений
 def check_updates():
     while True:
         try:
@@ -49,6 +51,9 @@ def check_updates():
             print("Ошибка:", e)
 
         time.sleep(600)
+
+# Запуск фонового потока
+threading.Thread(target=check_updates, daemon=True).start()
 
 # Запуск бота
 bot.polling(none_stop=True)
