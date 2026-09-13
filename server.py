@@ -1,5 +1,6 @@
 from flask import Flask, send_from_directory, jsonify
 import json
+import os
 
 app = Flask(__name__, static_folder='miniapp')
 
@@ -7,11 +8,9 @@ app = Flask(__name__, static_folder='miniapp')
 def root():
     return send_from_directory('miniapp', 'index.html')
 
-@app.route('/miniapp')
-@app.route('/miniapp/')
-@app.route('/miniapp/index.html')
-def miniapp():
-    return send_from_directory('miniapp', 'index.html')
+@app.route('/<path:path>')
+def static_files(path):
+    return send_from_directory('miniapp', path)
 
 @app.route('/api/feed')
 def feed():
@@ -20,4 +19,5 @@ def feed():
     return jsonify(data)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
