@@ -6,9 +6,27 @@ BOT_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"
 CHAT_ID = "5052523892"
 
 API_URL = "https://miniapp-server-production-9b9e.up.railway.app/api/feed"
+MINIAPP_URL = "https://miniapp-server-production-9b9e.up.railway.app/miniapp"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# Команда /start
+@bot.message_handler(commands=['start'])
+def start(message):
+    markup = telebot.types.InlineKeyboardMarkup()
+    btn = telebot.types.InlineKeyboardButton(
+        text="🛍 Открыть магазин",
+        url=MINIAPP_URL
+    )
+    markup.add(btn)
+
+    bot.send_message(
+        message.chat.id,
+        "Добро пожаловать! Нажми кнопку ниже, чтобы открыть магазин 👇",
+        reply_markup=markup
+    )
+
+# Функция проверки обновлений
 def format_feed(feed):
     if not feed:
         return "❗ Пока нет новых товаров."
@@ -30,6 +48,7 @@ def check_updates():
         except Exception as e:
             print("Ошибка:", e)
 
-        time.sleep(600)  # 10 минут
+        time.sleep(600)
 
-check_updates()
+# Запуск бота
+bot.polling(none_stop=True)
