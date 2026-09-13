@@ -1,16 +1,17 @@
 import requests
-from bs4 import BeautifulSoup
 
 def parse_wb():
-    url = "https://www.wildberries.ru/catalog/obuv/muzhskaya/kedy-i-krossovki"
-    html = requests.get(url).text
-    soup = BeautifulSoup(html, "html.parser")
+    url = "https://catalog.wb.ru/catalog/men_shoes/catalog?appType=1&curr=rub&dest=-1257786&sort=popular&page=1"
+    data = requests.get(url).json()
 
     items = []
 
-    for card in soup.select(".product-card"):
-        title = card.select_one(".product-card__brand").get_text(strip=True)
-        price = card.select_one(".price__lower-price").get_text(strip=True)
-        items.append({"title": title, "price": price})
+    for product in data["data"]["products"]:
+        title = product.get("name")
+        price = product.get("salePriceU", 0) // 100
+        items.append({
+            "title": title,
+            "price": f"{price} ₽"
+        })
 
     return items
