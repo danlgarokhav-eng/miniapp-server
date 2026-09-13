@@ -10,7 +10,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 def check_updates():
     while True:
         try:
-            feed = requests.get("https://ТВОЙ_ДОМЕН/api/feed").json()
+            feed = requests.get("https://miniapp-server-production-9b9e.up.railway.app/api/feed").json()
             bot.send_message(CHAT_ID, f"Новые товары:\n{feed}")
         except Exception as e:
             print("Ошибка:", e)
