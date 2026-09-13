@@ -17,17 +17,17 @@ async function loadFeed() {
             div.style.marginBottom = '12px';
 
             const title = document.createElement('div');
-            title.textContent = item.title || 'Без названия';
+            title.textContent = item.title;
 
             const price = document.createElement('div');
-            price.textContent = item.price || '—';
+            price.textContent = item.price;
 
             div.appendChild(title);
             div.appendChild(price);
             feedEl.appendChild(div);
         });
     } catch (e) {
-        feedEl.innerText = 'Ошибка загрузки товаров.';
+        feedEl.innerText = 'Ошибка загрузки.';
         console.error(e);
     }
 }
