@@ -1,13 +1,35 @@
 async function loadFeed() {
-    const res = await fetch("https://miniapp-server-production-9b9e.up.railway.app/api/feed");
-    const data = await res.json();
+    const feedEl = document.getElementById('feed');
 
-    const feedDiv = document.getElementById("feed");
-    feedDiv.innerHTML = "";
+    try {
+        const res = await fetch('/api/feed');
+        const data = await res.json();
 
-    data.forEach(item => {
-        feedDiv.innerHTML += `<p>${item.title} — ${item.price}</p>`;
-    });
+        if (!data || data.length === 0) {
+            feedEl.innerText = 'Пока нет товаров.';
+            return;
+        }
+
+        feedEl.innerHTML = '';
+
+        data.forEach(item => {
+            const div = document.createElement('div');
+            div.style.marginBottom = '12px';
+
+            const title = document.createElement('div');
+            title.textContent = item.title || 'Без названия';
+
+            const price = document.createElement('div');
+            price.textContent = item.price || '—';
+
+            div.appendChild(title);
+            div.appendChild(price);
+            feedEl.appendChild(div);
+        });
+    } catch (e) {
+        feedEl.innerText = 'Ошибка загрузки товаров.';
+        console.error(e);
+    }
 }
 
 loadFeed();
