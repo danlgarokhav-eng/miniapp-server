@@ -20,6 +20,6 @@ def feed():
     return jsonify(data)
 
 if __name__ == '__main__':
-    generate_feed()  # ← ВАЖНО: запускает парсер WB
+    generate_feed()  # ← Автоматически создаёт feed.json из WB
     port = int(os.environ.get("PORT", 8000))
     app.run(host='0.0.0.0', port=port)
