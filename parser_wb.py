@@ -1,5 +1,4 @@
 import requests
-import json
 
 def parse_wb(query="платье", limit=20):
     url = f"https://catalog.wb.ru/catalog/electronic/v4/search?appType=1&curr=rub&dest=-1257786&query={query}"
