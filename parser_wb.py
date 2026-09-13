@@ -1,17 +1,5 @@
-import requests
-
 def parse_wb():
-    url = "https://catalog.wb.ru/catalog/electronic3/catalog?appType=1&curr=rub&dest=-1257786&sort=popular&page=1"
-    data = requests.get(url).json()
-
-    items = []
-
-    for product in data["data"]["products"]:
-        title = product.get("name")
-        price = product.get("salePriceU", 0) // 100
-        items.append({
-            "title": title,
-            "price": f"{price} ₽"
-        })
-
-    return items
+    return [
+        {"title": "Тестовый товар 1", "price": "1000 ₽"},
+        {"title": "Тестовый товар 2", "price": "2000 ₽"},
+    ]
