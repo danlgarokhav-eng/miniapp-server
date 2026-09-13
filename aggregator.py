@@ -2,9 +2,8 @@ from parser_wb import parse_wb
 import json
 
 def generate_feed():
-    wb_items = parse_wb("платье", limit=10)
+    wb_items = parse_wb(limit=20)
 
-    # Если WB ничего не дал → оставляем старый feed.json
     if not wb_items:
         print("WB не дал товары, feed.json не обновлён")
         return
