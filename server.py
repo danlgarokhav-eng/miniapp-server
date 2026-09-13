@@ -1,6 +1,7 @@
 from flask import Flask, send_from_directory, jsonify
 import json
 import os
+from aggregator import generate_feed
 
 app = Flask(__name__, static_folder='miniapp')
 
@@ -19,5 +20,6 @@ def feed():
     return jsonify(data)
 
 if __name__ == '__main__':
+    generate_feed()  # ← ВАЖНО: запускает парсер WB
     port = int(os.environ.get("PORT", 8000))
     app.run(host='0.0.0.0', port=port)
