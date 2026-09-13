@@ -1,35 +1,39 @@
 import requests
+import random
+import time
 
-def parse_wb(query="платье", limit=20):
-    url = f"https://catalog.wb.ru/catalog/electronic/v4/search?appType=1&curr=rub&dest=-1257786&query={query}"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+}
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-    }
+def parse_wb(limit=20):
+    url = (
+        "https://catalog.wb.ru/catalog/women_clothes/v4/list"
+        "?appType=1&curr=rub&dest=-1257786"
+    )
 
-    r = requests.get(url, headers=headers)
+    for attempt in range(5):
+        resp = requests.get(url, headers=HEADERS, timeout=10)
 
-    # Если WB вернул пустой ответ → возвращаем пустой список
-    if not r.text.strip():
-        print("WB вернул пустой ответ")
-        return []
+        # Если WB сказал "слишком много запросов"
+        if resp.status_code == 429:
+            time.sleep(0.5 + random.random())
+            continue
 
-    try:
-        data = r.json()
-    except:
-        print("WB вернул НЕ JSON")
-        return []
+        resp.raise_for_status()
+        data = resp.json()
 
-    products = []
+        products = []
+        for item in data.get("data", {}).get("products", [])[:limit]:
+            products.append({
+                "title": item.get("name", "Без названия"),
+                "price": f"{item.get('salePriceU', item.get('priceU', 0)) // 100} ₽",
+                "image": f"https://images.wbstatic.net/c246x328/new/{item['id']}-1.jpg"
+            })
 
-    for item in data.get("data", {}).get("products", []):
-        products.append({
-            "title": item.get("name", "Без названия"),
-            "price": f"{item.get('salePriceU', 0) // 100} ₽",
-            "image": f"https://images.wbstatic.net/c246x328/new/{item['id']}-1.jpg"
-        })
+        return products
 
-        if len(products) >= limit:
-            break
+    return []
+
 
     return products
