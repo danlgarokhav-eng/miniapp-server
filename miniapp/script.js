@@ -3,7 +3,7 @@ async function loadFeed() {
 
     try {
         // ВАЖНО: полный URL, иначе WebView не даст доступ
-        const res = await fetch('https://miniapp-server-production-9b9e.up.railway.app/api/feed', {
+        const res = await fetch('https://miniapp-server-production.up.railway.app/api/feed', {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json'
