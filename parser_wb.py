@@ -4,10 +4,11 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
-def parse_wb(category_id=169873, limit=20):
+def parse_wb(query="платье", limit=20):
     url = (
-        f"https://catalog.wb.ru/catalog/{category_id}/v4/list"
-        "?appType=1&curr=rub&dest=-1257786"
+        "https://search.wb.ru/exactmatch/ru/common/v4/search"
+        f"?query={query}&resultset=catalog"
+        "&sort=popular&curr=rub&lang=ru"
     )
 
     r = requests.get(url, headers=HEADERS)
