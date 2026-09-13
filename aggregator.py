@@ -1,11 +1,10 @@
-import time
+from parser_wb import parse_wb
+import json
 
-# временное хранилище
-FEED = []
+def generate_feed():
+    wb_items = parse_wb("платье", limit=10)
 
-def update_feed(new_items):
-    global FEED
-    FEED = new_items
+    with open("feed.json", "w", encoding="utf-8") as f:
+        json.dump(wb_items, f, ensure_ascii=False, indent=2)
 
-def get_feed():
-    return FEED
+    print("feed.json обновлён!")
