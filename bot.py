@@ -1,7 +1,7 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
-BOT_TOKEN = "8824419035:AAG1ixl0eG-VjGD2eiPwWa-XHcHoJbo65ls"
+BOT_TOKEN = "8824419035:AAH72eIsZNUUbw8qVgoK_iB6PQmuHZVrro8"
 MINIAPP_URL = "https://miniapp-server-production-9b9e.up.railway.app/miniapp"
 
 bot = telebot.TeleBot(BOT_TOKEN)
