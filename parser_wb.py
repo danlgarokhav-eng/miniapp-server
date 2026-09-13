@@ -1,7 +1,7 @@
 import requests
 
 def parse_wb():
-    url = "https://catalog.wb.ru/catalog/men_shoes/catalog?appType=1&curr=rub&dest=-1257786&sort=popular&page=1"
+    url = "https://catalog.wb.ru/catalog/electronic3/catalog?appType=1&curr=rub&dest=-1257786&sort=popular&page=1"
     data = requests.get(url).json()
 
     items = []
