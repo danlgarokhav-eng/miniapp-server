@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>WB Admin Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #111;
+      color: #fff;
+      font-family: system-ui, sans-serif;
+    }
+
+    h1 {
+      margin-bottom: 20px;
+      font-size: 26px;
+      text-align: center;
+    }
+
+    label {
+      display: block;
+      margin-top: 20px;
+      font-size: 16px;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      margin-top: 8px;
+      border-radius: 8px;
+      border: none;
+      font-size: 16px;
+    }
+
+    button {
+      margin-top: 20px;
+      width: 100%;
+      padding: 14px;
+      font-size: 18px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    .save-btn {
+      background: #0f0;
+      color: #000;
+      font-weight: bold;
+    }
+
+    .reload-btn {
+      background: #fff;
+      color: #000;
+      font-weight: bold;
+    }
+
+    .status {
+      margin-top: 30px;
+      padding: 15px;
+      background: #222;
+      border-radius: 10px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Менеджерская панель</h1>
+
+  <label>Поисковый запрос WB:</label>
+  <input id="queryInput" placeholder="например: кроссовки">
+
+  <label>Количество товаров:</label>
+  <input id="limitInput" type="number" placeholder="например: 50">
+
+  <button class="save-btn" onclick="saveSettings()">💾 Сохранить настройки</button>
+  <button class="reload-btn" onclick="reloadFeed()">🔄 Обновить ленту</button>
+
+  <div class="status" id="statusBox">Статус: загрузка...</div>
+
+  <script>
+    async function loadSettings() {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+
+      document.getElementById('queryInput').value = data.query;
+      document.getElementById('limitInput').value = data.limit;
+
+      document.getElementById('statusBox').innerText =
+        "Статус: настройки загружены";
+    }
+
+    async function saveSettings() {
+      const query = document.getElementById('queryInput').value;
+      const limit = document.getElementById('limitInput').value;
+
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, limit })
+      });
+
+      const data = await res.json();
+      document.getElementById('statusBox').innerText =
+        "Статус: настройки сохранены";
+    }
+
+    async function reloadFeed() {
+      const res = await fetch('/api/reload');
+      const data = await res.json();
+
+      document.getElementById('statusBox').innerText =
+        "Статус: лента обновлена (" + data.count + " товаров)";
+    }
+
+    loadSettings();
+  </script>
+
+</body>
+</html>
