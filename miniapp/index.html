@@ -1,13 +1,95 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <title>Mini App Feed</title>
+  <meta charset="UTF-8">
+  <title>WB TikTok Feed</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow: hidden;
+    }
+
+    #card {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .media {
+      max-height: 60vh;
+      max-width: 100%;
+      border-radius: 16px;
+      overflow: hidden;
+      background: #111;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .media img, .media video {
+      max-height: 60vh;
+      max-width: 100%;
+      object-fit: cover;
+    }
+
+    .title {
+      margin-top: 16px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .brand {
+      margin-top: 4px;
+      font-size: 14px;
+      color: #aaa;
+    }
+
+    .price {
+      margin-top: 8px;
+      font-size: 18px;
+      color: #0f0;
+    }
+
+    .controls {
+      position: fixed;
+      bottom: 20px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 999px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    .btn-prev { background: #333; color: #fff; }
+    .btn-next { background: #fff; color: #000; }
+  </style>
 </head>
 <body>
-    <h1>Товары</h1>
-    <div id="feed">Загрузка...</div>
+  <div id="card">Загрузка...</div>
 
-    <script src="script.js"></script>
+  <div class="controls">
+    <button class="btn-prev" onclick="prev()">↑</button>
+    <button class="btn-next" onclick="next()">↓</button>
+  </div>
+
+  <script src="script.js"></script>
 </body>
 </html>
