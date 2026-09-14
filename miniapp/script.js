@@ -1,48 +1,64 @@
+let feed = [];
+let index = 0;
+
 async function loadFeed() {
-    const feedEl = document.getElementById('feed');
+  try {
+    const res = await fetch('/api/feed');
+    feed = await res.json();
+    if (!Array.isArray(feed)) feed = [];
+  } catch (e) {
+    feed = [];
+  }
+  index = 0;
+  render();
+}
 
-    try {
-        // ВАЖНО: полный URL, иначе WebView не даст доступ
-        const res = await fetch('https://miniapp-server-production.up.railway.app/api/feed', {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
+function render() {
+  const card = document.getElementById('card');
 
-        const data = await res.json();
+  if (!feed.length) {
+    card.innerHTML = '<div>Нет товаров</div>';
+    return;
+  }
 
-        if (!data || data.length === 0) {
-            feedEl.innerText = 'Пока нет товаров.';
-            return;
-        }
+  const item = feed[index];
 
-        feedEl.innerHTML = '';
+  const title = item.title || 'Без названия';
+  const brand = item.brand || '';
+  const price = item.price ? item.price + ' ₽' : '';
+  const image = item.image || '';
+  const video = item.video || '';
 
-        data.forEach(item => {
-            const div = document.createElement('div');
-            div.style.marginBottom = '12px';
-            div.style.padding = '10px';
-            div.style.border = '1px solid #ddd';
-            div.style.borderRadius = '8px';
-            div.style.background = '#fafafa';
+  let mediaHtml = '';
 
-            const title = document.createElement('div');
-            title.textContent = item.title || 'Без названия';
-            title.style.fontWeight = 'bold';
-            title.style.marginBottom = '4px';
+  if (video) {
+    mediaHtml = `<video src="${video}" controls autoplay muted loop></video>`;
+  } else if (image) {
+    mediaHtml = `<img src="${image}" alt="">`;
+  } else {
+    mediaHtml = `<div>Нет медиа</div>`;
+  }
 
-            const price = document.createElement('div');
-            price.textContent = item.price || '—';
+  card.innerHTML = `
+    <div class="media">${mediaHtml}</div>
+    <div class="title">${title}</div>
+    <div class="brand">${brand}</div>
+    <div class="price">${price}</div>
+  `;
+}
 
-            div.appendChild(title);
-            div.appendChild(price);
-            feedEl.appendChild(div);
-        });
-    } catch (e) {
-        feedEl.innerText = 'Ошибка загрузки.';
-        console.error('Ошибка Mini App:', e);
-    }
+function next() {
+  if (index < feed.length - 1) {
+    index++;
+    render();
+  }
+}
+
+function prev() {
+  if (index > 0) {
+    index--;
+    render();
+  }
 }
 
 loadFeed();
