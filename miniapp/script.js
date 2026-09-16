@@ -1,807 +1,636 @@
-```javascript id="n2p8sj"
-let feed = [];
-
-let index = 0;
-
-let startY = 0;
-let startX = 0;
+let products = [];
+let currentIndex = 0;
 
 let favorites = JSON.parse(
     localStorage.getItem("favorites") || "[]"
 );
 
+let cart = JSON.parse(
+    localStorage.getItem("cart") || "[]"
+);
 
-/* =========================
-   LOAD FEED
-   ========================= */
 
-async function loadFeed() {
+// =========================
+// ЗАГРУЗКА ТОВАРОВ
+// =========================
 
-    const card =
-        document.getElementById("card");
+async function loadProducts() {
+    const card = document.getElementById("card");
 
     try {
+        const response = await fetch("/api/feed");
 
-        const response =
-            await fetch("/api/feed");
+        if (!response.ok) {
+            throw new Error("Ошибка API: " + response.status);
+        }
 
-        const data =
-            await response.json();
+        const data = await response.json();
+
+        console.log("Получен feed:", data);
 
         if (Array.isArray(data)) {
-
-            feed = data;
-
-        } else if (
-            data &&
-            Array.isArray(data.items)
-        ) {
-
-            feed = data.items;
-
+            products = data;
+        } else if (data && Array.isArray(data.items)) {
+            products = data.items;
         } else {
-
-            feed = [];
-
+            products = [];
         }
+
+        if (!products.length) {
+            card.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">🛍️</div>
+                    <h2>Товаров пока нет</h2>
+                    <p>Попробуйте обновить каталог</p>
+                </div>
+            `;
+            return;
+        }
+
+        currentIndex = 0;
+        render();
 
     } catch (error) {
 
-        console.error(
-            "Ошибка загрузки:",
-            error
-        );
+        console.error("Ошибка загрузки товаров:", error);
 
-        feed = [];
-
+        card.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">⚠️</div>
+                <h2>Не удалось загрузить товары</h2>
+                <p>Попробуйте обновить страницу</p>
+            </div>
+        `;
     }
-
-    index = 0;
-
-    render();
 }
 
 
-/* =========================
-   RENDER
-   ========================= */
+// =========================
+// ОТОБРАЖЕНИЕ ТОВАРА
+// =========================
 
 function render() {
 
-    const card =
-        document.getElementById("card");
+    const card = document.getElementById("card");
 
-    if (!feed.length) {
-
-        card.innerHTML = `
-
-            <div class="loading">
-
-                <div style="font-size:40px;">
-                    🛍️
-                </div>
-
-                <div>
-                    Пока нет товаров
-                </div>
-
-            </div>
-
-        `;
-
+    if (!card || !products.length) {
         return;
     }
 
+    const item = products[currentIndex];
 
-    const item =
-        feed[index];
-
-
-    const title =
+    const name =
         item.name ||
         item.title ||
         "Без названия";
-
 
     const brand =
         item.brand ||
         "Без бренда";
 
-
     const price =
         item.price !== undefined
-            ? `${item.price}$`
-            : "";
-
+            ? item.price
+            : 0;
 
     const rating =
         item.rating !== undefined
-            ? `⭐ ${item.rating}`
-            : "";
-
+            ? item.rating
+            : "—";
 
     const image =
         item.image ||
+        (item.images && item.images[0]) ||
         "";
-
-
-    const video =
-        item.video ||
-        "";
-
 
     const link =
         item.link ||
         "#";
 
+    const id =
+        item.id !== undefined
+            ? item.id
+            : currentIndex;
 
     const isFavorite =
-        favorites.includes(
-            item.id
-        );
-
-
-    let mediaHTML = "";
-
-
-    if (video) {
-
-        mediaHTML = `
-
-            <video
-                src="${video}"
-                autoplay
-                muted
-                loop
-                playsinline
-            ></video>
-
-        `;
-
-    } else if (image) {
-
-        mediaHTML = `
-
-            <img
-                src="${image}"
-                alt=""
-            >
-
-        `;
-
-    } else {
-
-        mediaHTML = `
-
-            <div
-                style="
-                    font-size:60px;
-                    opacity:.5;
-                "
-            >
-                🛍️
-            </div>
-
-        `;
-
-    }
-
+        favorites.includes(String(id));
 
     card.innerHTML = `
+        <div class="product-media">
 
-        <div class="media">
-
-            ${mediaHTML}
-
-        </div>
-
-
-        <div class="image-gradient"></div>
-
-
-        <div class="side-actions">
-
-            <button
-                class="action-button"
-                onclick="toggleFavorite()"
-            >
-                ${isFavorite ? "❤️" : "🤍"}
-            </button>
-
-
-            <button
-                class="action-button"
-                onclick="showToast('Добавление в корзину скоро будет доступно')"
-            >
-                🛒
-            </button>
-
-
-            <button
-                class="action-button"
-                onclick="shareProduct()"
-            >
-                ↗
-            </button>
+            ${
+                image
+                    ? `
+                    <img
+                        src="${escapeHtml(image)}"
+                        class="product-image"
+                        onerror="this.style.display='none'"
+                    >
+                    `
+                    : `
+                    <div class="no-image">
+                        🛍️
+                    </div>
+                    `
+            }
 
         </div>
-
 
         <div class="product-info">
 
-            <div class="counter">
-
-                ${index + 1}
-                /
-                ${feed.length}
-
+            <div class="product-counter">
+                ${currentIndex + 1} / ${products.length}
             </div>
 
-
-            <div class="brand">
-
-                ${escapeHTML(brand)}
-
+            <div class="product-brand">
+                ${escapeHtml(brand)}
             </div>
 
+            <h1 class="product-title">
+                ${escapeHtml(name)}
+            </h1>
 
-            <div class="title">
-
-                ${escapeHTML(title)}
-
+            <div class="product-rating">
+                ⭐ ${rating}
             </div>
 
+            <div class="product-bottom">
 
-            <div class="meta">
-
-                <div class="price">
-
-                    ${escapeHTML(
-                        String(price)
-                    )}
-
+                <div class="product-price">
+                    ${price} $
                 </div>
 
-
-                ${
-                    rating
-                        ? `
-                            <div class="rating">
-                                ${escapeHTML(rating)}
-                            </div>
-                          `
-                        : ""
-                }
+                <button
+                    class="favorite-button ${isFavorite ? "active" : ""}"
+                    onclick="toggleFavorite()"
+                >
+                    ${isFavorite ? "❤️" : "♡"}
+                </button>
 
             </div>
 
-
             <button
-                class="open-button"
-                onclick="openProduct('${escapeAttribute(link)}')"
+                class="open-product"
+                onclick="openProduct()"
             >
-
                 Посмотреть товар
-
             </button>
 
         </div>
-
     `;
 
-
-    addSwipeEvents();
-
+    updateCounter();
 }
 
 
-/* =========================
-   NEXT
-   ========================= */
+// =========================
+// ОТКРЫТЬ ТОВАР
+// =========================
 
-function next() {
+function openProduct() {
 
-    if (!feed.length) {
+    if (!products.length) {
         return;
     }
 
-    if (index < feed.length - 1) {
+    const item = products[currentIndex];
 
-        index++;
-
-    } else {
-
-        index = 0;
-
-    }
-
-    animateCard("next");
-
-}
-
-
-/* =========================
-   PREVIOUS
-   ========================= */
-
-function prev() {
-
-    if (!feed.length) {
+    if (!item.link) {
+        showToast("Ссылка на товар отсутствует");
         return;
     }
 
-    if (index > 0) {
-
-        index--;
-
-    } else {
-
-        index = feed.length - 1;
-
-    }
-
-    animateCard("prev");
-
+    window.open(item.link, "_blank");
 }
 
 
-/* =========================
-   CARD ANIMATION
-   ========================= */
-
-function animateCard(direction) {
-
-    const card =
-        document.getElementById("card");
-
-    card.style.opacity = "0";
-
-    card.style.transform =
-        direction === "next"
-            ? "translateY(35px) scale(.97)"
-            : "translateY(-35px) scale(.97)";
-
-
-    setTimeout(() => {
-
-        render();
-
-        requestAnimationFrame(() => {
-
-            card.style.opacity = "1";
-
-            card.style.transform =
-                "translateY(0) scale(1)";
-
-        });
-
-    }, 180);
-
-}
-
-
-/* =========================
-   FAVORITES
-   ========================= */
+// =========================
+// ИЗБРАННОЕ
+// =========================
 
 function toggleFavorite() {
 
-    if (!feed.length) {
+    if (!products.length) {
         return;
     }
 
-    const item =
-        feed[index];
+    const item = products[currentIndex];
 
-    const id =
-        item.id ??
-        index;
+    const id = String(
+        item.id !== undefined
+            ? item.id
+            : currentIndex
+    );
 
+    if (favorites.includes(id)) {
 
-    const position =
-        favorites.indexOf(id);
-
-
-    if (position === -1) {
-
-        favorites.push(id);
-
-        showToast(
-            "❤️ Добавлено в избранное"
+        favorites = favorites.filter(
+            x => x !== id
         );
+
+        showToast("Удалено из избранного");
 
     } else {
 
-        favorites.splice(
-            position,
-            1
-        );
+        favorites.push(id);
 
-        showToast(
-            "Удалено из избранного"
-        );
-
+        showToast("❤️ Добавлено в избранное");
     }
-
 
     localStorage.setItem(
         "favorites",
         JSON.stringify(favorites)
     );
 
-
     render();
-
 }
 
 
-/* =========================
-   SHARE
-   ========================= */
+// =========================
+// КОРЗИНА
+// =========================
 
-async function shareProduct() {
+function addToCart() {
 
-    if (!feed.length) {
+    if (!products.length) {
         return;
     }
 
-    const item =
-        feed[index];
+    const item = products[currentIndex];
 
-    const title =
-        item.name ||
-        item.title ||
-        "Товар";
+    const id = String(
+        item.id !== undefined
+            ? item.id
+            : currentIndex
+    );
 
+    if (!cart.includes(id)) {
 
-    const link =
-        item.link ||
-        window.location.href;
+        cart.push(id);
 
+        localStorage.setItem(
+            "cart",
+            JSON.stringify(cart)
+        );
 
-    if (
-        navigator.share
-    ) {
-
-        try {
-
-            await navigator.share({
-                title: title,
-                url: link
-            });
-
-        } catch (error) {
-
-            // пользователь закрыл окно
-
-        }
+        showToast("🛒 Добавлено в корзину");
 
     } else {
 
-        try {
-
-            await navigator.clipboard.writeText(
-                link
-            );
-
-            showToast(
-                "🔗 Ссылка скопирована"
-            );
-
-        } catch (error) {
-
-            showToast(
-                "Ссылку не удалось скопировать"
-            );
-
-        }
-
+        showToast("Товар уже в корзине");
     }
-
 }
 
 
-/* =========================
-   OPEN PRODUCT
-   ========================= */
+// =========================
+// СЛЕДУЮЩИЙ ТОВАР
+// =========================
 
-function openProduct(link) {
+function next() {
 
-    if (
-        !link ||
-        link === "#"
-    ) {
-
-        showToast(
-            "Ссылка на товар отсутствует"
-        );
-
+    if (!products.length) {
         return;
-
     }
 
+    currentIndex++;
 
-    window.open(
-        link,
-        "_blank"
+    if (currentIndex >= products.length) {
+        currentIndex = 0;
+    }
+
+    animateCard("next");
+    render();
+}
+
+
+// =========================
+// ПРЕДЫДУЩИЙ ТОВАР
+// =========================
+
+function prev() {
+
+    if (!products.length) {
+        return;
+    }
+
+    currentIndex--;
+
+    if (currentIndex < 0) {
+        currentIndex = products.length - 1;
+    }
+
+    animateCard("prev");
+    render();
+}
+
+
+// =========================
+// АНИМАЦИЯ
+// =========================
+
+function animateCard(direction) {
+
+    const card = document.getElementById("card");
+
+    if (!card) {
+        return;
+    }
+
+    card.classList.remove(
+        "slide-next",
+        "slide-prev"
     );
 
+    void card.offsetWidth;
+
+    if (direction === "next") {
+        card.classList.add("slide-next");
+    } else {
+        card.classList.add("slide-prev");
+    }
 }
 
 
-/* =========================
-   NAVIGATION
-   ========================= */
+// =========================
+// НИЖНЕЕ МЕНЮ
+// =========================
 
-function switchTab(
-    button,
-    tab
-) {
+function switchTab(button, tab) {
 
     document
         .querySelectorAll(".nav-item")
         .forEach(item => {
-
-            item.classList.remove(
-                "active"
-            );
-
+            item.classList.remove("active");
         });
 
-
-    button.classList.add(
-        "active"
-    );
-
+    if (button) {
+        button.classList.add("active");
+    }
 
     if (tab === "feed") {
 
-        showToast(
-            "🏠 Лента"
-        );
+        showToast("Лента");
 
         return;
-
     }
-
 
     if (tab === "favorites") {
 
-        showToast(
-            `❤️ Избранное: ${favorites.length}`
-        );
+        showFavorites();
 
         return;
-
     }
-
 
     if (tab === "cart") {
 
-        showToast(
-            "🛒 Корзина пока пустая"
-        );
+        showCart();
 
         return;
-
     }
-
 
     if (tab === "profile") {
 
-        showToast(
-            "👤 Профиль скоро будет доступен"
-        );
+        showProfile();
 
+        return;
+    }
+}
+
+
+// =========================
+// ИЗБРАННОЕ — ЭКРАН
+// =========================
+
+function showFavorites() {
+
+    if (!favorites.length) {
+
+        showToast("❤️ Избранное пока пустое");
+
+        return;
     }
 
+    showToast(
+        `❤️ В избранном: ${favorites.length}`
+    );
 }
 
 
-/* =========================
-   TOAST
-   ========================= */
+// =========================
+// КОРЗИНА — ЭКРАН
+// =========================
 
-let toastTimer = null;
+function showCart() {
+
+    if (!cart.length) {
+
+        showToast("🛒 Корзина пока пустая");
+
+        return;
+    }
+
+    showToast(
+        `🛒 В корзине: ${cart.length}`
+    );
+}
 
 
-function showToast(
-    text
-) {
+// =========================
+// ПРОФИЛЬ
+// =========================
 
-    const toast =
-        document.getElementById(
-            "toast"
+function showProfile() {
+
+    showToast("👤 Профиль пока в разработке");
+}
+
+
+// =========================
+// TOAST
+// =========================
+
+function showToast(message) {
+
+    let toast = document.getElementById("toast");
+
+    if (!toast) {
+
+        toast = document.createElement("div");
+
+        toast.id = "toast";
+
+        document.body.appendChild(toast);
+    }
+
+    toast.textContent = message;
+
+    toast.classList.add("show");
+
+    clearTimeout(window.toastTimer);
+
+    window.toastTimer = setTimeout(() => {
+
+        toast.classList.remove("show");
+
+    }, 1800);
+}
+
+
+// =========================
+// СЧЁТЧИК
+// =========================
+
+function updateCounter() {
+
+    const counter =
+        document.querySelector(".product-counter");
+
+    if (!counter) {
+        return;
+    }
+
+    counter.textContent =
+        `${currentIndex + 1} / ${products.length}`;
+}
+
+
+// =========================
+// SHARE
+// =========================
+
+async function shareProduct() {
+
+    if (!products.length) {
+        return;
+    }
+
+    const item = products[currentIndex];
+
+    const text =
+        `${item.name || item.title || "Товар"}\n${item.link || ""}`;
+
+    if (navigator.share) {
+
+        try {
+
+            await navigator.share({
+                title: item.name || item.title,
+                text: text,
+                url: item.link || window.location.href
+            });
+
+        } catch (error) {
+
+            console.log("Share отменён");
+        }
+
+    } else {
+
+        await navigator.clipboard.writeText(
+            item.link || window.location.href
         );
 
-
-    toast.textContent =
-        text;
-
-
-    toast.classList.add(
-        "show"
-    );
-
-
-    clearTimeout(
-        toastTimer
-    );
-
-
-    toastTimer =
-        setTimeout(() => {
-
-            toast.classList.remove(
-                "show"
-            );
-
-        }, 1800);
-
+        showToast("🔗 Ссылка скопирована");
+    }
 }
 
 
-/* =========================
-   SWIPE
-   ========================= */
+// =========================
+// БЕЗОПАСНЫЙ HTML
+// =========================
 
-function addSwipeEvents() {
+function escapeHtml(value) {
 
-    const card =
-        document.getElementById(
-            "card"
-        );
+    if (value === null || value === undefined) {
+        return "";
+    }
 
-
-    card.ontouchstart =
-        function(event) {
-
-            const touch =
-                event.changedTouches[0];
-
-            startY =
-                touch.clientY;
-
-            startX =
-                touch.clientX;
-
-        };
-
-
-    card.ontouchend =
-        function(event) {
-
-            const touch =
-                event.changedTouches[0];
-
-            const diffY =
-                touch.clientY - startY;
-
-            const diffX =
-                touch.clientX - startX;
-
-
-            // горизонтальный свайп
-            if (
-                Math.abs(diffX) >
-                Math.abs(diffY)
-            ) {
-
-                return;
-
-            }
-
-
-            if (
-                Math.abs(diffY) < 50
-            ) {
-
-                return;
-
-            }
-
-
-            if (
-                diffY < 0
-            ) {
-
-                next();
-
-            } else {
-
-                prev();
-
-            }
-
-        };
-
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
 
-/* =========================
-   KEYBOARD
-   ========================= */
+// =========================
+// SWIPE
+// =========================
+
+let touchStartX = 0;
+let touchEndX = 0;
+
+document.addEventListener("touchstart", function(event) {
+
+    if (!event.touches.length) {
+        return;
+    }
+
+    touchStartX =
+        event.touches[0].clientX;
+
+});
+
+
+document.addEventListener("touchend", function(event) {
+
+    if (!event.changedTouches.length) {
+        return;
+    }
+
+    touchEndX =
+        event.changedTouches[0].clientX;
+
+    const difference =
+        touchStartX - touchEndX;
+
+    if (Math.abs(difference) < 50) {
+        return;
+    }
+
+    if (difference > 0) {
+
+        next();
+
+    } else {
+
+        prev();
+    }
+
+});
+
+
+// =========================
+// КЛАВИАТУРА
+// =========================
+
+document.addEventListener("keydown", function(event) {
+
+    if (event.key === "ArrowRight") {
+        next();
+    }
+
+    if (event.key === "ArrowLeft") {
+        prev();
+    }
+
+});
+
+
+// =========================
+// START
+// =========================
 
 document.addEventListener(
-    "keydown",
-    function(event) {
+    "DOMContentLoaded",
+    function() {
 
-        if (
-            event.key ===
-            "ArrowDown"
-        ) {
+        console.log(
+            "StyleFlow Mini App запущен"
+        );
 
-            next();
-
-        }
-
-
-        if (
-            event.key ===
-            "ArrowUp"
-        ) {
-
-            prev();
-
-        }
+        loadProducts();
 
     }
 );
-
-
-/* =========================
-   HELPERS
-   ========================= */
-
-function escapeHTML(
-    value
-) {
-
-    return String(value)
-        .replace(
-            /&/g,
-            "&amp;"
-        )
-        .replace(
-            /</g,
-            "&lt;"
-        )
-        .replace(
-            />/g,
-            "&gt;"
-        )
-        .replace(
-            /"/g,
-            "&quot;"
-        )
-        .replace(
-            /'/g,
-            "&#039;"
-        );
-
-}
-
-
-function escapeAttribute(
-    value
-) {
-
-    return String(value)
-        .replace(
-            /\\/g,
-            "\\\\"
-        )
-        .replace(
-            /'/g,
-            "\\'"
-        );
-
-}
-
-
-/* =========================
-   START
-   ========================= */
-
-loadFeed();
-```
