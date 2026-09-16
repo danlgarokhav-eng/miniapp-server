@@ -1,9 +1,6 @@
-```html
 <!DOCTYPE html>
 <html lang="ru">
-
 <head>
-
     <meta charset="UTF-8">
 
     <meta
@@ -24,102 +21,118 @@
         body {
             margin: 0;
             padding: 0;
+
             width: 100%;
             height: 100%;
+
             overflow: hidden;
+
             font-family:
                 Inter,
                 -apple-system,
                 BlinkMacSystemFont,
                 "Segoe UI",
                 sans-serif;
-            background: #07070a;
+
+            background: #050505;
             color: white;
         }
 
         body {
-            position: relative;
+            touch-action: none;
         }
 
 
         /* =========================
-           ANIMATED BACKGROUND
-           ========================= */
+           BACKGROUND
+        ========================= */
 
         .background {
             position: fixed;
             inset: 0;
+
             overflow: hidden;
-            z-index: 0;
+
             background:
                 radial-gradient(
-                    circle at 50% 20%,
-                    #19142e 0%,
-                    #09090d 45%,
-                    #050507 100%
-                );
+                    circle at 20% 20%,
+                    rgba(100, 50, 255, .18),
+                    transparent 35%
+                ),
+                radial-gradient(
+                    circle at 80% 70%,
+                    rgba(255, 40, 130, .14),
+                    transparent 35%
+                ),
+                #050505;
+
+            z-index: 0;
         }
 
         .blob {
             position: absolute;
-            width: 280px;
-            height: 280px;
+
+            width: 320px;
+            height: 320px;
+
             border-radius: 50%;
-            filter: blur(70px);
-            opacity: 0.45;
-            animation: float 12s ease-in-out infinite;
+
+            filter: blur(90px);
+
+            opacity: .28;
+
+            animation:
+                float 12s infinite alternate ease-in-out;
         }
 
         .blob.one {
-            background: #743cff;
-            top: -80px;
-            left: -90px;
+            background: #7b2cff;
+            top: -100px;
+            left: -100px;
         }
 
         .blob.two {
-            background: #ff287d;
-            right: -100px;
-            top: 25%;
+            background: #ff176d;
+            right: -120px;
+            bottom: 20%;
             animation-delay: -4s;
         }
 
         .blob.three {
-            background: #00b8ff;
-            left: 20%;
-            bottom: -150px;
+            background: #00b7ff;
+            left: 30%;
+            bottom: -180px;
             animation-delay: -8s;
         }
 
         @keyframes float {
 
-            0% {
-                transform: translate3d(0, 0, 0) scale(1);
+            from {
+                transform:
+                    translate3d(0, 0, 0)
+                    scale(1);
             }
 
-            33% {
-                transform: translate3d(35px, -30px, 0) scale(1.12);
+            to {
+                transform:
+                    translate3d(80px, -50px, 0)
+                    scale(1.2);
             }
-
-            66% {
-                transform: translate3d(-25px, 35px, 0) scale(0.92);
-            }
-
-            100% {
-                transform: translate3d(0, 0, 0) scale(1);
-            }
-
         }
 
 
         /* =========================
            APP
-           ========================= */
+        ========================= */
 
         .app {
             position: relative;
-            z-index: 2;
+
             width: 100%;
             height: 100%;
+
+            z-index: 1;
+
             display: flex;
             flex-direction: column;
         }
@@ -127,30 +140,53 @@
 
         /* =========================
            TOP BAR
-           ========================= */
+        ========================= */
 
         .topbar {
+            position: absolute;
+
+            top: 0;
+            left: 0;
+            right: 0;
+
             height: 70px;
-            flex-shrink: 0;
+
+            padding:
+                max(14px, env(safe-area-inset-top))
+                18px
+                10px
+                18px;
+
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 18px;
+
+            z-index: 20;
+
+            background:
+                linear-gradient(
+                    to bottom,
+                    rgba(0,0,0,.5),
+                    transparent
+                );
         }
 
         .logo {
             display: flex;
             align-items: center;
             gap: 9px;
-            font-weight: 800;
+
             font-size: 19px;
-            letter-spacing: -0.5px;
+            font-weight: 800;
+
+            letter-spacing: -.5px;
         }
 
         .logo-icon {
             width: 34px;
             height: 34px;
-            border-radius: 12px;
+
+            border-radius: 11px;
 
             display: flex;
             align-items: center;
@@ -159,454 +195,793 @@
             background:
                 linear-gradient(
                     135deg,
-                    #8b5cff,
-                    #ff3d9a
+                    #ff2f92,
+                    #773cff
                 );
 
             box-shadow:
-                0 8px 30px rgba(139, 92, 255, 0.35);
-
-            font-size: 17px;
+                0 5px 25px rgba(150,60,255,.35);
         }
 
         .top-button {
             width: 40px;
             height: 40px;
-            border-radius: 14px;
 
-            border: 1px solid rgba(255,255,255,0.08);
+            border: 0;
+            border-radius: 50%;
+
+            color: white;
 
             background:
-                rgba(255,255,255,0.07);
+                rgba(255,255,255,.10);
 
             backdrop-filter: blur(15px);
 
-            color: white;
-            font-size: 17px;
+            font-size: 18px;
 
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            cursor: pointer;
         }
 
 
         /* =========================
            FEED
-           ========================= */
+        ========================= */
 
-        .feed-wrapper {
-            flex: 1;
-            min-height: 0;
+        .feed {
+            position: absolute;
 
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            inset: 0;
 
-            padding:
-                5px
-                14px
-                14px;
+            overflow: hidden;
         }
 
         .card {
-            position: relative;
+            position: absolute;
 
-            width: 100%;
-            max-width: 460px;
+            inset:
+                68px
+                10px
+                84px
+                10px;
 
-            height: 100%;
-
-            border-radius: 28px;
+            border-radius: 27px;
 
             overflow: hidden;
 
             background:
-                rgba(255,255,255,0.065);
+                rgba(20,20,24,.78);
 
             border:
-                1px solid rgba(255,255,255,0.11);
+                1px solid rgba(255,255,255,.10);
 
             box-shadow:
-                0 30px 80px rgba(0,0,0,0.45);
+                0 25px 80px rgba(0,0,0,.55);
 
-            backdrop-filter: blur(20px);
+            backdrop-filter: blur(18px);
+
+            will-change:
+                transform,
+                opacity;
 
             transition:
-                transform 0.35s ease,
-                opacity 0.35s ease;
+                transform .35s cubic-bezier(.22,.61,.36,1),
+                opacity .35s ease;
+
+            user-select: none;
         }
 
 
         /* =========================
-           MEDIA
-           ========================= */
+           IMAGE
+        ========================= */
 
-        .media {
+        .product-media {
             position: absolute;
+
             inset: 0;
 
-            display: flex;
-            align-items: center;
-            justify-content: center;
-
-            background:
-                linear-gradient(
-                    180deg,
-                    rgba(255,255,255,0.03),
-                    rgba(0,0,0,0.35)
-                );
+            background: #111;
         }
 
-        .media img,
-        .media video {
+        .product-image {
             width: 100%;
             height: 100%;
 
-            object-fit: contain;
+            object-fit: cover;
 
-            background: rgba(0,0,0,0.12);
+            user-select: none;
+
+            pointer-events: none;
         }
 
-        .media img {
-            transition: transform 0.5s ease;
-        }
+        .product-media::after {
+            content: "";
 
-        .card:hover .media img {
-            transform: scale(1.025);
-        }
-
-
-        /* =========================
-           DARK GRADIENT OVER IMAGE
-           ========================= */
-
-        .image-gradient {
             position: absolute;
+
             inset: 0;
 
             background:
                 linear-gradient(
                     to bottom,
-                    rgba(0,0,0,0.15) 0%,
+                    rgba(0,0,0,.18),
                     transparent 35%,
-                    rgba(0,0,0,0.2) 50%,
-                    rgba(0,0,0,0.9) 100%
+                    rgba(0,0,0,.9) 100%
                 );
-
-            pointer-events: none;
         }
 
+        .no-image {
+            width: 100%;
+            height: 100%;
 
-        /* =========================
-           CARD INFO
-           ========================= */
-
-        .product-info {
-            position: absolute;
-            left: 18px;
-            right: 18px;
-            bottom: 20px;
-
-            z-index: 5;
-        }
-
-        .counter {
-            display: inline-flex;
-
-            padding: 7px 10px;
-
-            border-radius: 12px;
-
-            background:
-                rgba(0,0,0,0.38);
-
-            border:
-                1px solid rgba(255,255,255,0.1);
-
-            backdrop-filter: blur(12px);
-
-            font-size: 12px;
-            color: rgba(255,255,255,0.75);
-
-            margin-bottom: 10px;
-        }
-
-        .brand {
-            font-size: 13px;
-            font-weight: 600;
-            color: rgba(255,255,255,0.62);
-
-            margin-bottom: 5px;
-        }
-
-        .title {
-            font-size: 24px;
-            line-height: 1.08;
-            font-weight: 800;
-            letter-spacing: -0.7px;
-
-            margin-bottom: 9px;
-
-            max-width: 90%;
-        }
-
-        .meta {
             display: flex;
             align-items: center;
-            gap: 8px;
+            justify-content: center;
 
-            margin-bottom: 14px;
-        }
-
-        .price {
-            font-size: 22px;
-            font-weight: 800;
-        }
-
-        .rating {
-            padding: 6px 9px;
-            border-radius: 10px;
-
-            background:
-                rgba(255,255,255,0.1);
-
-            font-size: 12px;
-        }
-
-
-        /* =========================
-           OPEN BUTTON
-           ========================= */
-
-        .open-button {
-            width: 100%;
-            height: 48px;
-
-            border: 0;
-            border-radius: 16px;
+            font-size: 70px;
 
             background:
                 linear-gradient(
                     135deg,
-                    #8b5cff,
-                    #ff3d9a
+                    #181818,
+                    #303030
                 );
+        }
+
+
+        /* =========================
+           PRODUCT INFO
+        ========================= */
+
+        .product-info {
+            position: absolute;
+
+            left: 20px;
+            right: 82px;
+            bottom: 22px;
+
+            z-index: 5;
+        }
+
+        .product-counter {
+            position: absolute;
+
+            right: -62px;
+            bottom: 4px;
+
+            padding: 6px 10px;
+
+            border-radius: 20px;
+
+            font-size: 11px;
+
+            background:
+                rgba(0,0,0,.38);
+
+            color:
+                rgba(255,255,255,.7);
+
+            backdrop-filter: blur(10px);
+        }
+
+        .product-brand {
+            margin-bottom: 6px;
+
+            color:
+                rgba(255,255,255,.68);
+
+            font-size: 13px;
+            font-weight: 600;
+
+            text-transform: uppercase;
+
+            letter-spacing: 1px;
+        }
+
+        .product-title {
+            margin: 0 0 8px;
+
+            font-size:
+                clamp(22px, 6vw, 34px);
+
+            line-height: 1.05;
+
+            font-weight: 800;
+
+            letter-spacing: -.7px;
+
+            text-shadow:
+                0 3px 15px rgba(0,0,0,.5);
+        }
+
+        .product-rating {
+            display: inline-flex;
+
+            padding: 6px 10px;
+
+            margin-bottom: 11px;
+
+            border-radius: 20px;
+
+            background:
+                rgba(255,255,255,.12);
+
+            backdrop-filter: blur(10px);
+
+            font-size: 13px;
+        }
+
+        .product-price {
+            font-size: 27px;
+            font-weight: 850;
+
+            letter-spacing: -.7px;
+        }
+
+
+        /* =========================
+           OPEN PRODUCT
+        ========================= */
+
+        .open-product {
+            width: 100%;
+
+            margin-top: 13px;
+
+            padding: 14px 18px;
+
+            border: 0;
+            border-radius: 16px;
 
             color: white;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #ff2f92,
+                    #713bff
+                );
 
             font-size: 15px;
             font-weight: 800;
 
             box-shadow:
-                0 12px 30px rgba(139,92,255,0.28);
+                0 10px 30px rgba(111,50,255,.28);
 
-            transition:
-                transform 0.15s ease,
-                filter 0.15s ease;
+            cursor: pointer;
         }
 
-        .open-button:active {
-            transform: scale(0.97);
-            filter: brightness(0.9);
+        .open-product:active {
+            transform: scale(.97);
         }
 
 
         /* =========================
-           SIDE ACTIONS
-           ========================= */
+           RIGHT ACTIONS
+        ========================= */
 
-        .side-actions {
+        .actions {
             position: absolute;
 
-            right: 12px;
-            bottom: 155px;
+            right: 13px;
+            bottom: 150px;
+
+            display: flex;
+            flex-direction: column;
+
+            align-items: center;
+
+            gap: 17px;
 
             z-index: 10;
+        }
 
+        .action {
             display: flex;
             flex-direction: column;
-            gap: 10px;
-        }
 
-        .action-button {
-            width: 45px;
-            height: 45px;
-
-            border-radius: 15px;
-
-            border:
-                1px solid rgba(255,255,255,0.1);
-
-            background:
-                rgba(10,10,15,0.48);
-
-            backdrop-filter: blur(15px);
-
-            color: white;
-
-            font-size: 18px;
-
-            display: flex;
             align-items: center;
-            justify-content: center;
-
-            transition:
-                transform 0.15s ease,
-                background 0.15s ease;
-        }
-
-        .action-button:active {
-            transform: scale(0.9);
-        }
-
-
-        /* =========================
-           BOTTOM NAVIGATION
-           ========================= */
-
-        .bottom-nav {
-            flex-shrink: 0;
-
-            height: 76px;
-
-            margin:
-                0 12px
-                12px;
-
-            padding:
-                7px 8px;
-
-            border-radius: 22px;
-
-            display: grid;
-            grid-template-columns:
-                repeat(4, 1fr);
-
-            background:
-                rgba(18,18,24,0.72);
-
-            border:
-                1px solid rgba(255,255,255,0.09);
-
-            backdrop-filter:
-                blur(25px);
-
-            box-shadow:
-                0 20px 50px rgba(0,0,0,0.35);
-        }
-
-        .nav-item {
-            border: 0;
-            background: transparent;
-
-            color:
-                rgba(255,255,255,0.48);
-
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
 
             gap: 4px;
 
-            border-radius: 17px;
+            border: 0;
 
-            font-size: 11px;
+            background: transparent;
 
-            transition:
-                background 0.2s ease,
-                color 0.2s ease;
+            color: white;
+
+            cursor: pointer;
         }
 
-        .nav-icon {
+        .action-icon {
+            width: 48px;
+            height: 48px;
+
+            border-radius: 50%;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            font-size: 23px;
+
+            background:
+                rgba(0,0,0,.38);
+
+            border:
+                1px solid rgba(255,255,255,.12);
+
+            backdrop-filter: blur(14px);
+
+            box-shadow:
+                0 8px 25px rgba(0,0,0,.25);
+
+            transition:
+                transform .2s ease;
+        }
+
+        .action:active .action-icon {
+            transform: scale(.84);
+        }
+
+        .action-label {
+            font-size: 10px;
+
+            color:
+                rgba(255,255,255,.8);
+        }
+
+        .action.like.active .action-icon {
+            background:
+                rgba(255,45,110,.22);
+
+            color: #ff3b78;
+        }
+
+
+        /* =========================
+           LIKE ANIMATION
+        ========================= */
+
+        .big-heart {
+            position: absolute;
+
+            left: 50%;
+            top: 50%;
+
+            transform:
+                translate(-50%, -50%)
+                scale(.2);
+
+            font-size: 110px;
+
+            opacity: 0;
+
+            pointer-events: none;
+
+            z-index: 30;
+
+            filter:
+                drop-shadow(
+                    0 8px 25px
+                    rgba(255,40,110,.45)
+                );
+        }
+
+        .big-heart.show {
+            animation:
+                heartPop .7s ease forwards;
+        }
+
+        @keyframes heartPop {
+
+            0% {
+                opacity: 0;
+                transform:
+                    translate(-50%, -50%)
+                    scale(.2);
+            }
+
+            25% {
+                opacity: 1;
+                transform:
+                    translate(-50%, -50%)
+                    scale(1.25);
+            }
+
+            65% {
+                opacity: 1;
+                transform:
+                    translate(-50%, -50%)
+                    scale(1);
+            }
+
+            100% {
+                opacity: 0;
+                transform:
+                    translate(-50%, -50%)
+                    scale(1.35);
+            }
+        }
+
+
+        /* =========================
+           BOTTOM NAV
+        ========================= */
+
+        .bottom-nav {
+            position: absolute;
+
+            left: 10px;
+            right: 10px;
+            bottom: 9px;
+
+            height: 66px;
+
+            padding:
+                5px
+                8px
+                max(5px, env(safe-area-inset-bottom));
+
+            display: flex;
+
+            align-items: center;
+            justify-content: space-around;
+
+            border:
+                1px solid rgba(255,255,255,.09);
+
+            border-radius: 22px;
+
+            background:
+                rgba(18,18,22,.78);
+
+            backdrop-filter: blur(22px);
+
+            z-index: 20;
+        }
+
+        .nav-item {
+            flex: 1;
+
+            height: 55px;
+
+            border: 0;
+
+            border-radius: 16px;
+
+            background: transparent;
+
+            color:
+                rgba(255,255,255,.48);
+
+            display: flex;
+            flex-direction: column;
+
+            align-items: center;
+            justify-content: center;
+
+            gap: 3px;
+
+            cursor: pointer;
+
+            transition:
+                .2s ease;
+        }
+
+        .nav-item span {
             font-size: 19px;
-            line-height: 1;
+        }
+
+        .nav-item small {
+            font-size: 9px;
         }
 
         .nav-item.active {
             color: white;
 
             background:
-                rgba(255,255,255,0.08);
+                rgba(255,255,255,.08);
         }
 
 
         /* =========================
-           EMPTY / LOADING
-           ========================= */
+           COMMENTS
+        ========================= */
 
-        .loading {
-            position: absolute;
+        .comments-overlay {
+            position: fixed;
+
             inset: 0;
 
-            display: flex;
-            align-items: center;
-            justify-content: center;
-
-            flex-direction: column;
-            gap: 12px;
-
             background:
-                rgba(5,5,8,0.5);
+                rgba(0,0,0,.55);
 
-            backdrop-filter: blur(10px);
+            opacity: 0;
+            pointer-events: none;
 
-            z-index: 20;
+            transition: opacity .25s ease;
 
-            font-size: 14px;
-            color: rgba(255,255,255,0.7);
+            z-index: 50;
         }
 
-        .spinner {
-            width: 28px;
-            height: 28px;
+        .comments-overlay.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
 
-            border:
-                3px solid rgba(255,255,255,0.15);
+        .comments {
+            position: absolute;
 
-            border-top-color: white;
+            left: 0;
+            right: 0;
+            bottom: 0;
+
+            height: 67%;
+
+            border-radius:
+                28px 28px 0 0;
+
+            background:
+                #151518;
+
+            transform:
+                translateY(100%);
+
+            transition:
+                transform .35s
+                cubic-bezier(.22,.61,.36,1);
+
+            padding: 18px;
+
+            overflow: hidden;
+
+            display: flex;
+            flex-direction: column;
+        }
+
+        .comments-overlay.show .comments {
+            transform:
+                translateY(0);
+        }
+
+        .comments-head {
+            display: flex;
+
+            align-items: center;
+            justify-content: space-between;
+
+            margin-bottom: 15px;
+        }
+
+        .comments-title {
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        .close-comments {
+            width: 38px;
+            height: 38px;
+
+            border: 0;
 
             border-radius: 50%;
 
-            animation:
-                spin 0.8s linear infinite;
+            color: white;
+
+            background:
+                rgba(255,255,255,.09);
+
+            font-size: 18px;
         }
 
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
+        .comments-list {
+            overflow-y: auto;
+
+            flex: 1;
+
+            padding-bottom: 20px;
+        }
+
+        .comment {
+            padding: 14px 0;
+
+            border-bottom:
+                1px solid
+                rgba(255,255,255,.07);
+        }
+
+        .comment-user {
+            font-weight: 700;
+
+            margin-bottom: 4px;
+        }
+
+        .comment-text {
+            color:
+                rgba(255,255,255,.72);
+
+            line-height: 1.4;
+
+            font-size: 14px;
+        }
+
+        .comment-date {
+            margin-top: 5px;
+
+            color:
+                rgba(255,255,255,.35);
+
+            font-size: 11px;
+        }
+
+
+        /* =========================
+           FAVORITES
+        ========================= */
+
+        .favorites-screen {
+            position: absolute;
+
+            inset: 0;
+
+            z-index: 15;
+
+            display: none;
+
+            padding:
+                82px
+                15px
+                88px;
+
+            overflow-y: auto;
+        }
+
+        .favorites-screen.show {
+            display: block;
+        }
+
+        .favorites-header {
+            margin-bottom: 18px;
+        }
+
+        .favorites-header h2 {
+            margin: 0;
+
+            font-size: 28px;
+        }
+
+        .favorites-header p {
+            margin: 5px 0 0;
+
+            color:
+                rgba(255,255,255,.5);
+        }
+
+        .favorites-grid {
+            display: grid;
+
+            grid-template-columns:
+                repeat(2, 1fr);
+
+            gap: 11px;
+        }
+
+        .favorite-card {
+            min-width: 0;
+
+            overflow: hidden;
+
+            border-radius: 17px;
+
+            background:
+                rgba(255,255,255,.07);
+
+            border:
+                1px solid
+                rgba(255,255,255,.08);
+
+            cursor: pointer;
+        }
+
+        .favorite-card img {
+            width: 100%;
+
+            aspect-ratio: .78;
+
+            object-fit: cover;
+
+            display: block;
+        }
+
+        .favorite-card-info {
+            padding: 9px;
+        }
+
+        .favorite-card-name {
+            white-space: nowrap;
+
+            overflow: hidden;
+
+            text-overflow: ellipsis;
+
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .favorite-card-price {
+            margin-top: 5px;
+
+            font-weight: 800;
+        }
+
+
+        /* =========================
+           EMPTY
+        ========================= */
+
+        .empty-state {
+            position: absolute;
+
+            inset: 0;
+
+            display: flex;
+            flex-direction: column;
+
+            align-items: center;
+            justify-content: center;
+
+            text-align: center;
+
+            padding: 30px;
+        }
+
+        .empty-icon {
+            font-size: 60px;
+
+            margin-bottom: 15px;
+        }
+
+        .empty-state h2 {
+            margin: 0 0 7px;
+        }
+
+        .empty-state p {
+            margin: 0;
+
+            color:
+                rgba(255,255,255,.55);
         }
 
 
         /* =========================
            TOAST
-           ========================= */
+        ========================= */
 
-        .toast {
+        #toast {
             position: fixed;
 
             left: 50%;
-            bottom: 98px;
+            bottom: 91px;
 
             transform:
-                translateX(-50%)
-                translateY(20px);
-
-            z-index: 100;
+                translate(-50%, 20px);
 
             padding:
-                11px 16px;
+                11px 17px;
 
-            border-radius: 14px;
+            border-radius: 30px;
 
             background:
-                rgba(20,20,25,0.9);
+                rgba(20,20,22,.9);
 
             border:
-                1px solid rgba(255,255,255,0.1);
+                1px solid
+                rgba(255,255,255,.1);
 
             backdrop-filter: blur(15px);
+
+            color: white;
 
             font-size: 13px;
 
@@ -614,55 +989,72 @@
 
             pointer-events: none;
 
-            transition:
-                opacity 0.25s ease,
-                transform 0.25s ease;
+            z-index: 100;
 
-            white-space: nowrap;
+            transition:
+                .25s ease;
         }
 
-        .toast.show {
+        #toast.show {
             opacity: 1;
 
             transform:
-                translateX(-50%)
-                translateY(0);
+                translate(-50%, 0);
         }
 
 
         /* =========================
            DESKTOP
-           ========================= */
+        ========================= */
 
         @media (min-width: 700px) {
 
-            .feed-wrapper {
-                padding-bottom: 18px;
+            .card {
+                width: 430px;
+
+                left: 50%;
+                right: auto;
+
+                transform:
+                    translateX(-50%);
             }
 
-            .card {
-                max-width: 430px;
+            .actions {
+                right:
+                    calc(50% - 265px);
             }
 
             .bottom-nav {
-                max-width: 430px;
-                margin-left: auto;
-                margin-right: auto;
+                width: 430px;
+
+                left: 50%;
+                right: auto;
+
+                transform:
+                    translateX(-50%);
+            }
+
+            .favorites-screen {
+                width: 650px;
+
+                left: 50%;
+                right: auto;
+
+                transform:
+                    translateX(-50%);
             }
 
         }
 
     </style>
-
 </head>
 
 
 <body>
 
-
     <!-- =========================
          BACKGROUND
-         ========================= -->
+    ========================= -->
 
     <div class="background">
 
@@ -675,12 +1067,12 @@
 
     <!-- =========================
          APP
-         ========================= -->
+    ========================= -->
 
     <div class="app">
 
 
-        <!-- TOP BAR -->
+        <!-- TOP -->
 
         <header class="topbar">
 
@@ -696,9 +1088,9 @@
 
             <button
                 class="top-button"
-                onclick="showToast('Поиск скоро будет доступен')"
+                onclick="showToast('🔎 Поиск скоро появится')"
             >
-                🔍
+                🔎
             </button>
 
         </header>
@@ -706,27 +1098,114 @@
 
         <!-- FEED -->
 
-        <main class="feed-wrapper">
+        <main
+            class="feed"
+            id="feed"
+        >
 
             <div
-                id="card"
                 class="card"
+                id="card"
             >
+            </div>
 
-                <div class="loading">
 
-                    <div class="spinner"></div>
+            <!-- ACTIONS -->
 
-                    Загрузка товаров...
+            <div class="actions">
 
-                </div>
+                <button
+                    class="action like"
+                    id="likeButton"
+                    onclick="toggleFavorite(event)"
+                >
 
+                    <div class="action-icon">
+                        ♡
+                    </div>
+
+                    <span class="action-label">
+                        Нравится
+                    </span>
+
+                </button>
+
+
+                <button
+                    class="action"
+                    onclick="openComments()"
+                >
+
+                    <div class="action-icon">
+                        💬
+                    </div>
+
+                    <span class="action-label">
+                        Отзывы
+                    </span>
+
+                </button>
+
+
+                <button
+                    class="action"
+                    onclick="shareProduct(event)"
+                >
+
+                    <div class="action-icon">
+                        ↗
+                    </div>
+
+                    <span class="action-label">
+                        Поделиться
+                    </span>
+
+                </button>
+
+            </div>
+
+
+            <!-- HEART -->
+
+            <div
+                class="big-heart"
+                id="bigHeart"
+            >
+                ❤️
             </div>
 
         </main>
 
 
-        <!-- BOTTOM NAV -->
+        <!-- FAVORITES -->
+
+        <section
+            class="favorites-screen"
+            id="favoritesScreen"
+        >
+
+            <div class="favorites-header">
+
+                <h2>
+                    ❤️ Избранное
+                </h2>
+
+                <p id="favoritesCount">
+                    Сохранённые товары
+                </p>
+
+            </div>
+
+            <div
+                class="favorites-grid"
+                id="favoritesGrid"
+            >
+            </div>
+
+        </section>
+
+
+        <!-- NAV -->
 
         <nav class="bottom-nav">
 
@@ -735,11 +1214,11 @@
                 onclick="switchTab(this, 'feed')"
             >
 
-                <span class="nav-icon">
-                    🏠
-                </span>
+                <span>⌂</span>
 
-                Лента
+                <small>
+                    Лента
+                </small>
 
             </button>
 
@@ -749,39 +1228,39 @@
                 onclick="switchTab(this, 'favorites')"
             >
 
-                <span class="nav-icon">
-                    ❤️
-                </span>
+                <span>♡</span>
 
-                Избранное
-
-            </button>
-
-
-            <button
-                class="nav-item"
-                onclick="switchTab(this, 'cart')"
-            >
-
-                <span class="nav-icon">
-                    🛒
-                </span>
-
-                Корзина
+                <small>
+                    Избранное
+                </small>
 
             </button>
 
 
             <button
                 class="nav-item"
-                onclick="switchTab(this, 'profile')"
+                onclick="showToast('🔎 Поиск скоро появится')"
             >
 
-                <span class="nav-icon">
-                    👤
-                </span>
+                <span>⌕</span>
 
-                Профиль
+                <small>
+                    Поиск
+                </small>
+
+            </button>
+
+
+            <button
+                class="nav-item"
+                onclick="showProfile()"
+            >
+
+                <span>○</span>
+
+                <small>
+                    Профиль
+                </small>
 
             </button>
 
@@ -790,17 +1269,49 @@
     </div>
 
 
-    <!-- TOAST -->
+    <!-- =========================
+         COMMENTS
+    ========================= -->
 
     <div
-        id="toast"
-        class="toast"
-    ></div>
+        class="comments-overlay"
+        id="commentsOverlay"
+        onclick="closeComments(event)"
+    >
+
+        <div
+            class="comments"
+            onclick="event.stopPropagation()"
+        >
+
+            <div class="comments-head">
+
+                <div class="comments-title">
+                    Отзывы
+                </div>
+
+                <button
+                    class="close-comments"
+                    onclick="closeComments()"
+                >
+                    ✕
+                </button>
+
+            </div>
+
+
+            <div
+                class="comments-list"
+                id="commentsList"
+            >
+            </div>
+
+        </div>
+
+    </div>
 
 
     <script src="/script.js"></script>
 
 </body>
-
 </html>
-```
