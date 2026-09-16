@@ -1,982 +1,941 @@
+/* =========================================================
+   STYLEFLOW
+   Frontend for marketplace aggregation
+
+   IMPORTANT:
+   Product objects are normalized in one place.
+   This allows us to connect WB / Ozon / AliExpress /
+   Kufar / other marketplaces later without rebuilding UI.
+========================================================= */
+
 let allProducts = [];
 let products = [];
 
 let currentIndex = 0;
+let currentProduct = null;
 
-let favorites = JSON.parse(
-    localStorage.getItem("favorites") || "[]"
-);
+let favorites = loadJSON("styleflow_favorites", []);
+let viewedProducts = loadJSON("styleflow_viewed", []);
+let openedProducts = loadJSON("styleflow_opened", []);
 
 let currentTab = "feed";
 
-let startY = 0;
-let currentY = 0;
+let touchStartY = 0;
+let touchStartX = 0;
+let isDragging = false;
 
-let startX = 0;
-let currentX = 0;
+let lastTapTime = 0;
 
-let dragging = false;
-
-let touchCount = 0;
-
-let lastTap = 0;
+let searchTimer = null;
 
 
-// =====================================
-// LOAD
-// =====================================
+/* =========================================================
+   TELEGRAM
+========================================================= */
 
-async function loadProducts() {
+if (window.Telegram && Telegram.WebApp) {
+    Telegram.WebApp.ready();
+    Telegram.WebApp.expand();
+
+    try {
+        Telegram.WebApp.setHeaderColor("#09090d");
+        Telegram.WebApp.setBackgroundColor("#09090d");
+    } catch (e) {}
+}
+
+
+/* =========================================================
+   INIT
+========================================================= */
+
+document.addEventListener("DOMContentLoaded", () => {
+
+    setupSearch();
+
+    setupSwipe();
+
+    loadFeed();
+
+    updateProfile();
+
+});
+
+
+/* =========================================================
+   LOAD FEED
+========================================================= */
+
+async function loadFeed() {
 
     try {
 
-        const response =
-            await fetch("/api/feed");
+        const response = await fetch("/api/feed", {
+            cache: "no-store"
+        });
 
         if (!response.ok) {
-            throw new Error(
-                "HTTP " + response.status
-            );
+            throw new Error("Feed request failed");
         }
 
-        const data =
-            await response.json();
+        const data = await response.json();
 
-        if (Array.isArray(data)) {
+        const rawProducts =
+            Array.isArray(data)
+                ? data
+                : Array.isArray(data.products)
+                    ? data.products
+                    : Array.isArray(data.items)
+                        ? data.items
+                        : [];
 
-            allProducts = data;
+        allProducts = rawProducts.map(normalizeProduct);
 
-        } else if (
-            data &&
-            Array.isArray(data.items)
-        ) {
-
-            allProducts = data.items;
-
-        } else {
-
-            allProducts = [];
-        }
-
-
-        products = allProducts;
+        products = [...allProducts];
 
         localStorage.setItem(
-            "main_feed",
+            "styleflow_main_feed",
             JSON.stringify(allProducts)
         );
 
-
-        if (!products.length) {
-
-            showEmpty(
-                "🛍️",
-                "Товаров пока нет",
-                "Попробуйте обновить каталог"
-            );
-
-            return;
-        }
-
-
         currentIndex = 0;
 
-        render();
+        if (products.length > 0) {
+            showProduct();
+        } else {
+            showEmptyFeed();
+        }
 
     } catch (error) {
 
-        console.error(
-            "Ошибка загрузки:",
-            error
-        );
+        console.error("Feed error:", error);
 
-        showEmpty(
-            "⚠️",
-            "Ошибка загрузки",
-            "Не удалось получить товары"
-        );
+        const cached =
+            loadJSON("styleflow_main_feed", []);
+
+        if (cached.length > 0) {
+
+            allProducts = cached.map(normalizeProduct);
+            products = [...allProducts];
+
+            currentIndex = 0;
+
+            showProduct();
+
+            showToast("Показана последняя сохранённая лента");
+
+        } else {
+
+            showEmptyFeed();
+
+        }
+
     }
+
 }
 
 
-// =====================================
-// RENDER
-// =====================================
+/* =========================================================
+   PRODUCT NORMALIZATION
+   THE MOST IMPORTANT PART FOR FUTURE MARKETPLACES
+========================================================= */
 
-function render() {
+function normalizeProduct(item, index = 0) {
 
-    const card =
-        document.getElementById("card");
+    const source =
+        item.source ||
+        item.marketplace ||
+        item.platform ||
+        detectSource(item.url || item.link || "");
 
-    if (!card) {
-        return;
-    }
-
-
-    if (!products.length) {
-
-        showEmpty(
-            "❤️",
-            "Здесь пока пусто",
-            "Добавьте понравившиеся товары"
-        );
-
-        return;
-    }
-
-
-    if (currentIndex >= products.length) {
-
-        currentIndex =
-            products.length - 1;
-    }
-
-
-    const item =
-        products[currentIndex];
-
-
-    const name =
-        item.name ||
+    const title =
         item.title ||
-        "Без названия";
-
-
-    const brand =
-        item.brand ||
-        "Без бренда";
-
-
-    const price =
-        item.price !== undefined
-            ? item.price
-            : 0;
-
-
-    const rating =
-        item.rating !== undefined
-            ? item.rating
-            : "—";
-
+        item.name ||
+        item.product_name ||
+        "Товар";
 
     const image =
         item.image ||
+        item.image_url ||
+        item.thumbnail ||
         (
-            item.images &&
-            item.images.length
+            Array.isArray(item.images)
                 ? item.images[0]
                 : ""
-        );
-
-
-    const liked =
-        isFavorite(item);
-
-
-    card.innerHTML = `
-
-        <div class="product-media">
-
-            ${
-                image
-                    ? `
-                        <img
-                            src="${escapeHtml(image)}"
-                            class="product-image"
-                            draggable="false"
-                            onerror="
-                                this.style.display='none'
-                            "
-                        >
-                    `
-                    :
-                    `
-                        <div class="no-image">
-                            🛍️
-                        </div>
-                    `
-            }
-
-        </div>
-
-
-        <div class="product-info">
-
-            <div class="product-brand">
-                ${escapeHtml(brand)}
-            </div>
-
-
-            <h1 class="product-title">
-                ${escapeHtml(name)}
-            </h1>
-
-
-            <div class="product-rating">
-                ⭐ ${rating}
-            </div>
-
-
-            <div class="product-price">
-                ${price} $
-            </div>
-
-
-            <button
-                class="open-product"
-                onclick="openProduct(event)"
-            >
-                Открыть товар ↗
-            </button>
-
-
-            <div class="product-counter">
-                ${currentIndex + 1}
-                /
-                ${products.length}
-            </div>
-
-        </div>
-    `;
-
-
-    updateLikeButton(liked);
-}
-
-
-// =====================================
-// LIKE
-// =====================================
-
-function toggleFavorite(event) {
-
-    if (event) {
-        event.stopPropagation();
-    }
-
-
-    if (!products.length) {
-        return;
-    }
-
-
-    const item =
-        products[currentIndex];
-
-
-    const id =
-        getProductId(item);
-
-
-    const existing =
-        favorites.findIndex(
-            product =>
-                String(product.id) === id
-        );
-
-
-    if (existing !== -1) {
-
-        favorites.splice(
-            existing,
-            1
-        );
-
-        showToast(
-            "Удалено из избранного"
-        );
-
-    } else {
-
-        favorites.push({
-            ...item,
-            id: id
-        });
-
-        showToast(
-            "❤️ Добавлено в избранное"
-        );
-
-        playHeart();
-    }
-
-
-    saveFavorites();
-
-    updateLikeButton(
-        existing === -1
-    );
-}
-
-
-// =====================================
-// LIKE BUTTON
-// =====================================
-
-function updateLikeButton(liked) {
-
-    const button =
-        document.getElementById(
-            "likeButton"
-        );
-
-    if (!button) {
-        return;
-    }
-
-
-    const icon =
-        button.querySelector(
-            ".action-icon"
-        );
-
-
-    if (liked) {
-
-        button.classList.add(
-            "active"
-        );
-
-        icon.textContent = "❤️";
-
-    } else {
-
-        button.classList.remove(
-            "active"
-        );
-
-        icon.textContent = "♡";
-    }
-}
-
-
-// =====================================
-// HEART ANIMATION
-// =====================================
-
-function playHeart() {
-
-    const heart =
-        document.getElementById(
-            "bigHeart"
-        );
-
-
-    heart.classList.remove(
-        "show"
-    );
-
-
-    void heart.offsetWidth;
-
-
-    heart.classList.add(
-        "show"
-    );
-}
-
-
-// =====================================
-// ID
-// =====================================
-
-function getProductId(item) {
-
-    if (
-        item.id !== undefined &&
-        item.id !== null
-    ) {
-
-        return String(item.id);
-    }
-
-
-    return String(
+        ) ||
+        "https://via.placeholder.com/600x800?text=StyleFlow";
+
+    const url =
+        item.url ||
         item.link ||
-        item.name ||
-        item.title ||
-        Math.random()
-    );
-}
+        item.product_url ||
+        "#";
 
+    const price =
+        parsePrice(
+            item.price ??
+            item.current_price ??
+            item.sale_price
+        );
 
-// =====================================
-// IS FAVORITE
-// =====================================
+    const oldPrice =
+        parsePrice(
+            item.old_price ??
+            item.oldPrice ??
+            item.original_price
+        );
 
-function isFavorite(item) {
+    const rating =
+        item.rating ??
+        item.stars ??
+        "";
+
+    const brand =
+        item.brand ||
+        item.vendor ||
+        "";
+
+    const category =
+        item.category ||
+        item.type ||
+        "Одежда";
 
     const id =
-        getProductId(item);
-
-
-    return favorites.some(
-        product =>
-            String(product.id) === id
-    );
-}
-
-
-// =====================================
-// SAVE
-// =====================================
-
-function saveFavorites() {
-
-    localStorage.setItem(
-        "favorites",
-        JSON.stringify(
-            favorites
-        )
-    );
-}
-
-
-// =====================================
-// OPEN PRODUCT
-// =====================================
-
-function openProduct(event) {
-
-    if (event) {
-        event.stopPropagation();
-    }
-
-
-    if (!products.length) {
-        return;
-    }
-
-
-    const item =
-        products[currentIndex];
-
-
-    if (!item.link) {
-
-        showToast(
-            "Ссылка на товар отсутствует"
+        String(
+            item.id ??
+            item.product_id ??
+            item.external_id ??
+            `${source}_${index}_${title}`
         );
 
-        return;
-    }
+    return {
 
+        id,
 
-    window.open(
-        item.link,
-        "_blank"
-    );
+        source: normalizeSource(source),
+
+        external_id:
+            String(
+                item.external_id ??
+                item.product_id ??
+                item.id ??
+                ""
+            ),
+
+        title,
+        brand,
+        category,
+
+        price,
+        oldPrice,
+
+        currency:
+            item.currency ||
+            detectCurrency(item),
+
+        rating,
+
+        image,
+
+        images:
+            Array.isArray(item.images)
+                ? item.images
+                : [image],
+
+        url,
+
+        // Keep the original object.
+        // This is useful when we connect real marketplaces.
+        raw: item
+
+    };
+
 }
 
 
-// =====================================
-// VERTICAL SWIPE
-// =====================================
+/* =========================================================
+   SOURCE HELPERS
+========================================================= */
 
-document.addEventListener(
-    "touchstart",
-    function(event) {
+function detectSource(url) {
 
-        if (
-            event.target.closest(
-                "button"
-            )
-        ) {
-            return;
-        }
+    const value = String(url).toLowerCase();
 
-
-        if (!event.touches.length) {
-            return;
-        }
-
-
-        touchCount =
-            event.touches.length;
-
-
-        startY =
-            event.touches[0].clientY;
-
-
-        currentY =
-            startY;
-
-
-        startX =
-            event.touches[0].clientX;
-
-
-        currentX =
-            startX;
-
-
-        dragging = true;
-
-
-        const card =
-            document.getElementById(
-                "card"
-            );
-
-
-        if (card) {
-
-            card.style.transition =
-                "none";
-        }
-
-    },
-    {
-        passive: true
-    }
-);
-
-
-// =====================================
-// TOUCH MOVE
-// =====================================
-
-document.addEventListener(
-    "touchmove",
-    function(event) {
-
-        if (!dragging) {
-            return;
-        }
-
-
-        if (!event.touches.length) {
-            return;
-        }
-
-
-        currentY =
-            event.touches[0].clientY;
-
-
-        currentX =
-            event.touches[0].clientX;
-
-
-        const diff =
-            currentY - startY;
-
-
-        const card =
-            document.getElementById(
-                "card"
-            );
-
-
-        if (!card) {
-            return;
-        }
-
-
-        const rotation =
-            -(diff / 25);
-
-
-        card.style.transform =
-            `
-                translateY(${diff}px)
-                rotate(${rotation}deg)
-            `;
-    },
-    {
-        passive: true
-    }
-);
-
-
-// =====================================
-// TOUCH END
-// =====================================
-
-document.addEventListener(
-    "touchend",
-    function() {
-
-        if (!dragging) {
-            return;
-        }
-
-
-        dragging = false;
-
-
-        const card =
-            document.getElementById(
-                "card"
-            );
-
-
-        if (!card) {
-            return;
-        }
-
-
-        const diff =
-            currentY - startY;
-
-
-        const threshold =
-            Math.min(
-                130,
-                window.innerHeight * .18
-            );
-
-
-        card.style.transition =
-            "transform .35s cubic-bezier(.22,.61,.36,1)";
-
-
-        if (
-            Math.abs(diff) >
-            threshold
-        ) {
-
-
-            if (diff < 0) {
-
-                // свайп вверх
-
-                card.style.transform =
-                    `
-                        translateY(-120%)
-                        rotate(-5deg)
-                    `;
-
-
-                setTimeout(
-                    () => {
-
-                        nextProduct();
-
-                        resetCard();
-
-                    },
-                    260
-                );
-
-
-            } else {
-
-                // свайп вниз
-
-                card.style.transform =
-                    `
-                        translateY(120%)
-                        rotate(5deg)
-                    `;
-
-
-                setTimeout(
-                    () => {
-
-                        previousProduct();
-
-                        resetCard();
-
-                    },
-                    260
-                );
-            }
-
-
-        } else {
-
-            resetCard();
-        }
-
-
-        // двойной тап
-        checkDoubleTap();
-
-    }
-);
-
-
-// =====================================
-// RESET CARD
-// =====================================
-
-function resetCard() {
-
-    const card =
-        document.getElementById(
-            "card"
-        );
-
-
-    if (!card) {
-        return;
+    if (value.includes("wildberries")) {
+        return "wildberries";
     }
 
+    if (value.includes("ozon")) {
+        return "ozon";
+    }
 
-    card.style.transition =
-        "none";
+    if (value.includes("aliexpress")) {
+        return "aliexpress";
+    }
 
+    if (value.includes("kufar")) {
+        return "kufar";
+    }
 
-    card.style.transform =
-        "translateY(0) rotate(0)";
-
-
-    requestAnimationFrame(
-        () => {
-
-            card.style.transition =
-                "transform .35s cubic-bezier(.22,.61,.36,1)";
-        }
-    );
+    return "marketplace";
 }
 
 
-// =====================================
-// NEXT
-// =====================================
+function normalizeSource(source) {
 
-function nextProduct() {
-
-    if (!products.length) {
-        return;
-    }
-
-
-    currentIndex++;
-
+    const value =
+        String(source || "")
+            .toLowerCase()
+            .trim();
 
     if (
-        currentIndex >=
-        products.length
+        value.includes("wild") ||
+        value === "wb"
     ) {
+        return "wildberries";
+    }
 
+    if (value.includes("ozon")) {
+        return "ozon";
+    }
+
+    if (
+        value.includes("ali") ||
+        value.includes("aliexpress")
+    ) {
+        return "aliexpress";
+    }
+
+    if (value.includes("kufar")) {
+        return "kufar";
+    }
+
+    return value || "marketplace";
+}
+
+
+function sourceLabel(source) {
+
+    const labels = {
+        wildberries: "🟣 Wildberries",
+        ozon: "🔵 Ozon",
+        aliexpress: "🟠 AliExpress",
+        kufar: "🟢 Kufar",
+        marketplace: "🛍 Marketplace"
+    };
+
+    return labels[source] || "🛍 " + capitalize(source);
+}
+
+
+/* =========================================================
+   PRICE
+========================================================= */
+
+function parsePrice(value) {
+
+    if (
+        value === null ||
+        value === undefined ||
+        value === ""
+    ) {
+        return null;
+    }
+
+    if (typeof value === "number") {
+        return value;
+    }
+
+    const cleaned =
+        String(value)
+            .replace(/[^\d.,-]/g, "")
+            .replace(",", ".");
+
+    const number = Number(cleaned);
+
+    return Number.isFinite(number)
+        ? number
+        : null;
+}
+
+
+function detectCurrency(item) {
+
+    const raw =
+        String(
+            item.currency ||
+            item.price ||
+            ""
+        ).toLowerCase();
+
+    if (
+        raw.includes("byn") ||
+        raw.includes("бел")
+    ) {
+        return "BYN";
+    }
+
+    if (
+        raw.includes("₽") ||
+        raw.includes("rub") ||
+        raw.includes("руб")
+    ) {
+        return "RUB";
+    }
+
+    if (
+        raw.includes("$") ||
+        raw.includes("usd")
+    ) {
+        return "USD";
+    }
+
+    return "BYN";
+}
+
+
+function formatPrice(product) {
+
+    if (product.price === null) {
+        return "Цена уточняется";
+    }
+
+    const currency =
+        product.currency || "BYN";
+
+    const symbols = {
+        BYN: "BYN",
+        RUB: "₽",
+        USD: "$",
+        EUR: "€"
+    };
+
+    const symbol =
+        symbols[currency] || currency;
+
+    return (
+        Number(product.price)
+            .toLocaleString("ru-RU", {
+                maximumFractionDigits: 2
+            })
+        + " "
+        + symbol
+    );
+}
+
+
+/* =========================================================
+   FEED DISPLAY
+========================================================= */
+
+function showProduct() {
+
+    if (!products.length) {
+        showEmptyFeed();
+        return;
+    }
+
+    if (currentIndex < 0) {
+        currentIndex = products.length - 1;
+    }
+
+    if (currentIndex >= products.length) {
         currentIndex = 0;
     }
 
+    currentProduct =
+        products[currentIndex];
 
-    render();
+    const image =
+        document.getElementById("productImage");
+
+    const title =
+        document.getElementById("productTitle");
+
+    const brand =
+        document.getElementById("productBrand");
+
+    const source =
+        document.getElementById("productSource");
+
+    const price =
+        document.getElementById("productPrice");
+
+    const oldPrice =
+        document.getElementById("productOldPrice");
+
+    const rating =
+        document.getElementById("productRating");
+
+    const category =
+        document.getElementById("productCategory");
+
+    image.src =
+        currentProduct.image;
+
+    image.alt =
+        currentProduct.title;
+
+    title.textContent =
+        currentProduct.title;
+
+    brand.textContent =
+        currentProduct.brand ||
+        "StyleFlow";
+
+    source.textContent =
+        sourceLabel(currentProduct.source);
+
+    price.textContent =
+        formatPrice(currentProduct);
+
+    if (currentProduct.oldPrice) {
+
+        oldPrice.textContent =
+            formatPrice({
+                price: currentProduct.oldPrice,
+                currency: currentProduct.currency
+            });
+
+    } else {
+
+        oldPrice.textContent = "";
+
+    }
+
+    if (currentProduct.rating !== "") {
+
+        rating.textContent =
+            "★ " + currentProduct.rating;
+
+    } else {
+
+        rating.textContent =
+            "★ —";
+
+    }
+
+    category.textContent =
+        currentProduct.category ||
+        "Одежда";
+
+    updateLikeButton();
+
+    registerView(currentProduct);
+
+    resetCardPosition();
+
 }
 
 
-// =====================================
-// PREVIOUS
-// =====================================
+/* =========================================================
+   EMPTY FEED
+========================================================= */
 
-function previousProduct() {
+function showEmptyFeed() {
 
-    if (!products.length) {
+    document.getElementById("productCard").style.display =
+        "none";
+
+    document.getElementById("feedEmpty").style.display =
+        "flex";
+
+}
+
+
+/* =========================================================
+   NAVIGATION
+========================================================= */
+
+function switchTab(tab) {
+
+    currentTab = tab;
+
+    const screens = {
+        feed: "feedScreen",
+        favorites: "favoritesScreen",
+        search: "searchScreen",
+        profile: "profileScreen"
+    };
+
+    Object.values(screens).forEach(id => {
+
+        document
+            .getElementById(id)
+            .classList.remove("active");
+
+    });
+
+    document
+        .getElementById(screens[tab])
+        .classList.add("active");
+
+
+    const navs = {
+        feed: "navFeed",
+        favorites: "navFavorites",
+        search: "navSearch",
+        profile: "navProfile"
+    };
+
+    Object.values(navs).forEach(id => {
+
+        document
+            .getElementById(id)
+            .classList.remove("active");
+
+    });
+
+    document
+        .getElementById(navs[tab])
+        .classList.add("active");
+
+
+    if (tab === "favorites") {
+        renderFavorites();
+    }
+
+    if (tab === "profile") {
+        updateProfile();
+    }
+
+    if (tab === "search") {
+
+        setTimeout(() => {
+
+            document
+                .getElementById("searchInput")
+                .focus();
+
+        }, 100);
+
+    }
+
+}
+
+
+/* =========================================================
+   FAVORITES
+========================================================= */
+
+function isFavorite(productId) {
+
+    return favorites.some(
+        item => String(item.id) === String(productId)
+    );
+
+}
+
+
+function toggleLike() {
+
+    if (!currentProduct) {
         return;
     }
 
+    const index =
+        favorites.findIndex(
+            item =>
+                String(item.id) ===
+                String(currentProduct.id)
+        );
 
-    currentIndex--;
+    if (index >= 0) {
 
+        favorites.splice(index, 1);
 
-    if (currentIndex < 0) {
+        showToast("Удалено из избранного");
 
-        currentIndex =
-            products.length - 1;
+    } else {
+
+        favorites.unshift(currentProduct);
+
+        showToast("❤️ Добавлено в избранное");
+
+        showHeart();
+
     }
 
+    saveJSON(
+        "styleflow_favorites",
+        favorites
+    );
 
-    render();
+    updateLikeButton();
+
+    updateProfile();
+
 }
 
 
-// =====================================
-// DOUBLE TAP
-// =====================================
+function updateLikeButton() {
 
-function checkDoubleTap() {
+    const button =
+        document.getElementById("likeButton");
 
-    const now =
-        Date.now();
+    if (!currentProduct) {
+        return;
+    }
+
+    if (isFavorite(currentProduct.id)) {
+
+        button.classList.add("liked");
+
+        button.querySelector(".action-icon")
+            .textContent = "❤️";
+
+    } else {
+
+        button.classList.remove("liked");
+
+        button.querySelector(".action-icon")
+            .textContent = "♥";
+
+    }
+
+}
 
 
-    const difference =
-        now - lastTap;
+function renderFavorites() {
 
+    const grid =
+        document.getElementById("favoritesGrid");
+
+    const empty =
+        document.getElementById("favoritesEmpty");
+
+    grid.innerHTML = "";
+
+    if (!favorites.length) {
+
+        empty.style.display = "flex";
+
+        return;
+
+    }
+
+    empty.style.display = "none";
+
+
+    favorites.forEach(product => {
+
+        const card =
+            document.createElement("div");
+
+        card.className =
+            "favorite-card";
+
+        card.innerHTML = `
+
+            <img
+                src="${escapeAttribute(product.image)}"
+                alt="${escapeAttribute(product.title)}"
+            >
+
+            <div class="favorite-info">
+
+                <div class="favorite-title">
+                    ${escapeHTML(product.title)}
+                </div>
+
+                <div class="favorite-price">
+                    ${escapeHTML(formatPrice(product))}
+                </div>
+
+            </div>
+
+        `;
+
+        card.onclick = () => {
+
+            openProductFromObject(product);
+
+        };
+
+        grid.appendChild(card);
+
+    });
+
+}
+
+
+/* =========================================================
+   OPEN PRODUCT
+========================================================= */
+
+function openCurrentProduct() {
+
+    if (!currentProduct) {
+        return;
+    }
 
     if (
-        difference > 0 &&
-        difference < 350
+        !currentProduct.url ||
+        currentProduct.url === "#"
     ) {
 
-        toggleFavorite();
+        showToast(
+            "Ссылка на товар пока не подключена"
+        );
+
+        return;
 
     }
 
+    registerOpen(currentProduct);
 
-    lastTap = now;
-}
-
-
-// =====================================
-// MOUSE WHEEL
-// =====================================
-
-let wheelLocked = false;
-
-
-document.addEventListener(
-    "wheel",
-    function(event) {
+    try {
 
         if (
-            currentTab !== "feed"
-        ) {
-            return;
-        }
-
-
-        if (wheelLocked) {
-            return;
-        }
-
-
-        if (
-            Math.abs(
-                event.deltaY
-            ) < 20
-        ) {
-            return;
-        }
-
-
-        wheelLocked = true;
-
-
-        if (
-            event.deltaY > 0
+            window.Telegram &&
+            Telegram.WebApp &&
+            Telegram.WebApp.openLink
         ) {
 
-            nextProduct();
+            Telegram.WebApp.openLink(
+                currentProduct.url
+            );
 
         } else {
 
-            previousProduct();
+            window.open(
+                currentProduct.url,
+                "_blank"
+            );
+
         }
 
+    } catch (error) {
 
-        setTimeout(
-            () => {
-
-                wheelLocked = false;
-
-            },
-            450
+        window.open(
+            currentProduct.url,
+            "_blank"
         );
-    },
-    {
-        passive: true
-    }
-);
 
-
-// =====================================
-// KEYBOARD
-// =====================================
-
-document.addEventListener(
-    "keydown",
-    function(event) {
-
-        if (
-            event.key ===
-            "ArrowDown"
-        ) {
-
-            nextProduct();
-        }
-
-
-        if (
-            event.key ===
-            "ArrowUp"
-        ) {
-
-            previousProduct();
-        }
-    }
-);
-
-
-// =====================================
-// SHARE
-// =====================================
-
-async function shareProduct(event) {
-
-    if (event) {
-        event.stopPropagation();
     }
 
+}
 
-    if (!products.length) {
+
+function openProductFromObject(product) {
+
+    const index =
+        products.findIndex(
+            item =>
+                String(item.id) ===
+                String(product.id)
+        );
+
+    if (index >= 0) {
+
+        currentIndex = index;
+
+        showProduct();
+
+        switchTab("feed");
+
+        return;
+
+    }
+
+    currentProduct = product;
+
+    renderSingleProductObject(product);
+
+    switchTab("feed");
+
+}
+
+
+function renderSingleProductObject(product) {
+
+    document.getElementById("productImage").src =
+        product.image;
+
+    document.getElementById("productTitle").textContent =
+        product.title;
+
+    document.getElementById("productBrand").textContent =
+        product.brand || "StyleFlow";
+
+    document.getElementById("productSource").textContent =
+        sourceLabel(product.source);
+
+    document.getElementById("productPrice").textContent =
+        formatPrice(product);
+
+    document.getElementById("productOldPrice").textContent =
+        product.oldPrice
+            ? formatPrice({
+                price: product.oldPrice,
+                currency: product.currency
+            })
+            : "";
+
+    document.getElementById("productRating").textContent =
+        product.rating
+            ? "★ " + product.rating
+            : "★ —";
+
+    document.getElementById("productCategory").textContent =
+        product.category || "Одежда";
+
+    updateLikeButton();
+
+}
+
+
+/* =========================================================
+   SHARE
+========================================================= */
+
+async function shareCurrentProduct() {
+
+    if (!currentProduct) {
         return;
     }
 
+    const text =
+        `${currentProduct.title} — ${formatPrice(currentProduct)}`;
 
-    const item =
-        products[currentIndex];
+    try {
 
-
-    const url =
-        item.link ||
-        window.location.href;
-
-
-    if (
-        navigator.share
-    ) {
-
-        try {
+        if (navigator.share) {
 
             await navigator.share({
 
                 title:
-                    item.name ||
-                    item.title ||
-                    "Товар",
+                    currentProduct.title,
 
-                url: url
+                text,
+
+                url:
+                    currentProduct.url
 
             });
 
-        } catch (error) {
+        } else {
 
-            console.log(
-                "Share cancelled"
+            await navigator.clipboard.writeText(
+                currentProduct.url
             );
-        }
-
-
-    } else {
-
-        try {
-
-            await navigator.clipboard
-                .writeText(url);
 
             showToast(
                 "🔗 Ссылка скопирована"
             );
 
-        } catch {
-
-            showToast(
-                "🔗 " + url
-            );
         }
+
+    } catch (error) {
+
+        // User cancelled share.
     }
+
 }
 
 
-// =====================================
-// COMMENTS
-// =====================================
+/* =========================================================
+   COMMENTS
+========================================================= */
 
 function openComments() {
 
@@ -985,601 +944,1001 @@ function openComments() {
             "commentsOverlay"
         );
 
-
     const list =
         document.getElementById(
             "commentsList"
         );
 
-
-    if (!overlay || !list) {
-        return;
-    }
-
-
-    const item =
-        products[currentIndex];
-
-
-    list.innerHTML = "";
-
-
-    /*
-     * Пока реальные отзывы
-     * не подключены,
-     * показываем демо.
-     */
-
     const comments = [
 
         {
             user: "Алекс",
-            text: "Выглядит очень круто 👍",
-            date: "2 дня назад"
+            text: "Выглядит очень круто 👍"
         },
 
         {
             user: "Мария",
-            text: "Кто-нибудь уже заказывал?",
-            date: "5 дней назад"
+            text: "Кто-нибудь уже заказывал?"
         },
 
         {
             user: "Илья",
-            text: "Цена интересная",
-            date: "1 неделю назад"
+            text: "Цена интересная"
         },
 
         {
             user: "Катя",
-            text: "Размер подошёл идеально",
-            date: "1 неделю назад"
+            text: "Размер подошёл идеально"
         }
 
     ];
 
+    list.innerHTML =
+        comments.map(comment => `
 
-    comments.forEach(
-        comment => {
-
-            const element =
-                document.createElement(
-                    "div"
-                );
-
-
-            element.className =
-                "comment";
-
-
-            element.innerHTML = `
+            <div class="comment">
 
                 <div class="comment-user">
-                    ${escapeHtml(
-                        comment.user
-                    )}
+                    ${escapeHTML(comment.user)}
                 </div>
 
                 <div class="comment-text">
-                    ${escapeHtml(
-                        comment.text
-                    )}
+                    ${escapeHTML(comment.text)}
                 </div>
 
-                <div class="comment-date">
-                    ${escapeHtml(
-                        comment.date
-                    )}
-                </div>
-            `;
+            </div>
 
+        `).join("");
 
-            list.appendChild(
-                element
-            );
-        }
-    );
+    overlay.classList.add("show");
 
-
-    overlay.classList.add(
-        "show"
-    );
 }
 
-
-// =====================================
-// CLOSE COMMENTS
-// =====================================
 
 function closeComments(event) {
 
     if (
-        event &&
-        event.target !== event.currentTarget
+        !event ||
+        event.target.id ===
+        "commentsOverlay"
     ) {
-        return;
+
+        document
+            .getElementById("commentsOverlay")
+            .classList.remove("show");
+
     }
 
-
-    const overlay =
-        document.getElementById(
-            "commentsOverlay"
-        );
-
-
-    if (overlay) {
-
-        overlay.classList.remove(
-            "show"
-        );
-    }
 }
 
 
-// =====================================
-// FAVORITES SCREEN
-// =====================================
+/* =========================================================
+   SEARCH
+========================================================= */
 
-function switchTab(button, tab) {
+function setupSearch() {
+
+    const input =
+        document.getElementById(
+            "searchInput"
+        );
+
+    input.addEventListener(
+        "input",
+        () => {
+
+            const value =
+                input.value.trim();
+
+            document
+                .getElementById("searchClear")
+                .style.display =
+                    value
+                        ? "flex"
+                        : "none";
+
+            clearTimeout(searchTimer);
+
+            searchTimer =
+                setTimeout(
+                    () => performSearch(value),
+                    150
+                );
+
+        }
+    );
+
+    input.addEventListener(
+        "keydown",
+        event => {
+
+            if (event.key === "Enter") {
+
+                event.preventDefault();
+
+                performSearch(
+                    input.value.trim()
+                );
+
+            }
+
+        }
+    );
+
+}
+
+
+function quickSearch(query) {
+
+    switchTab("search");
+
+    const input =
+        document.getElementById(
+            "searchInput"
+        );
+
+    input.value = query;
 
     document
-        .querySelectorAll(
-            ".nav-item"
-        )
-        .forEach(
-            item => {
+        .getElementById("searchClear")
+        .style.display = "flex";
 
-                item.classList.remove(
-                    "active"
-                );
-            }
-        );
+    performSearch(query);
 
-
-    if (button) {
-
-        button.classList.add(
-            "active"
-        );
-    }
-
-
-    currentTab = tab;
-
-
-    const feed =
-        document.getElementById(
-            "feed"
-        );
-
-
-    const favoritesScreen =
-        document.getElementById(
-            "favoritesScreen"
-        );
-
-
-    if (
-        tab === "favorites"
-    ) {
-
-        feed.style.display =
-            "none";
-
-
-        favoritesScreen.classList.add(
-            "show"
-        );
-
-
-        renderFavorites();
-
-        return;
-    }
-
-
-    if (
-        tab === "feed"
-    ) {
-
-        favoritesScreen.classList.remove(
-            "show"
-        );
-
-
-        feed.style.display =
-            "block";
-
-
-        products =
-            allProducts;
-
-
-        currentIndex = 0;
-
-
-        render();
-    }
 }
 
 
-// =====================================
-// FAVORITES GRID
-// =====================================
+function clearSearch() {
 
-function renderFavorites() {
-
-    const grid =
+    const input =
         document.getElementById(
-            "favoritesGrid"
+            "searchInput"
+        );
+
+    input.value = "";
+
+    document
+        .getElementById("searchClear")
+        .style.display = "none";
+
+    document
+        .getElementById("searchResults")
+        .classList.remove("active");
+
+    document
+        .getElementById("searchHome")
+        .style.display = "block";
+
+    input.focus();
+
+}
+
+
+function performSearch(query) {
+
+    const home =
+        document.getElementById(
+            "searchHome"
+        );
+
+    const results =
+        document.getElementById(
+            "searchResults"
+        );
+
+    const resultList =
+        document.getElementById(
+            "resultList"
+        );
+
+    const resultCount =
+        document.getElementById(
+            "resultCount"
         );
 
 
-    const count =
-        document.getElementById(
-            "favoritesCount"
-        );
+    if (!query) {
 
+        home.style.display = "block";
 
-    if (!grid) {
+        results.classList.remove("active");
+
         return;
+
     }
 
 
-    count.textContent =
-        favorites.length
-            ? `${favorites.length} сохранённых товаров`
-            : "Здесь появятся понравившиеся товары";
+    home.style.display = "none";
+
+    results.classList.add("active");
 
 
-    if (!favorites.length) {
+    const normalizedQuery =
+        query
+            .toLowerCase()
+            .trim();
 
-        grid.innerHTML = `
 
-            <div
-                class="empty-state"
-                style="
-                    position:relative;
-                    grid-column:1/-1;
-                    min-height:50vh;
-                "
-            >
+    const tokens =
+        normalizedQuery
+            .split(/\s+/)
+            .filter(Boolean);
 
-                <div class="empty-icon">
-                    ❤️
+
+    const filtered =
+        allProducts.filter(product => {
+
+            const searchable = [
+
+                product.title,
+
+                product.brand,
+
+                product.category,
+
+                product.source,
+
+                sourceLabel(product.source)
+
+            ]
+                .join(" ")
+                .toLowerCase();
+
+
+            return tokens.every(
+                token =>
+                    searchable.includes(token)
+            );
+
+        });
+
+
+    resultCount.textContent =
+        filtered.length === 1
+            ? "Найден 1 товар"
+            : `Найдено товаров: ${filtered.length}`;
+
+
+    resultList.innerHTML = "";
+
+
+    if (!filtered.length) {
+
+        resultList.innerHTML = `
+
+            <div class="empty" style="position:relative; min-height:300px;">
+
+                <div class="empty-inner">
+
+                    <div class="empty-icon">
+                        🔎
+                    </div>
+
+                    <h2>
+                        Ничего не нашли
+                    </h2>
+
+                    <p>
+                        Попробуй другое название,
+                        бренд или категорию.
+                    </p>
+
                 </div>
 
-                <h2>
-                    Пока пусто
-                </h2>
-
-                <p>
-                    Лайкните понравившийся товар
-                </p>
-
             </div>
+
         `;
 
         return;
+
     }
 
+
+    filtered.forEach(product => {
+
+        const card =
+            document.createElement("div");
+
+        card.className =
+            "result-card";
+
+        card.innerHTML = `
+
+            <img
+                class="result-image"
+                src="${escapeAttribute(product.image)}"
+                alt="${escapeAttribute(product.title)}"
+            >
+
+            <div class="result-info">
+
+                <div class="result-brand">
+                    ${escapeHTML(
+                        product.brand ||
+                        sourceLabel(product.source)
+                    )}
+                </div>
+
+                <div class="result-title">
+                    ${escapeHTML(product.title)}
+                </div>
+
+                <div class="result-price">
+                    ${escapeHTML(
+                        formatPrice(product)
+                    )}
+                </div>
+
+            </div>
+
+        `;
+
+        card.onclick = () => {
+
+            openProductFromObject(product);
+
+        };
+
+        resultList.appendChild(card);
+
+    });
+
+}
+
+
+/* =========================================================
+   PROFILE
+========================================================= */
+
+function updateProfile() {
+
+    const likedCount =
+        document.getElementById(
+            "likedCount"
+        );
+
+    const viewedCount =
+        document.getElementById(
+            "viewedCount"
+        );
+
+    const openedCount =
+        document.getElementById(
+            "openedCount"
+        );
+
+    const collectionCount =
+        document.getElementById(
+            "collectionCount"
+        );
+
+
+    likedCount.textContent =
+        favorites.length;
+
+    viewedCount.textContent =
+        viewedProducts.length;
+
+    openedCount.textContent =
+        openedProducts.length;
+
+    collectionCount.textContent =
+        `${favorites.length} ${
+            getRussianPlural(
+                favorites.length,
+                "товар",
+                "товара",
+                "товаров"
+            )
+        }`;
+
+
+    renderRecentProducts();
+
+}
+
+
+function renderRecentProducts() {
+
+    const grid =
+        document.getElementById(
+            "recentGrid"
+        );
 
     grid.innerHTML = "";
 
 
-    favorites.forEach(
-        (item, index) => {
-
-            const card =
-                document.createElement(
-                    "div"
-                );
+    const recentIds =
+        [...viewedProducts]
+            .reverse()
+            .slice(0, 6);
 
 
-            card.className =
-                "favorite-card";
+    const recent =
+        recentIds
+            .map(id =>
+                allProducts.find(
+                    product =>
+                        String(product.id) ===
+                        String(id)
+                )
+            )
+            .filter(Boolean);
 
 
-            const image =
-                item.image ||
-                (
-                    item.images &&
-                    item.images.length
-                        ? item.images[0]
-                        : ""
-                );
+    recent.forEach(product => {
+
+        const card =
+            document.createElement("div");
+
+        card.className =
+            "recent-card";
+
+        card.innerHTML = `
+
+            <img
+                src="${escapeAttribute(product.image)}"
+                alt="${escapeAttribute(product.title)}"
+            >
+
+            <div class="recent-price">
+                ${escapeHTML(formatPrice(product))}
+            </div>
+
+        `;
+
+        card.onclick = () => {
+
+            openProductFromObject(product);
+
+        };
+
+        grid.appendChild(card);
+
+    });
 
 
-            card.innerHTML = `
+    if (!recent.length) {
 
-                ${
-                    image
-                        ? `
-                            <img
-                                src="${escapeHtml(image)}"
-                                draggable="false"
-                            >
-                        `
-                        :
-                        `
-                            <div
-                                style="
-                                    aspect-ratio:.78;
-                                    display:flex;
-                                    align-items:center;
-                                    justify-content:center;
-                                    font-size:45px;
-                                "
-                            >
-                                🛍️
-                            </div>
-                        `
-                }
+        grid.innerHTML = `
 
-                <div
-                    class="favorite-card-info"
-                >
+            <div style="
+                grid-column:1/-1;
+                padding:25px 5px;
+                color:rgba(255,255,255,.4);
+                font-size:13px;
+            ">
+                Начни листать ленту —
+                здесь появятся твои находки.
+            </div>
 
-                    <div
-                        class="favorite-card-name"
-                    >
-                        ${escapeHtml(
-                            item.name ||
-                            item.title ||
-                            "Товар"
-                        )}
-                    </div>
+        `;
 
-                    <div
-                        class="favorite-card-price"
-                    >
-                        ${item.price || 0} $
-                    </div>
+    }
 
-                </div>
-            `;
-
-
-            card.onclick =
-                () => openFavorite(index);
-
-
-            grid.appendChild(card);
-        }
-    );
 }
 
 
-// =====================================
-// OPEN FAVORITE
-// =====================================
+function openCollection(type) {
 
-function openFavorite(index) {
+    if (type === "favorites") {
 
-    if (
-        !favorites.length
-    ) {
+        switchTab("favorites");
+
+    }
+
+}
+
+
+/* =========================================================
+   VIEW / OPEN TRACKING
+========================================================= */
+
+function registerView(product) {
+
+    if (!product) {
         return;
     }
 
+    const id =
+        String(product.id);
 
-    products =
-        favorites;
+    if (
+        !viewedProducts
+            .map(String)
+            .includes(id)
+    ) {
 
+        viewedProducts.push(id);
 
-    currentIndex =
-        index;
+        if (viewedProducts.length > 500) {
+            viewedProducts.shift();
+        }
 
-
-    currentTab =
-        "feed";
-
-
-    document
-        .getElementById(
-            "favoritesScreen"
-        )
-        .classList.remove(
-            "show"
+        saveJSON(
+            "styleflow_viewed",
+            viewedProducts
         );
 
+    }
 
-    document
-        .getElementById(
-            "feed"
-        )
-        .style.display =
-        "block";
-
-
-    document
-        .querySelectorAll(
-            ".nav-item"
-        )
-        .forEach(
-            item =>
-                item.classList.remove(
-                    "active"
-                )
-        );
-
-
-    document
-        .querySelector(
-            ".nav-item"
-        )
-        .classList.add(
-            "active"
-        );
-
-
-    render();
 }
 
 
-// =====================================
-// PROFILE
-// =====================================
+function registerOpen(product) {
 
-function showProfile() {
+    if (!product) {
+        return;
+    }
 
-    showToast(
-        "👤 Профиль скоро появится"
+    const id =
+        String(product.id);
+
+    openedProducts.push(id);
+
+    if (openedProducts.length > 500) {
+        openedProducts.shift();
+    }
+
+    saveJSON(
+        "styleflow_opened",
+        openedProducts
     );
+
+    updateProfile();
+
 }
 
 
-// =====================================
-// EMPTY
-// =====================================
+/* =========================================================
+   SWIPE
+========================================================= */
 
-function showEmpty(
-    icon,
-    title,
-    text
-) {
+function setupSwipe() {
 
     const card =
         document.getElementById(
-            "card"
+            "productCard"
         );
 
 
-    if (!card) {
-        return;
-    }
+    card.addEventListener(
+        "touchstart",
+        event => {
+
+            if (!currentProduct) {
+                return;
+            }
+
+            touchStartY =
+                event.touches[0].clientY;
+
+            touchStartX =
+                event.touches[0].clientX;
+
+            isDragging = true;
+
+            card.classList.add("dragging");
+
+        },
+        { passive: true }
+    );
 
 
-    card.innerHTML = `
+    card.addEventListener(
+        "touchmove",
+        event => {
 
-        <div class="empty-state">
+            if (!isDragging) {
+                return;
+            }
 
-            <div class="empty-icon">
-                ${icon}
-            </div>
+            const y =
+                event.touches[0].clientY;
 
-            <h2>
-                ${escapeHtml(title)}
-            </h2>
+            const x =
+                event.touches[0].clientX;
 
-            <p>
-                ${escapeHtml(text)}
-            </p>
+            const deltaY =
+                y - touchStartY;
 
-        </div>
-    `;
+            const deltaX =
+                x - touchStartX;
+
+
+            if (
+                Math.abs(deltaY) >
+                Math.abs(deltaX)
+            ) {
+
+                event.preventDefault();
+
+                card.style.transform =
+                    `translateY(${deltaY}px)
+                     rotate(${deltaY * -.025}deg)`;
+
+            }
+
+        },
+        { passive: false }
+    );
+
+
+    card.addEventListener(
+        "touchend",
+        event => {
+
+            if (!isDragging) {
+                return;
+            }
+
+            isDragging = false;
+
+            card.classList.remove("dragging");
+
+
+            const touch =
+                event.changedTouches[0];
+
+            const deltaY =
+                touch.clientY -
+                touchStartY;
+
+
+            card.style.transform = "";
+
+
+            if (Math.abs(deltaY) > 80) {
+
+                if (deltaY < 0) {
+                    nextProduct();
+                } else {
+                    previousProduct();
+                }
+
+                return;
+
+            }
+
+
+            // Double tap
+            const now =
+                Date.now();
+
+            if (
+                now - lastTapTime <
+                350
+            ) {
+
+                toggleLike();
+
+            }
+
+            lastTapTime = now;
+
+        },
+        { passive: true }
+    );
+
+
+    // Mouse wheel
+    let wheelLocked = false;
+
+    card.addEventListener(
+        "wheel",
+        event => {
+
+            if (wheelLocked) {
+                return;
+            }
+
+            wheelLocked = true;
+
+            if (event.deltaY > 0) {
+                nextProduct();
+            } else {
+                previousProduct();
+            }
+
+            setTimeout(() => {
+                wheelLocked = false;
+            }, 300);
+
+        },
+        { passive: true }
+    );
+
+
+    // Keyboard
+    document.addEventListener(
+        "keydown",
+        event => {
+
+            if (currentTab !== "feed") {
+                return;
+            }
+
+            if (
+                event.key === "ArrowDown" ||
+                event.key === "ArrowRight"
+            ) {
+                nextProduct();
+            }
+
+            if (
+                event.key === "ArrowUp" ||
+                event.key === "ArrowLeft"
+            ) {
+                previousProduct();
+            }
+
+        }
+    );
+
 }
 
 
-// =====================================
-// TOAST
-// =====================================
+function nextProduct() {
+
+    if (!products.length) {
+        return;
+    }
+
+    currentIndex++;
+
+    if (
+        currentIndex >=
+        products.length
+    ) {
+        currentIndex = 0;
+    }
+
+    animateCardChange(
+        "next"
+    );
+
+}
+
+
+function previousProduct() {
+
+    if (!products.length) {
+        return;
+    }
+
+    currentIndex--;
+
+    if (currentIndex < 0) {
+        currentIndex =
+            products.length - 1;
+    }
+
+    animateCardChange(
+        "previous"
+    );
+
+}
+
+
+function animateCardChange(direction) {
+
+    const card =
+        document.getElementById(
+            "productCard"
+        );
+
+    card.style.opacity = "0";
+
+    card.style.transform =
+        direction === "next"
+            ? "translateY(-20px)"
+            : "translateY(20px)";
+
+
+    setTimeout(() => {
+
+        showProduct();
+
+        requestAnimationFrame(() => {
+
+            card.style.opacity = "1";
+            card.style.transform = "";
+
+        });
+
+    }, 100);
+
+}
+
+
+function resetCardPosition() {
+
+    const card =
+        document.getElementById(
+            "productCard"
+        );
+
+    card.style.opacity = "1";
+    card.style.transform = "";
+
+}
+
+
+/* =========================================================
+   HEART
+========================================================= */
+
+function showHeart() {
+
+    const heart =
+        document.getElementById(
+            "bigHeart"
+        );
+
+    heart.classList.remove("show");
+
+    void heart.offsetWidth;
+
+    heart.classList.add("show");
+
+}
+
+
+/* =========================================================
+   TOAST
+========================================================= */
+
+let toastTimer = null;
 
 function showToast(message) {
 
-    let toast =
+    const toast =
         document.getElementById(
             "toast"
         );
 
-
-    if (!toast) {
-
-        toast =
-            document.createElement(
-                "div"
-            );
-
-        toast.id =
-            "toast";
-
-
-        document.body.appendChild(
-            toast
-        );
-    }
-
-
     toast.textContent =
         message;
 
+    toast.classList.add("show");
 
-    toast.classList.add(
-        "show"
-    );
+    clearTimeout(toastTimer);
 
+    toastTimer =
+        setTimeout(() => {
 
-    clearTimeout(
-        window.toastTimer
-    );
+            toast.classList.remove("show");
 
+        }, 1800);
 
-    window.toastTimer =
-        setTimeout(
-            () => {
-
-                toast.classList.remove(
-                    "show"
-                );
-
-            },
-            1800
-        );
 }
 
 
-// =====================================
-// ESCAPE
-// =====================================
+/* =========================================================
+   LOCAL STORAGE
+========================================================= */
 
-function escapeHtml(value) {
+function loadJSON(key, fallback) {
 
-    if (
-        value === null ||
-        value === undefined
-    ) {
+    try {
+
+        const value =
+            localStorage.getItem(key);
+
+        if (!value) {
+            return fallback;
+        }
+
+        const parsed =
+            JSON.parse(value);
+
+        return parsed ?? fallback;
+
+    } catch (error) {
+
+        return fallback;
+
+    }
+
+}
+
+
+function saveJSON(key, value) {
+
+    try {
+
+        localStorage.setItem(
+            key,
+            JSON.stringify(value)
+        );
+
+    } catch (error) {
+
+        console.error(
+            "localStorage error:",
+            error
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   SECURITY / HTML HELPERS
+========================================================= */
+
+function escapeHTML(value) {
+
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+
+}
+
+
+function escapeAttribute(value) {
+
+    return escapeHTML(value);
+
+}
+
+
+/* =========================================================
+   UTILS
+========================================================= */
+
+function capitalize(value) {
+
+    const text =
+        String(value || "");
+
+    if (!text) {
         return "";
     }
 
+    return (
+        text.charAt(0).toUpperCase() +
+        text.slice(1)
+    );
 
-    return String(value)
-        .replace(
-            /&/g,
-            "&amp;"
-        )
-        .replace(
-            /</g,
-            "&lt;"
-        )
-        .replace(
-            />/g,
-            "&gt;"
-        )
-        .replace(
-            /"/g,
-            "&quot;"
-        )
-        .replace(
-            /'/g,
-            "&#039;"
-        );
 }
 
 
-// =====================================
-// START
-// =====================================
+function getRussianPlural(
+    number,
+    one,
+    few,
+    many
+) {
 
-document.addEventListener(
-    "DOMContentLoaded",
-    function() {
+    const n =
+        Math.abs(number) % 100;
 
-        console.log(
-            "StyleFlow TikTok UI started"
-        );
+    const n1 =
+        n % 10;
 
-
-        loadProducts();
-
+    if (
+        n > 10 &&
+        n < 20
+    ) {
+        return many;
     }
-);
+
+    if (n1 === 1) {
+        return one;
+    }
+
+    if (
+        n1 >= 2 &&
+        n1 <= 4
+    ) {
+        return few;
+    }
+
+    return many;
+
+}
