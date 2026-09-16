@@ -1,316 +1,807 @@
+```javascript id="n2p8sj"
 let feed = [];
-let index = 0;
-let isAnimating = false;
 
-const card = document.getElementById("card");
+let index = 0;
+
+let startY = 0;
+let startX = 0;
+
+let favorites = JSON.parse(
+    localStorage.getItem("favorites") || "[]"
+);
+
+
+/* =========================
+   LOAD FEED
+   ========================= */
 
 async function loadFeed() {
+
+    const card =
+        document.getElementById("card");
+
     try {
-        const res = await fetch("/api/feed", {
-            cache: "no-store"
-        });
 
-        if (!res.ok) {
-            throw new Error("Ошибка загрузки фида");
-        }
+        const response =
+            await fetch("/api/feed");
 
-        const data = await res.json();
+        const data =
+            await response.json();
 
         if (Array.isArray(data)) {
+
             feed = data;
-        } else if (data && Array.isArray(data.items)) {
+
+        } else if (
+            data &&
+            Array.isArray(data.items)
+        ) {
+
             feed = data.items;
+
         } else {
+
             feed = [];
+
         }
 
-        index = 0;
-
-        render();
-
     } catch (error) {
-        console.error(error);
 
-        card.innerHTML = `
-            <div class="empty">
-                <div class="empty-icon">⚠️</div>
-                <div class="empty-title">Не удалось загрузить товары</div>
-                <div class="empty-text">Попробуйте обновить страницу</div>
-            </div>
-        `;
+        console.error(
+            "Ошибка загрузки:",
+            error
+        );
+
+        feed = [];
+
     }
+
+    index = 0;
+
+    render();
 }
 
 
-function render(direction = "none") {
+/* =========================
+   RENDER
+   ========================= */
+
+function render() {
+
+    const card =
+        document.getElementById("card");
 
     if (!feed.length) {
+
         card.innerHTML = `
-            <div class="empty">
-                <div class="empty-icon">🛍️</div>
-                <div class="empty-title">Товаров пока нет</div>
-                <div class="empty-text">
-                    Запусти поиск товаров через бота
+
+            <div class="loading">
+
+                <div style="font-size:40px;">
+                    🛍️
                 </div>
+
+                <div>
+                    Пока нет товаров
+                </div>
+
             </div>
+
         `;
 
         return;
     }
 
-    const item = feed[index];
+
+    const item =
+        feed[index];
+
 
     const title =
         item.name ||
         item.title ||
         "Без названия";
 
+
     const brand =
         item.brand ||
         "Без бренда";
 
+
     const price =
-        item.price !== undefined &&
-        item.price !== null
-            ? `${item.price} ₽`
+        item.price !== undefined
+            ? `${item.price}$`
             : "";
 
+
     const rating =
-        item.rating
+        item.rating !== undefined
             ? `⭐ ${item.rating}`
             : "";
 
+
     const image =
         item.image ||
-        (item.images && item.images.length
-            ? item.images[0]
-            : "");
+        "";
+
+
+    const video =
+        item.video ||
+        "";
+
 
     const link =
-        item.link || "#";
+        item.link ||
+        "#";
 
 
-    let mediaHTML;
+    const isFavorite =
+        favorites.includes(
+            item.id
+        );
 
-    if (image) {
+
+    let mediaHTML = "";
+
+
+    if (video) {
 
         mediaHTML = `
+
+            <video
+                src="${video}"
+                autoplay
+                muted
+                loop
+                playsinline
+            ></video>
+
+        `;
+
+    } else if (image) {
+
+        mediaHTML = `
+
             <img
                 src="${image}"
-                alt="${escapeHTML(title)}"
-                loading="eager"
-                onerror="this.style.display='none'; this.parentElement.classList.add('image-error')"
+                alt=""
             >
+
         `;
 
     } else {
 
         mediaHTML = `
-            <div class="no-image">
+
+            <div
+                style="
+                    font-size:60px;
+                    opacity:.5;
+                "
+            >
                 🛍️
             </div>
+
         `;
+
     }
 
 
     card.innerHTML = `
-        <div class="product-card ${direction !== "none" ? "animate-" + direction : ""}">
 
-            <div class="product-image">
-                ${mediaHTML}
+        <div class="media">
 
-                <div class="counter">
-                    ${index + 1} / ${feed.length}
-                </div>
-            </div>
-
-            <div class="product-info">
-
-                <div class="product-brand">
-                    ${escapeHTML(brand)}
-                </div>
-
-                <div class="product-title">
-                    ${escapeHTML(title)}
-                </div>
-
-                <div class="product-bottom">
-
-                    <div>
-                        <div class="product-price">
-                            ${price}
-                        </div>
-
-                        ${
-                            rating
-                                ? `<div class="product-rating">${rating}</div>`
-                                : ""
-                        }
-                    </div>
-
-                    <a
-                        class="open-button"
-                        href="${link}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                    >
-                        Открыть →
-                    </a>
-
-                </div>
-
-            </div>
+            ${mediaHTML}
 
         </div>
+
+
+        <div class="image-gradient"></div>
+
+
+        <div class="side-actions">
+
+            <button
+                class="action-button"
+                onclick="toggleFavorite()"
+            >
+                ${isFavorite ? "❤️" : "🤍"}
+            </button>
+
+
+            <button
+                class="action-button"
+                onclick="showToast('Добавление в корзину скоро будет доступно')"
+            >
+                🛒
+            </button>
+
+
+            <button
+                class="action-button"
+                onclick="shareProduct()"
+            >
+                ↗
+            </button>
+
+        </div>
+
+
+        <div class="product-info">
+
+            <div class="counter">
+
+                ${index + 1}
+                /
+                ${feed.length}
+
+            </div>
+
+
+            <div class="brand">
+
+                ${escapeHTML(brand)}
+
+            </div>
+
+
+            <div class="title">
+
+                ${escapeHTML(title)}
+
+            </div>
+
+
+            <div class="meta">
+
+                <div class="price">
+
+                    ${escapeHTML(
+                        String(price)
+                    )}
+
+                </div>
+
+
+                ${
+                    rating
+                        ? `
+                            <div class="rating">
+                                ${escapeHTML(rating)}
+                            </div>
+                          `
+                        : ""
+                }
+
+            </div>
+
+
+            <button
+                class="open-button"
+                onclick="openProduct('${escapeAttribute(link)}')"
+            >
+
+                Посмотреть товар
+
+            </button>
+
+        </div>
+
     `;
+
+
+    addSwipeEvents();
+
 }
 
+
+/* =========================
+   NEXT
+   ========================= */
 
 function next() {
 
-    if (!feed.length || isAnimating) {
+    if (!feed.length) {
         return;
     }
 
-    if (index >= feed.length - 1) {
-        index = 0;
-    } else {
+    if (index < feed.length - 1) {
+
         index++;
+
+    } else {
+
+        index = 0;
+
     }
 
-    render("next");
+    animateCard("next");
+
 }
 
+
+/* =========================
+   PREVIOUS
+   ========================= */
 
 function prev() {
 
-    if (!feed.length || isAnimating) {
+    if (!feed.length) {
         return;
     }
 
-    if (index <= 0) {
-        index = feed.length - 1;
-    } else {
+    if (index > 0) {
+
         index--;
+
+    } else {
+
+        index = feed.length - 1;
+
     }
 
-    render("prev");
-}
+    animateCard("prev");
 
-
-function escapeHTML(text) {
-
-    return String(text)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
 }
 
 
 /* =========================
-   КНОПКИ
-========================= */
+   CARD ANIMATION
+   ========================= */
 
-document.addEventListener("click", function(event) {
+function animateCard(direction) {
 
-    const nextButton =
-        event.target.closest(".btn-next");
+    const card =
+        document.getElementById("card");
 
-    const prevButton =
-        event.target.closest(".btn-prev");
+    card.style.opacity = "0";
 
-    if (nextButton) {
-        next();
-    }
-
-    if (prevButton) {
-        prev();
-    }
-
-});
+    card.style.transform =
+        direction === "next"
+            ? "translateY(35px) scale(.97)"
+            : "translateY(-35px) scale(.97)";
 
 
-/* =========================
-   КЛАВИАТУРА
-========================= */
+    setTimeout(() => {
 
-document.addEventListener("keydown", function(event) {
+        render();
 
-    if (event.key === "ArrowDown" ||
-        event.key === "ArrowRight") {
+        requestAnimationFrame(() => {
 
-        next();
-    }
+            card.style.opacity = "1";
 
-    if (event.key === "ArrowUp" ||
-        event.key === "ArrowLeft") {
+            card.style.transform =
+                "translateY(0) scale(1)";
 
-        prev();
-    }
+        });
 
-});
+    }, 180);
+
+}
 
 
 /* =========================
-   СВАЙП
-========================= */
+   FAVORITES
+   ========================= */
 
-let touchStartY = 0;
-let touchStartX = 0;
+function toggleFavorite() {
 
-document.addEventListener(
-    "touchstart",
-    function(event) {
+    if (!feed.length) {
+        return;
+    }
 
-        const touch = event.changedTouches[0];
+    const item =
+        feed[index];
 
-        touchStartY = touch.clientY;
-        touchStartX = touch.clientX;
-
-    },
-    { passive: true }
-);
+    const id =
+        item.id ??
+        index;
 
 
-document.addEventListener(
-    "touchend",
-    function(event) {
-
-        const touch = event.changedTouches[0];
-
-        const deltaY =
-            touchStartY - touch.clientY;
-
-        const deltaX =
-            touchStartX - touch.clientX;
+    const position =
+        favorites.indexOf(id);
 
 
-        /*
-         * Вертикальный свайп должен
-         * быть сильнее горизонтального.
-         */
+    if (position === -1) {
 
-        if (
-            Math.abs(deltaY) > 50 &&
-            Math.abs(deltaY) > Math.abs(deltaX)
-        ) {
+        favorites.push(id);
 
-            if (deltaY > 0) {
-                next();
-            } else {
-                prev();
-            }
+        showToast(
+            "❤️ Добавлено в избранное"
+        );
+
+    } else {
+
+        favorites.splice(
+            position,
+            1
+        );
+
+        showToast(
+            "Удалено из избранного"
+        );
+
+    }
+
+
+    localStorage.setItem(
+        "favorites",
+        JSON.stringify(favorites)
+    );
+
+
+    render();
+
+}
+
+
+/* =========================
+   SHARE
+   ========================= */
+
+async function shareProduct() {
+
+    if (!feed.length) {
+        return;
+    }
+
+    const item =
+        feed[index];
+
+    const title =
+        item.name ||
+        item.title ||
+        "Товар";
+
+
+    const link =
+        item.link ||
+        window.location.href;
+
+
+    if (
+        navigator.share
+    ) {
+
+        try {
+
+            await navigator.share({
+                title: title,
+                url: link
+            });
+
+        } catch (error) {
+
+            // пользователь закрыл окно
+
         }
 
-    },
-    { passive: true }
+    } else {
+
+        try {
+
+            await navigator.clipboard.writeText(
+                link
+            );
+
+            showToast(
+                "🔗 Ссылка скопирована"
+            );
+
+        } catch (error) {
+
+            showToast(
+                "Ссылку не удалось скопировать"
+            );
+
+        }
+
+    }
+
+}
+
+
+/* =========================
+   OPEN PRODUCT
+   ========================= */
+
+function openProduct(link) {
+
+    if (
+        !link ||
+        link === "#"
+    ) {
+
+        showToast(
+            "Ссылка на товар отсутствует"
+        );
+
+        return;
+
+    }
+
+
+    window.open(
+        link,
+        "_blank"
+    );
+
+}
+
+
+/* =========================
+   NAVIGATION
+   ========================= */
+
+function switchTab(
+    button,
+    tab
+) {
+
+    document
+        .querySelectorAll(".nav-item")
+        .forEach(item => {
+
+            item.classList.remove(
+                "active"
+            );
+
+        });
+
+
+    button.classList.add(
+        "active"
+    );
+
+
+    if (tab === "feed") {
+
+        showToast(
+            "🏠 Лента"
+        );
+
+        return;
+
+    }
+
+
+    if (tab === "favorites") {
+
+        showToast(
+            `❤️ Избранное: ${favorites.length}`
+        );
+
+        return;
+
+    }
+
+
+    if (tab === "cart") {
+
+        showToast(
+            "🛒 Корзина пока пустая"
+        );
+
+        return;
+
+    }
+
+
+    if (tab === "profile") {
+
+        showToast(
+            "👤 Профиль скоро будет доступен"
+        );
+
+    }
+
+}
+
+
+/* =========================
+   TOAST
+   ========================= */
+
+let toastTimer = null;
+
+
+function showToast(
+    text
+) {
+
+    const toast =
+        document.getElementById(
+            "toast"
+        );
+
+
+    toast.textContent =
+        text;
+
+
+    toast.classList.add(
+        "show"
+    );
+
+
+    clearTimeout(
+        toastTimer
+    );
+
+
+    toastTimer =
+        setTimeout(() => {
+
+            toast.classList.remove(
+                "show"
+            );
+
+        }, 1800);
+
+}
+
+
+/* =========================
+   SWIPE
+   ========================= */
+
+function addSwipeEvents() {
+
+    const card =
+        document.getElementById(
+            "card"
+        );
+
+
+    card.ontouchstart =
+        function(event) {
+
+            const touch =
+                event.changedTouches[0];
+
+            startY =
+                touch.clientY;
+
+            startX =
+                touch.clientX;
+
+        };
+
+
+    card.ontouchend =
+        function(event) {
+
+            const touch =
+                event.changedTouches[0];
+
+            const diffY =
+                touch.clientY - startY;
+
+            const diffX =
+                touch.clientX - startX;
+
+
+            // горизонтальный свайп
+            if (
+                Math.abs(diffX) >
+                Math.abs(diffY)
+            ) {
+
+                return;
+
+            }
+
+
+            if (
+                Math.abs(diffY) < 50
+            ) {
+
+                return;
+
+            }
+
+
+            if (
+                diffY < 0
+            ) {
+
+                next();
+
+            } else {
+
+                prev();
+
+            }
+
+        };
+
+}
+
+
+/* =========================
+   KEYBOARD
+   ========================= */
+
+document.addEventListener(
+    "keydown",
+    function(event) {
+
+        if (
+            event.key ===
+            "ArrowDown"
+        ) {
+
+            next();
+
+        }
+
+
+        if (
+            event.key ===
+            "ArrowUp"
+        ) {
+
+            prev();
+
+        }
+
+    }
 );
 
 
 /* =========================
-   ЗАПУСК
-========================= */
+   HELPERS
+   ========================= */
+
+function escapeHTML(
+    value
+) {
+
+    return String(value)
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+        .replace(
+            /</g,
+            "&lt;"
+        )
+        .replace(
+            />/g,
+            "&gt;"
+        )
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+        .replace(
+            /'/g,
+            "&#039;"
+        );
+
+}
+
+
+function escapeAttribute(
+    value
+) {
+
+    return String(value)
+        .replace(
+            /\\/g,
+            "\\\\"
+        )
+        .replace(
+            /'/g,
+            "\\'"
+        );
+
+}
+
+
+/* =========================
+   START
+   ========================= */
 
 loadFeed();
+```
