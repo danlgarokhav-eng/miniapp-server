@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="ru">
 
@@ -10,13 +11,7 @@
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     >
 
-    <meta
-        name="theme-color"
-        content="#000000"
-    >
-
-    <title>Clothing Feed</title>
-
+    <title>StyleFlow</title>
 
     <style>
 
@@ -25,416 +20,637 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-
         html,
         body {
-
             margin: 0;
             padding: 0;
-
             width: 100%;
             height: 100%;
-
-            background: #000;
-
-            color: #fff;
-
+            overflow: hidden;
             font-family:
-                system-ui,
+                Inter,
                 -apple-system,
                 BlinkMacSystemFont,
                 "Segoe UI",
                 sans-serif;
-
-            overflow: hidden;
+            background: #07070a;
+            color: white;
         }
-
 
         body {
-
-            display: flex;
-
-            justify-content: center;
-            align-items: center;
-        }
-
-
-        #card {
-
-            width: 100%;
-            height: 100%;
-
             position: relative;
-
-            overflow: hidden;
         }
 
 
-        .product-card {
+        /* =========================
+           ANIMATED BACKGROUND
+           ========================= */
 
+        .background {
+            position: fixed;
+            inset: 0;
+            overflow: hidden;
+            z-index: 0;
+            background:
+                radial-gradient(
+                    circle at 50% 20%,
+                    #19142e 0%,
+                    #09090d 45%,
+                    #050507 100%
+                );
+        }
+
+        .blob {
+            position: absolute;
+            width: 280px;
+            height: 280px;
+            border-radius: 50%;
+            filter: blur(70px);
+            opacity: 0.45;
+            animation: float 12s ease-in-out infinite;
+        }
+
+        .blob.one {
+            background: #743cff;
+            top: -80px;
+            left: -90px;
+        }
+
+        .blob.two {
+            background: #ff287d;
+            right: -100px;
+            top: 25%;
+            animation-delay: -4s;
+        }
+
+        .blob.three {
+            background: #00b8ff;
+            left: 20%;
+            bottom: -150px;
+            animation-delay: -8s;
+        }
+
+        @keyframes float {
+
+            0% {
+                transform: translate3d(0, 0, 0) scale(1);
+            }
+
+            33% {
+                transform: translate3d(35px, -30px, 0) scale(1.12);
+            }
+
+            66% {
+                transform: translate3d(-25px, 35px, 0) scale(0.92);
+            }
+
+            100% {
+                transform: translate3d(0, 0, 0) scale(1);
+            }
+
+        }
+
+
+        /* =========================
+           APP
+           ========================= */
+
+        .app {
+            position: relative;
+            z-index: 2;
             width: 100%;
             height: 100%;
-
             display: flex;
-
             flex-direction: column;
-
-            justify-content: center;
-
-            position: relative;
-
-            padding: 15px 15px 90px;
-
-            animation-duration: 0.25s;
-            animation-timing-function: ease-out;
-            animation-fill-mode: both;
         }
 
 
-        .animate-next {
+        /* =========================
+           TOP BAR
+           ========================= */
 
-            animation-name: slideNext;
+        .topbar {
+            height: 70px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 18px;
         }
 
-
-        .animate-prev {
-
-            animation-name: slidePrev;
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            font-weight: 800;
+            font-size: 19px;
+            letter-spacing: -0.5px;
         }
 
-
-        @keyframes slideNext {
-
-            from {
-                opacity: 0;
-                transform: translateY(40px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-
-        @keyframes slidePrev {
-
-            from {
-                opacity: 0;
-                transform: translateY(-40px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-
-        .product-image {
-
-            width: 100%;
-
-            max-width: 520px;
-
-            height: min(
-                68vh,
-                700px
-            );
-
-            margin: 0 auto;
-
-            position: relative;
+        .logo-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 12px;
 
             display: flex;
+            align-items: center;
+            justify-content: center;
 
+            background:
+                linear-gradient(
+                    135deg,
+                    #8b5cff,
+                    #ff3d9a
+                );
+
+            box-shadow:
+                0 8px 30px rgba(139, 92, 255, 0.35);
+
+            font-size: 17px;
+        }
+
+        .top-button {
+            width: 40px;
+            height: 40px;
+            border-radius: 14px;
+
+            border: 1px solid rgba(255,255,255,0.08);
+
+            background:
+                rgba(255,255,255,0.07);
+
+            backdrop-filter: blur(15px);
+
+            color: white;
+            font-size: 17px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+
+        /* =========================
+           FEED
+           ========================= */
+
+        .feed-wrapper {
+            flex: 1;
+            min-height: 0;
+
+            display: flex;
             justify-content: center;
             align-items: center;
 
-            background: #111;
+            padding:
+                5px
+                14px
+                14px;
+        }
 
-            border-radius: 22px;
+        .card {
+            position: relative;
+
+            width: 100%;
+            max-width: 460px;
+
+            height: 100%;
+
+            border-radius: 28px;
 
             overflow: hidden;
+
+            background:
+                rgba(255,255,255,0.065);
+
+            border:
+                1px solid rgba(255,255,255,0.11);
+
+            box-shadow:
+                0 30px 80px rgba(0,0,0,0.45);
+
+            backdrop-filter: blur(20px);
+
+            transition:
+                transform 0.35s ease,
+                opacity 0.35s ease;
         }
 
 
-        .product-image img {
+        /* =========================
+           MEDIA
+           ========================= */
 
+        .media {
+            position: absolute;
+            inset: 0;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            background:
+                linear-gradient(
+                    180deg,
+                    rgba(255,255,255,0.03),
+                    rgba(0,0,0,0.35)
+                );
+        }
+
+        .media img,
+        .media video {
             width: 100%;
             height: 100%;
 
             object-fit: contain;
 
-            display: block;
+            background: rgba(0,0,0,0.12);
+        }
+
+        .media img {
+            transition: transform 0.5s ease;
+        }
+
+        .card:hover .media img {
+            transform: scale(1.025);
         }
 
 
-        .image-error {
+        /* =========================
+           DARK GRADIENT OVER IMAGE
+           ========================= */
 
-            background: #151515;
-        }
-
-
-        .no-image {
-
-            font-size: 70px;
-
-            opacity: 0.5;
-        }
-
-
-        .counter {
-
+        .image-gradient {
             position: absolute;
+            inset: 0;
 
-            top: 14px;
-            right: 14px;
+            background:
+                linear-gradient(
+                    to bottom,
+                    rgba(0,0,0,0.15) 0%,
+                    transparent 35%,
+                    rgba(0,0,0,0.2) 50%,
+                    rgba(0,0,0,0.9) 100%
+                );
 
-            padding: 7px 11px;
-
-            border-radius: 20px;
-
-            background: rgba(
-                0,
-                0,
-                0,
-                0.65
-            );
-
-            backdrop-filter: blur(10px);
-
-            font-size: 13px;
-
-            color: #fff;
+            pointer-events: none;
         }
 
+
+        /* =========================
+           CARD INFO
+           ========================= */
 
         .product-info {
+            position: absolute;
+            left: 18px;
+            right: 18px;
+            bottom: 20px;
 
-            width: 100%;
-
-            max-width: 520px;
-
-            margin: 14px auto 0;
-
-            padding: 0 5px;
+            z-index: 5;
         }
 
+        .counter {
+            display: inline-flex;
 
-        .product-brand {
+            padding: 7px 10px;
 
-            color: #aaa;
+            border-radius: 12px;
 
-            font-size: 14px;
+            background:
+                rgba(0,0,0,0.38);
 
-            margin-bottom: 4px;
+            border:
+                1px solid rgba(255,255,255,0.1);
+
+            backdrop-filter: blur(12px);
+
+            font-size: 12px;
+            color: rgba(255,255,255,0.75);
+
+            margin-bottom: 10px;
         }
 
-
-        .product-title {
-
-            font-size: 20px;
-
-            line-height: 1.25;
-
-            font-weight: 650;
-
-            display: -webkit-box;
-
-            -webkit-line-clamp: 2;
-
-            -webkit-box-orient: vertical;
-
-            overflow: hidden;
-        }
-
-
-        .product-bottom {
-
-            display: flex;
-
-            justify-content: space-between;
-
-            align-items: center;
-
-            gap: 12px;
-
-            margin-top: 10px;
-        }
-
-
-        .product-price {
-
-            font-size: 22px;
-
-            font-weight: 750;
-        }
-
-
-        .product-rating {
-
-            margin-top: 3px;
-
+        .brand {
             font-size: 13px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.62);
 
-            color: #ccc;
+            margin-bottom: 5px;
         }
 
+        .title {
+            font-size: 24px;
+            line-height: 1.08;
+            font-weight: 800;
+            letter-spacing: -0.7px;
+
+            margin-bottom: 9px;
+
+            max-width: 90%;
+        }
+
+        .meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+
+            margin-bottom: 14px;
+        }
+
+        .price {
+            font-size: 22px;
+            font-weight: 800;
+        }
+
+        .rating {
+            padding: 6px 9px;
+            border-radius: 10px;
+
+            background:
+                rgba(255,255,255,0.1);
+
+            font-size: 12px;
+        }
+
+
+        /* =========================
+           OPEN BUTTON
+           ========================= */
 
         .open-button {
+            width: 100%;
+            height: 48px;
 
-            flex-shrink: 0;
+            border: 0;
+            border-radius: 16px;
 
-            text-decoration: none;
+            background:
+                linear-gradient(
+                    135deg,
+                    #8b5cff,
+                    #ff3d9a
+                );
 
-            color: #000;
+            color: white;
 
-            background: #fff;
+            font-size: 15px;
+            font-weight: 800;
 
-            padding: 11px 17px;
-
-            border-radius: 999px;
-
-            font-size: 14px;
-
-            font-weight: 650;
+            box-shadow:
+                0 12px 30px rgba(139,92,255,0.28);
 
             transition:
-                transform 0.15s,
-                opacity 0.15s;
+                transform 0.15s ease,
+                filter 0.15s ease;
         }
-
 
         .open-button:active {
-
-            transform: scale(0.94);
-
-            opacity: 0.8;
+            transform: scale(0.97);
+            filter: brightness(0.9);
         }
 
 
-        .controls {
+        /* =========================
+           SIDE ACTIONS
+           ========================= */
 
-            position: fixed;
+        .side-actions {
+            position: absolute;
 
-            right: 15px;
+            right: 12px;
+            bottom: 155px;
 
-            bottom: 25px;
-
-            z-index: 20;
+            z-index: 10;
 
             display: flex;
-
             flex-direction: column;
-
             gap: 10px;
         }
 
+        .action-button {
+            width: 45px;
+            height: 45px;
 
-        .controls button {
+            border-radius: 15px;
 
-            width: 48px;
-            height: 48px;
+            border:
+                1px solid rgba(255,255,255,0.1);
 
-            border: none;
+            background:
+                rgba(10,10,15,0.48);
 
-            border-radius: 50%;
+            backdrop-filter: blur(15px);
 
-            background: rgba(
-                35,
-                35,
-                35,
-                0.85
-            );
+            color: white;
 
-            color: #fff;
-
-            font-size: 22px;
-
-            cursor: pointer;
-
-            backdrop-filter: blur(10px);
-
-            transition:
-                transform 0.15s,
-                background 0.15s;
-        }
-
-
-        .controls button:active {
-
-            transform: scale(0.9);
-
-            background: #333;
-        }
-
-
-        .empty {
-
-            width: 100%;
-            height: 100%;
+            font-size: 18px;
 
             display: flex;
-
-            flex-direction: column;
-
             align-items: center;
             justify-content: center;
 
-            text-align: center;
+            transition:
+                transform 0.15s ease,
+                background 0.15s ease;
+        }
 
-            padding: 30px;
+        .action-button:active {
+            transform: scale(0.9);
         }
 
 
-        .empty-icon {
+        /* =========================
+           BOTTOM NAVIGATION
+           ========================= */
 
-            font-size: 60px;
+        .bottom-nav {
+            flex-shrink: 0;
 
-            margin-bottom: 20px;
+            height: 76px;
+
+            margin:
+                0 12px
+                12px;
+
+            padding:
+                7px 8px;
+
+            border-radius: 22px;
+
+            display: grid;
+            grid-template-columns:
+                repeat(4, 1fr);
+
+            background:
+                rgba(18,18,24,0.72);
+
+            border:
+                1px solid rgba(255,255,255,0.09);
+
+            backdrop-filter:
+                blur(25px);
+
+            box-shadow:
+                0 20px 50px rgba(0,0,0,0.35);
+        }
+
+        .nav-item {
+            border: 0;
+            background: transparent;
+
+            color:
+                rgba(255,255,255,0.48);
+
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+
+            gap: 4px;
+
+            border-radius: 17px;
+
+            font-size: 11px;
+
+            transition:
+                background 0.2s ease,
+                color 0.2s ease;
+        }
+
+        .nav-icon {
+            font-size: 19px;
+            line-height: 1;
+        }
+
+        .nav-item.active {
+            color: white;
+
+            background:
+                rgba(255,255,255,0.08);
         }
 
 
-        .empty-title {
+        /* =========================
+           EMPTY / LOADING
+           ========================= */
 
-            font-size: 22px;
+        .loading {
+            position: absolute;
+            inset: 0;
 
-            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
 
-            margin-bottom: 8px;
+            flex-direction: column;
+            gap: 12px;
+
+            background:
+                rgba(5,5,8,0.5);
+
+            backdrop-filter: blur(10px);
+
+            z-index: 20;
+
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+        }
+
+        .spinner {
+            width: 28px;
+            height: 28px;
+
+            border:
+                3px solid rgba(255,255,255,0.15);
+
+            border-top-color: white;
+
+            border-radius: 50%;
+
+            animation:
+                spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
         }
 
 
-        .empty-text {
+        /* =========================
+           TOAST
+           ========================= */
 
-            color: #999;
+        .toast {
+            position: fixed;
 
-            font-size: 15px;
+            left: 50%;
+            bottom: 98px;
 
-            line-height: 1.4;
+            transform:
+                translateX(-50%)
+                translateY(20px);
+
+            z-index: 100;
+
+            padding:
+                11px 16px;
+
+            border-radius: 14px;
+
+            background:
+                rgba(20,20,25,0.9);
+
+            border:
+                1px solid rgba(255,255,255,0.1);
+
+            backdrop-filter: blur(15px);
+
+            font-size: 13px;
+
+            opacity: 0;
+
+            pointer-events: none;
+
+            transition:
+                opacity 0.25s ease,
+                transform 0.25s ease;
+
+            white-space: nowrap;
         }
 
+        .toast.show {
+            opacity: 1;
+
+            transform:
+                translateX(-50%)
+                translateY(0);
+        }
+
+
+        /* =========================
+           DESKTOP
+           ========================= */
 
         @media (min-width: 700px) {
 
-            .product-card {
-
-                padding-bottom: 40px;
+            .feed-wrapper {
+                padding-bottom: 18px;
             }
 
-            .product-image {
-
-                height: 65vh;
+            .card {
+                max-width: 430px;
             }
 
-            .controls {
-
-                right: 30px;
-                bottom: 40px;
+            .bottom-nav {
+                max-width: 430px;
+                margin-left: auto;
+                margin-right: auto;
             }
+
         }
-
 
     </style>
 
@@ -444,44 +660,147 @@
 <body>
 
 
-    <div id="card">
+    <!-- =========================
+         BACKGROUND
+         ========================= -->
 
-        <div class="empty">
+    <div class="background">
 
-            <div class="empty-icon">
-                🛍️
-            </div>
-
-            <div class="empty-title">
-                Загрузка товаров...
-            </div>
-
-        </div>
+        <div class="blob one"></div>
+        <div class="blob two"></div>
+        <div class="blob three"></div>
 
     </div>
 
 
-    <div class="controls">
+    <!-- =========================
+         APP
+         ========================= -->
 
-        <button
-            class="btn-prev"
-            aria-label="Предыдущий товар"
-        >
-            ↑
-        </button>
+    <div class="app">
 
-        <button
-            class="btn-next"
-            aria-label="Следующий товар"
-        >
-            ↓
-        </button>
+
+        <!-- TOP BAR -->
+
+        <header class="topbar">
+
+            <div class="logo">
+
+                <div class="logo-icon">
+                    ✦
+                </div>
+
+                StyleFlow
+
+            </div>
+
+            <button
+                class="top-button"
+                onclick="showToast('Поиск скоро будет доступен')"
+            >
+                🔍
+            </button>
+
+        </header>
+
+
+        <!-- FEED -->
+
+        <main class="feed-wrapper">
+
+            <div
+                id="card"
+                class="card"
+            >
+
+                <div class="loading">
+
+                    <div class="spinner"></div>
+
+                    Загрузка товаров...
+
+                </div>
+
+            </div>
+
+        </main>
+
+
+        <!-- BOTTOM NAV -->
+
+        <nav class="bottom-nav">
+
+            <button
+                class="nav-item active"
+                onclick="switchTab(this, 'feed')"
+            >
+
+                <span class="nav-icon">
+                    🏠
+                </span>
+
+                Лента
+
+            </button>
+
+
+            <button
+                class="nav-item"
+                onclick="switchTab(this, 'favorites')"
+            >
+
+                <span class="nav-icon">
+                    ❤️
+                </span>
+
+                Избранное
+
+            </button>
+
+
+            <button
+                class="nav-item"
+                onclick="switchTab(this, 'cart')"
+            >
+
+                <span class="nav-icon">
+                    🛒
+                </span>
+
+                Корзина
+
+            </button>
+
+
+            <button
+                class="nav-item"
+                onclick="switchTab(this, 'profile')"
+            >
+
+                <span class="nav-icon">
+                    👤
+                </span>
+
+                Профиль
+
+            </button>
+
+        </nav>
 
     </div>
 
 
-    <script src="script.js"></script>
+    <!-- TOAST -->
+
+    <div
+        id="toast"
+        class="toast"
+    ></div>
+
+
+    <script src="/script.js"></script>
 
 </body>
 
 </html>
+```
