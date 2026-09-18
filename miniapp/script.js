@@ -474,10 +474,12 @@ function buildPersonalizedFeed() {
         return;
     }
 
+
     const viewedSet =
         new Set(
             viewedProducts.map(String)
         );
+
 
     const unviewed =
         allProducts.filter(
@@ -486,6 +488,7 @@ function buildPersonalizedFeed() {
                     String(product.id)
                 )
         );
+
 
     console.log(
         "[StyleFlow] Всего товаров:",
@@ -507,28 +510,35 @@ function buildPersonalizedFeed() {
     Если остались непросмотренные товары —
     используем только их.
 
-    Если пользователь просмотрел абсолютно всё,
+    Если пользователь просмотрел абсолютно всё —
     начинаем новый круг.
     */
 
     let candidates;
 
+
     if (unviewed.length > 0) {
-        candidates = unviewed;
+
+        candidates =
+            unviewed;
+
     } else {
 
         console.log(
             "[StyleFlow] Все товары просмотрены. Начинаем новый круг."
         );
 
-        candidates = [...allProducts];
+
+        candidates =
+            [...allProducts];
+
 
         /*
-        Очищаем историю просмотров,
-        чтобы лента снова была доступна.
+        Начинаем новый круг.
         */
 
         viewedProducts = [];
+
 
         saveJSON(
             "styleflow_viewed",
@@ -546,7 +556,7 @@ function buildPersonalizedFeed() {
 
 
     /*
-    Если пользователь новый,
+    Если пользователь новый —
     просто перемешиваем товары.
 
     Если уже есть история —
@@ -555,6 +565,7 @@ function buildPersonalizedFeed() {
 
     const hasProfile =
         profile.totalSignals > 0;
+
 
     if (!hasProfile) {
 
@@ -575,6 +586,7 @@ function buildPersonalizedFeed() {
         candidates
             .map(product => ({
                 product,
+
                 score:
                     calculateRecommendationScore(
                         product,
@@ -867,6 +879,7 @@ function calculateRecommendationScore(
                 profile.prices
             );
 
+
         if (
             averagePrice > 0
         ) {
@@ -877,9 +890,11 @@ function calculateRecommendationScore(
                     averagePrice
                 );
 
+
             const percentage =
                 difference /
                 averagePrice;
+
 
             /*
             Чем ближе цена к привычному
@@ -888,10 +903,15 @@ function calculateRecommendationScore(
             */
 
             if (percentage <= 0.10) {
+
                 score += 12;
+
             } else if (percentage <= 0.25) {
+
                 score += 7;
+
             } else if (percentage <= 0.50) {
+
                 score += 3;
             }
         }
@@ -901,8 +921,8 @@ function calculateRecommendationScore(
     /*
     Небольшой случайный фактор.
 
-    Он нужен, чтобы лента не была
-    абсолютно одинаковой каждый раз.
+    Он нужен, чтобы товары с одинаковым
+    score не шли всегда в одном порядке.
     */
 
     score +=
@@ -927,6 +947,7 @@ function getWeightedAveragePrice(
     let weight =
         0;
 
+
     prices.forEach(
         item => {
 
@@ -939,9 +960,11 @@ function getWeightedAveragePrice(
         }
     );
 
+
     if (!weight) {
         return 0;
     }
+
 
     return total / weight;
 }
@@ -966,9 +989,11 @@ function findProductById(id) {
     const target =
         String(id);
 
+
     return allProducts.find(
         product =>
-            String(product.id) === target
+            String(product.id) ===
+            target
     );
 }
 
@@ -977,6 +1002,7 @@ function shuffleArray(array) {
 
     const result =
         [...array];
+
 
     for (
         let i = result.length - 1;
@@ -990,6 +1016,7 @@ function shuffleArray(array) {
                 (i + 1)
             );
 
+
         [
             result[i],
             result[j]
@@ -1000,7 +1027,98 @@ function shuffleArray(array) {
         ];
     }
 
+
     return result;
+}
+
+
+/* =========================================================
+VIEWED HELPERS
+========================================================= */
+
+function isProductViewed(
+    product
+) {
+
+    if (!product) {
+        return false;
+    }
+
+
+    const id =
+        String(product.id);
+
+
+    return viewedProducts.some(
+        viewedId =>
+            String(viewedId) === id
+    );
+}
+
+
+function findNextUnviewedIndex(
+    startIndex,
+    direction
+) {
+
+    if (!products.length) {
+        return -1;
+    }
+
+
+    /*
+    Ищем следующий товар,
+    который ещё не просмотрен.
+
+    direction:
+    +1 = вперёд
+    -1 = назад
+    */
+
+    for (
+        let step = 1;
+        step <= products.length;
+        step++
+    ) {
+
+        let index =
+            startIndex +
+            direction *
+            step;
+
+
+        while (
+            index < 0
+        ) {
+            index +=
+                products.length;
+        }
+
+
+        while (
+            index >= products.length
+        ) {
+            index -=
+                products.length;
+        }
+
+
+        const product =
+            products[index];
+
+
+        if (
+            !isProductViewed(
+                product
+            )
+        ) {
+
+            return index;
+        }
+    }
+
+
+    return -1;
 }
 
 
@@ -1015,21 +1133,92 @@ function showProduct() {
         return;
     }
 
+
+    const productCard =
+        document.getElementById(
+            "productCard"
+        );
+
+    const feedEmpty =
+        document.getElementById(
+            "feedEmpty"
+        );
+
+
+    /*
+    Если до этого была пустая лента,
+    возвращаем карточку.
+    */
+
+    if (productCard) {
+        productCard.style.display =
+            "";
+    }
+
+
+    if (feedEmpty) {
+        feedEmpty.style.display =
+            "none";
+    }
+
+
     if (
         currentIndex < 0
     ) {
+
         currentIndex =
             products.length - 1;
     }
 
+
     if (
         currentIndex >= products.length
     ) {
+
         currentIndex = 0;
     }
 
+
     currentProduct =
         products[currentIndex];
+
+
+    /*
+    На всякий случай не показываем
+    уже просмотренный товар.
+    */
+
+    if (
+        isProductViewed(
+            currentProduct
+        )
+    ) {
+
+        const nextIndex =
+            findNextUnviewedIndex(
+                currentIndex,
+                1
+            );
+
+
+        if (
+            nextIndex === -1
+        ) {
+
+            showEmptyFeed();
+
+            return;
+        }
+
+
+        currentIndex =
+            nextIndex;
+
+
+        currentProduct =
+            products[currentIndex];
+    }
+
 
     const image =
         document.getElementById(
@@ -1078,17 +1267,21 @@ function showProduct() {
     image.alt =
         currentProduct.title;
 
+
     title.textContent =
         currentProduct.title;
+
 
     brand.textContent =
         currentProduct.brand ||
         "StyleFlow";
 
+
     source.textContent =
         sourceLabel(
             currentProduct.source
         );
+
 
     price.textContent =
         formatPrice(
@@ -1111,7 +1304,8 @@ function showProduct() {
 
     } else {
 
-        oldPrice.textContent = "";
+        oldPrice.textContent =
+            "";
     }
 
 
@@ -1137,9 +1331,16 @@ function showProduct() {
 
     updateLikeButton();
 
+
+    /*
+    Товар считается просмотренным,
+    когда реально показан пользователю.
+    */
+
     registerView(
         currentProduct
     );
+
 
     resetCardPosition();
 }
@@ -1151,13 +1352,29 @@ EMPTY FEED
 
 function showEmptyFeed() {
 
-    document.getElementById(
-        "productCard"
-    ).style.display = "none";
+    const productCard =
+        document.getElementById(
+            "productCard"
+        );
 
-    document.getElementById(
-        "feedEmpty"
-    ).style.display = "flex";
+    const feedEmpty =
+        document.getElementById(
+            "feedEmpty"
+        );
+
+
+    if (productCard) {
+
+        productCard.style.display =
+            "none";
+    }
+
+
+    if (feedEmpty) {
+
+        feedEmpty.style.display =
+            "flex";
+    }
 }
 
 
@@ -1168,6 +1385,7 @@ TABS
 function switchTab(tab) {
 
     currentTab = tab;
+
 
     const screens = {
 
@@ -1246,6 +1464,7 @@ function switchTab(tab) {
     if (
         tab === "favorites"
     ) {
+
         renderFavorites();
     }
 
@@ -1253,6 +1472,7 @@ function switchTab(tab) {
     if (
         tab === "profile"
     ) {
+
         updateProfile();
     }
 
@@ -1315,6 +1535,7 @@ function toggleLike() {
             1
         );
 
+
         showToast(
             "Удалено из избранного"
         );
@@ -1325,9 +1546,11 @@ function toggleLike() {
             currentProduct
         );
 
+
         showToast(
             "❤️ Добавлено в избранное"
         );
+
 
         showHeart();
     }
@@ -1350,11 +1573,16 @@ function toggleLike() {
 
     rebuildFeedAfterSignal();
 
+
     updateLikeButton();
 
     updateProfile();
 }
 
+
+/* =========================================================
+LIKE BUTTON
+========================================================= */
 
 function updateLikeButton() {
 
@@ -1363,9 +1591,16 @@ function updateLikeButton() {
             "likeButton"
         );
 
-    if (!currentProduct) {
+
+    if (!button || !currentProduct) {
         return;
     }
+
+
+    const icon =
+        button.querySelector(
+            ".action-icon"
+        );
 
 
     if (
@@ -1378,12 +1613,12 @@ function updateLikeButton() {
             "liked"
         );
 
-        button
-            .querySelector(
-                ".action-icon"
-            )
-            .textContent =
+
+        if (icon) {
+
+            icon.textContent =
                 "❤️";
+        }
 
     } else {
 
@@ -1391,12 +1626,12 @@ function updateLikeButton() {
             "liked"
         );
 
-        button
-            .querySelector(
-                ".action-icon"
-            )
-            .textContent =
+
+        if (icon) {
+
+            icon.textContent =
                 "♥";
+        }
     }
 }
 
@@ -1426,24 +1661,43 @@ function rebuildFeedAfterSignal() {
         currentId
     ) {
 
-        const index =
-            products.findIndex(
+        products =
+            products.filter(
                 product =>
-                    String(product.id) ===
+                    String(product.id) !==
                     currentId
             );
-
-        if (index >= 0) {
-
-            products.splice(
-                index,
-                1
-            );
-        }
     }
 
 
+    /*
+    После перестроения начинаем
+    с первого подходящего товара.
+    */
+
     currentIndex = 0;
+
+
+    /*
+    Если после перестроения товаров нет,
+    показываем пустую ленту.
+    */
+
+    if (!products.length) {
+
+        showEmptyFeed();
+
+        return;
+    }
+
+
+    /*
+    Важно:
+    текущую карточку не меняем мгновенно.
+    Пользователь сначала может открыть
+    товар/лайкнуть его, а следующая
+    карточка будет выбрана при свайпе.
+    */
 }
 
 
@@ -1487,6 +1741,7 @@ function renderFavorites() {
                 document.createElement(
                     "div"
                 );
+
 
             card.className =
                 "favorite-card";
@@ -1605,11 +1860,14 @@ function openProductFromObject(
         currentIndex =
             index;
 
+
         showProduct();
+
 
         switchTab(
             "feed"
         );
+
 
         return;
     }
@@ -1618,9 +1876,16 @@ function openProductFromObject(
     currentProduct =
         product;
 
+
+    registerView(
+        product
+    );
+
+
     renderSingleProductObject(
         product
     );
+
 
     switchTab(
         "feed"
@@ -1631,6 +1896,31 @@ function openProductFromObject(
 function renderSingleProductObject(
     product
 ) {
+
+    const productCard =
+        document.getElementById(
+            "productCard"
+        );
+
+    const feedEmpty =
+        document.getElementById(
+            "feedEmpty"
+        );
+
+
+    if (productCard) {
+
+        productCard.style.display =
+            "";
+    }
+
+
+    if (feedEmpty) {
+
+        feedEmpty.style.display =
+            "none";
+    }
+
 
     document.getElementById(
         "productImage"
@@ -1698,6 +1988,8 @@ function renderSingleProductObject(
 
 
     updateLikeButton();
+
+    resetCardPosition();
 }
 
 
@@ -1736,6 +2028,7 @@ async function shareCurrentProduct() {
             await navigator.clipboard.writeText(
                 currentProduct.url
             );
+
 
             showToast(
                 "🔗 Ссылка скопирована"
@@ -1848,6 +2141,11 @@ function setupSearch() {
         );
 
 
+    if (!input) {
+        return;
+    }
+
+
     input.addEventListener(
         "input",
         () => {
@@ -1893,6 +2191,7 @@ function setupSearch() {
             ) {
 
                 event.preventDefault();
+
 
                 performSearch(
                     input.value.trim()
@@ -2003,9 +2302,11 @@ function performSearch(
         home.style.display =
             "block";
 
+
         results.classList.remove(
             "active"
         );
+
 
         return;
     }
@@ -2013,6 +2314,7 @@ function performSearch(
 
     home.style.display =
         "none";
+
 
     results.classList.add(
         "active"
@@ -2106,6 +2408,7 @@ function performSearch(
 
         `;
 
+
         return;
     }
 
@@ -2117,6 +2420,7 @@ function performSearch(
                 document.createElement(
                     "div"
                 );
+
 
             card.className =
                 "result-card";
@@ -2204,27 +2508,39 @@ function updateProfile() {
         );
 
 
-    likedCount.textContent =
-        favorites.length;
+    if (likedCount) {
+
+        likedCount.textContent =
+            favorites.length;
+    }
 
 
-    viewedCount.textContent =
-        viewedProducts.length;
+    if (viewedCount) {
+
+        viewedCount.textContent =
+            viewedProducts.length;
+    }
 
 
-    openedCount.textContent =
-        openedProducts.length;
+    if (openedCount) {
+
+        openedCount.textContent =
+            openedProducts.length;
+    }
 
 
-    collectionCount.textContent =
-        `${favorites.length} ${
-            getRussianPlural(
-                favorites.length,
-                "товар",
-                "товара",
-                "товаров"
-            )
-        }`;
+    if (collectionCount) {
+
+        collectionCount.textContent =
+            `${favorites.length} ${
+                getRussianPlural(
+                    favorites.length,
+                    "товар",
+                    "товара",
+                    "товаров"
+                )
+            }`;
+    }
 
 
     renderRecentProducts();
@@ -2237,6 +2553,11 @@ function renderRecentProducts() {
         document.getElementById(
             "recentGrid"
         );
+
+
+    if (!grid) {
+        return;
+    }
 
 
     grid.innerHTML = "";
@@ -2268,6 +2589,7 @@ function renderRecentProducts() {
                 document.createElement(
                     "div"
                 );
+
 
             card.className =
                 "recent-card";
@@ -2390,9 +2712,16 @@ function registerView(
             "[StyleFlow] Просмотрен товар:",
             product.title
         );
+
+
+        updateProfile();
     }
 }
 
+
+/* =========================================================
+OPEN TRACKING
+========================================================= */
 
 function registerOpen(
     product
@@ -2454,6 +2783,11 @@ function setupSwipe() {
         );
 
 
+    if (!card) {
+        return;
+    }
+
+
     card.addEventListener(
         "touchstart",
         event => {
@@ -2500,6 +2834,7 @@ function setupSwipe() {
                 event.touches[0]
                     .clientY;
 
+
             const x =
                 event.touches[0]
                     .clientX;
@@ -2507,6 +2842,7 @@ function setupSwipe() {
 
             const deltaY =
                 y - touchStartY;
+
 
             const deltaX =
                 x - touchStartX;
@@ -2694,25 +3030,6 @@ NEXT / PREVIOUS
 function nextProduct() {
 
     if (!products.length) {
-        return;
-    }
-
-
-    currentIndex++;
-
-
-    if (
-        currentIndex >=
-        products.length
-    ) {
-
-        /*
-        Пользователь дошёл до конца
-        персональной пачки.
-
-        Строим новую пачку из
-        оставшихся товаров.
-        */
 
         buildPersonalizedFeed();
 
@@ -2720,15 +3037,125 @@ function nextProduct() {
 
 
         if (!products.length) {
+
             showEmptyFeed();
+
             return;
         }
+
+
+        showProduct();
+
+        return;
     }
 
 
-    animateCardChange(
-        "next"
+    /*
+    Ищем следующий непросмотренный товар.
+    */
+
+    const nextIndex =
+        findNextUnviewedIndex(
+            currentIndex,
+            1
+        );
+
+
+    if (
+        nextIndex >= 0
+    ) {
+
+        currentIndex =
+            nextIndex;
+
+
+        animateCardChange(
+            "next"
+        );
+
+
+        return;
+    }
+
+
+    /*
+    Все товары из текущего набора
+    уже просмотрены.
+
+    Проверяем, остались ли вообще
+    какие-либо товары, которые можно
+    показать.
+    */
+
+    const unviewed =
+        allProducts.filter(
+            product =>
+                !isProductViewed(
+                    product
+                )
+        );
+
+
+    if (unviewed.length > 0) {
+
+        buildPersonalizedFeed();
+
+        currentIndex = 0;
+
+
+        if (products.length > 0) {
+
+            animateCardChange(
+                "next"
+            );
+
+        } else {
+
+            showEmptyFeed();
+        }
+
+
+        return;
+    }
+
+
+    /*
+    Пользователь просмотрел абсолютно
+    все товары.
+
+    Начинаем новый круг.
+    */
+
+    console.log(
+        "[StyleFlow] Все товары просмотрены — новый круг"
     );
+
+
+    viewedProducts = [];
+
+
+    saveJSON(
+        "styleflow_viewed",
+        viewedProducts
+    );
+
+
+    buildPersonalizedFeed();
+
+
+    currentIndex = 0;
+
+
+    if (products.length > 0) {
+
+        animateCardChange(
+            "next"
+        );
+
+    } else {
+
+        showEmptyFeed();
+    }
 }
 
 
@@ -2739,16 +3166,37 @@ function previousProduct() {
     }
 
 
-    currentIndex--;
+    /*
+    Назад также ищет только
+    непросмотренный товар.
+
+    Это не позволяет пользователю
+    случайно вернуть уже просмотренную
+    карточку.
+    */
+
+    const previousIndex =
+        findNextUnviewedIndex(
+            currentIndex,
+            -1
+        );
 
 
     if (
-        currentIndex < 0
+        previousIndex < 0
     ) {
 
-        currentIndex =
-            products.length - 1;
+        showToast(
+            "Больше непросмотренных товаров нет"
+        );
+
+
+        return;
     }
+
+
+    currentIndex =
+        previousIndex;
 
 
     animateCardChange(
@@ -2769,6 +3217,11 @@ function animateCardChange(
         document.getElementById(
             "productCard"
         );
+
+
+    if (!card) {
+        return;
+    }
 
 
     card.style.opacity =
@@ -2793,6 +3246,7 @@ function animateCardChange(
                     card.style.opacity =
                         "1";
 
+
                     card.style.transform =
                         "";
                 }
@@ -2812,8 +3266,14 @@ function resetCardPosition() {
         );
 
 
+    if (!card) {
+        return;
+    }
+
+
     card.style.opacity =
         "1";
+
 
     card.style.transform =
         "";
@@ -2830,6 +3290,11 @@ function showHeart() {
         document.getElementById(
             "bigHeart"
         );
+
+
+    if (!heart) {
+        return;
+    }
 
 
     heart.classList.remove(
@@ -2862,6 +3327,11 @@ function showToast(
         document.getElementById(
             "toast"
         );
+
+
+    if (!toast) {
+        return;
+    }
 
 
     toast.textContent =
@@ -3036,6 +3506,7 @@ function getRussianPlural(
         n > 10 &&
         n < 20
     ) {
+
         return many;
     }
 
@@ -3043,6 +3514,7 @@ function getRussianPlural(
     if (
         n1 === 1
     ) {
+
         return one;
     }
 
@@ -3051,6 +3523,7 @@ function getRussianPlural(
         n1 >= 2 &&
         n1 <= 4
     ) {
+
         return few;
     }
 
