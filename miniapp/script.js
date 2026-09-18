@@ -2,15 +2,17 @@
 STYLEFLOW
 Personalized marketplace feed
 
-ЭТАП 2:
+ЭТАП 3:
 
 1. Новая лента сначала максимально случайная.
 2. Не показываем уже просмотренные товары.
-3. Постепенно собираем интересы пользователя.
-4. Персонализация усиливается по мере накопления сигналов.
-5. Даже персонализированная лента сохраняет случайные товары.
-6. Не допускаем длинных серий одной категории/площадки.
-7. Учитываем:
+3. История просмотров хранится на сервере.
+4. История привязана к Telegram user.id.
+5. Постепенно собираем интересы пользователя.
+6. Персонализация усиливается по мере накопления сигналов.
+7. Даже персонализированная лента сохраняет случайные товары.
+8. Не допускаем длинных серий одной категории/площадки.
+9. Учитываем:
     * категории
     * бренды
     * маркетплейсы
@@ -18,9 +20,10 @@ Personalized marketplace feed
     * лайки
     * открытия товаров
     * просмотры
-8. История сохраняется в localStorage.
 
-Product objects are normalized in one place.
+Локальный localStorage используется как кэш,
+а сервер является источником пользовательской истории.
+
 ========================================================= */
 
 
@@ -33,9 +36,20 @@ let products = [];
 let currentIndex = 0;
 let currentProduct = null;
 
-let favorites = loadJSON("styleflow_favorites", []);
-let viewedProducts = loadJSON("styleflow_viewed", []);
-let openedProducts = loadJSON("styleflow_opened", []);
+let favorites = loadJSON(
+    "styleflow_favorites",
+    []
+);
+
+let viewedProducts = loadJSON(
+    "styleflow_viewed",
+    []
+);
+
+let openedProducts = loadJSON(
+    "styleflow_opened",
+    []
+);
 
 let currentTab = "feed";
 
@@ -47,22 +61,17 @@ let searchTimer = null;
 
 
 /* =========================================================
-RECOMMENDATION SETTINGS
+SERVER USER HISTORY
 ========================================================= */
 
-/*
-Сколько пользователь должен совершить действий,
-чтобы персонализация начала заметно влиять.
+let telegramUserId = null;
 
-Важно:
-мы не включаем персонализацию резко.
+let userHistoryLoaded = false;
 
-Она постепенно усиливается:
-0 сигналов -> 0%
-10 сигналов -> небольшая
-20+ сигналов -> заметная
-50+ сигналов -> сильная
-*/
+
+/* =========================================================
+RECOMMENDATION SETTINGS
+========================================================= */
 
 const PERSONALIZATION_START =
     5;
@@ -71,25 +80,12 @@ const PERSONALIZATION_FULL =
     50;
 
 
-/*
-Часть ленты всегда остаётся случайной.
-
-Даже при сильной персонализации
-не хотим превращать StyleFlow
-в список одинаковых товаров.
-*/
-
 const MIN_RANDOM_RATIO =
     0.20;
 
 const MAX_RANDOM_RATIO =
     0.75;
 
-
-/*
-Максимальная длина серии одной категории
-или одного источника.
-*/
 
 const MAX_SAME_CATEGORY_STREAK =
     2;
@@ -102,7 +98,10 @@ const MAX_SAME_SOURCE_STREAK =
 TELEGRAM
 ========================================================= */
 
-if (window.Telegram && Telegram.WebApp) {
+if (
+    window.Telegram &&
+    Telegram.WebApp
+) {
 
     Telegram.WebApp.ready();
 
@@ -123,22 +122,416 @@ if (window.Telegram && Telegram.WebApp) {
 
 
 /* =========================================================
+GET TELEGRAM USER ID
+========================================================= */
+
+function getTelegramUserId() {
+
+    try {
+
+        if (
+            window.Telegram &&
+            Telegram.WebApp &&
+            Telegram.WebApp.initDataUnsafe &&
+            Telegram.WebApp.initDataUnsafe.user
+        ) {
+
+            return String(
+                Telegram.WebApp
+                    .initDataUnsafe
+                    .user
+                    .id
+            );
+        }
+
+    } catch (error) {
+
+        console.error(
+            "[StyleFlow] Ошибка получения Telegram user.id:",
+            error
+        );
+    }
+
+
+    return "";
+}
+
+
+/* =========================================================
 START
 ========================================================= */
 
 document.addEventListener(
     "DOMContentLoaded",
-    () => {
+    async () => {
 
         setupSearch();
 
         setupSwipe();
 
-        loadFeed();
+
+        /*
+        Получаем Telegram пользователя
+        до загрузки товаров.
+        */
+
+        telegramUserId =
+            getTelegramUserId();
+
+
+        console.log(
+            "[StyleFlow] Telegram user ID:",
+            telegramUserId || "не найден"
+        );
+
+
+        /*
+        Сначала загружаем историю.
+
+        Это очень важно.
+
+        Если сначала загрузить товары,
+        а историю получить позже,
+        пользователь может увидеть
+        уже просмотренный товар.
+        */
+
+        await loadUserHistory();
+
+
+        /*
+        Теперь загружаем каталог.
+        */
+
+        await loadFeed();
+
 
         updateProfile();
     }
 );
+
+
+/* =========================================================
+LOAD USER HISTORY
+========================================================= */
+
+async function loadUserHistory() {
+
+    /*
+    Если Mini App открыт не внутри Telegram
+    или Telegram user.id недоступен,
+    продолжаем работать на localStorage.
+    */
+
+    if (!telegramUserId) {
+
+        console.log(
+            "[StyleFlow] Telegram user.id не найден. Используем localStorage."
+        );
+
+
+        userHistoryLoaded = true;
+
+        return;
+    }
+
+
+    try {
+
+        const response =
+            await fetch(
+                `/api/user/history?user_id=${encodeURIComponent(
+                    telegramUserId
+                )}`,
+                {
+                    cache: "no-store"
+                }
+            );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                `History request failed: ${response.status}`
+            );
+        }
+
+
+        const data =
+            await response.json();
+
+
+        console.log(
+            "[StyleFlow] История сервера:",
+            data
+        );
+
+
+        if (
+            data &&
+            data.status === "ok"
+        ) {
+
+            /*
+            Объединяем серверную историю
+            с локальной.
+
+            Дубликаты удаляются.
+            */
+
+            viewedProducts =
+                mergeUniqueIds(
+                    viewedProducts,
+                    Array.isArray(
+                        data.viewed
+                    )
+                        ? data.viewed
+                        : []
+                );
+
+
+            openedProducts =
+                mergeIds(
+                    openedProducts,
+                    Array.isArray(
+                        data.opened
+                    )
+                        ? data.opened
+                        : []
+                );
+
+
+            /*
+            Ограничиваем локальный кэш.
+            */
+
+            if (
+                viewedProducts.length >
+                500
+            ) {
+
+                viewedProducts =
+                    viewedProducts.slice(
+                        -500
+                    );
+            }
+
+
+            if (
+                openedProducts.length >
+                500
+            ) {
+
+                openedProducts =
+                    openedProducts.slice(
+                        -500
+                    );
+            }
+
+
+            saveJSON(
+                "styleflow_viewed",
+                viewedProducts
+            );
+
+
+            saveJSON(
+                "styleflow_opened",
+                openedProducts
+            );
+
+
+            console.log(
+                "[StyleFlow] История объединена.",
+                "Viewed:",
+                viewedProducts.length,
+                "Opened:",
+                openedProducts.length
+            );
+        }
+
+
+        userHistoryLoaded = true;
+
+    } catch (error) {
+
+        console.error(
+            "[StyleFlow] Ошибка загрузки истории:",
+            error
+        );
+
+
+        /*
+        Даже если сервер истории временно
+        недоступен, приложение продолжает
+        работать через localStorage.
+        */
+
+        userHistoryLoaded = true;
+    }
+}
+
+
+/* =========================================================
+MERGE UNIQUE IDS
+========================================================= */
+
+function mergeUniqueIds(
+    existing,
+    incoming
+) {
+
+    const result = [];
+
+    const seen =
+        new Set();
+
+
+    [
+        ...(Array.isArray(existing)
+            ? existing
+            : []),
+
+        ...(Array.isArray(incoming)
+            ? incoming
+            : [])
+    ].forEach(
+        id => {
+
+            const normalized =
+                String(id);
+
+
+            if (
+                !seen.has(
+                    normalized
+                )
+            ) {
+
+                seen.add(
+                    normalized
+                );
+
+                result.push(
+                    normalized
+                );
+            }
+        }
+    );
+
+
+    return result;
+}
+
+
+/* =========================================================
+MERGE IDS
+========================================================= */
+
+function mergeIds(
+    existing,
+    incoming
+) {
+
+    const result = [];
+
+
+    [
+        ...(Array.isArray(existing)
+            ? existing
+            : []),
+
+        ...(Array.isArray(incoming)
+            ? incoming
+            : [])
+    ].forEach(
+        id => {
+
+            result.push(
+                String(id)
+            );
+        }
+    );
+
+
+    return result;
+}
+
+
+/* =========================================================
+SYNC USER ACTION
+========================================================= */
+
+async function syncUserAction(
+    action,
+    productId
+) {
+
+    if (
+        !telegramUserId ||
+        !productId
+    ) {
+
+        return;
+    }
+
+
+    let endpoint;
+
+
+    if (
+        action === "view"
+    ) {
+
+        endpoint =
+            "/api/user/view";
+
+    } else if (
+        action === "open"
+    ) {
+
+        endpoint =
+            "/api/user/open";
+
+    } else {
+
+        return;
+    }
+
+
+    try {
+
+        await fetch(
+            endpoint,
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+
+                body: JSON.stringify({
+
+                    user_id:
+                        telegramUserId,
+
+                    product_id:
+                        String(
+                            productId
+                        )
+                })
+            }
+        );
+
+    } catch (error) {
+
+        console.error(
+            `[StyleFlow] Ошибка синхронизации ${action}:`,
+            error
+        );
+    }
+}
 
 
 /* =========================================================
@@ -713,29 +1106,6 @@ function formatPrice(
 PERSONALIZED FEED
 ========================================================= */
 
-/*
-Главное изменение.
-
-Раньше здесь было:
-
-    score -> sort -> вся лента по score
-
-Из-за этого один запрос мог практически
-полностью заполнить верх ленты.
-
-Теперь:
-
-    1. убираем просмотренные
-    2. определяем силу профиля
-    3. строим score
-    4. перемешиваем товары
-    5. постепенно добавляем персонализацию
-    6. контролируем разнообразие
-
-В результате лента не превращается
-в "осень → осень → осень".
-*/
-
 function buildPersonalizedFeed() {
 
     if (
@@ -756,7 +1126,7 @@ function buildPersonalizedFeed() {
         );
 
 
-    let unviewed =
+    const unviewed =
         allProducts.filter(
             product =>
                 !viewedSet.has(
@@ -784,44 +1154,19 @@ function buildPersonalizedFeed() {
 
 
     /*
-    Если остались непросмотренные —
-    используем их.
+    ВАЖНО:
 
-    Если всё просмотрено —
-    начинаем новый круг.
+    Если товар уже просмотрен —
+    он больше не возвращается
+    автоматически.
+
+    Когда в базу добавятся новые товары,
+    они будут непросмотренными
+    и попадут в ленту.
     */
 
-    let candidates;
-
-
-    if (
-        unviewed.length > 0
-    ) {
-
-        candidates =
-            unviewed;
-
-    } else {
-
-        console.log(
-            "[StyleFlow] Все товары просмотрены. Начинаем новый круг."
-        );
-
-
-        candidates =
-            [
-                ...allProducts
-            ];
-
-
-        viewedProducts = [];
-
-
-        saveJSON(
-            "styleflow_viewed",
-            viewedProducts
-        );
-    }
+    const candidates =
+        unviewed;
 
 
     if (
@@ -830,30 +1175,19 @@ function buildPersonalizedFeed() {
 
         products = [];
 
+
+        console.log(
+            "[StyleFlow] Все доступные товары уже просмотрены."
+        );
+
+
         return;
     }
 
 
-    /*
-    Профиль пользователя.
-    */
-
     const profile =
         buildUserProfile();
 
-
-    /*
-    Сколько у нас накоплено сигналов.
-
-    0-5:
-        полностью случайно
-
-    5-50:
-        постепенное усиление
-
-    50+:
-        полноценная персонализация
-    */
 
     const personalization =
         getPersonalizationStrength(
@@ -867,26 +1201,11 @@ function buildPersonalizedFeed() {
     );
 
 
-    /*
-    Строим случайную базу.
-
-    Это важно:
-    даже если API вернул товары блоками,
-    здесь они перемешаются.
-    */
-
     const shuffled =
         shuffleArray(
             candidates
         );
 
-
-    /*
-    Новый пользователь.
-
-    Просто случайная лента,
-    но с контролем разнообразия.
-    */
 
     if (
         personalization <= 0
@@ -907,11 +1226,6 @@ function buildPersonalizedFeed() {
     }
 
 
-    /*
-    Для каждого товара рассчитываем
-    персональный score.
-    */
-
     const scored =
         candidates.map(
             product => ({
@@ -926,18 +1240,6 @@ function buildPersonalizedFeed() {
             })
         );
 
-
-    /*
-    Теперь не сортируем всё по score.
-
-    Вместо этого делаем взвешенный выбор.
-
-    Чем выше score —
-    тем выше шанс попасть раньше.
-
-    Но случайные товары всё равно
-    регулярно попадают в ленту.
-    */
 
     products =
         buildWeightedDiverseFeed(
@@ -1072,11 +1374,6 @@ function buildDiverseRandomFeed(
             );
 
 
-        /*
-        Если ограничения слишком строгие —
-        разрешаем любой оставшийся товар.
-        */
-
         if (
             !available.length
         ) {
@@ -1085,11 +1382,6 @@ function buildDiverseRandomFeed(
                 remaining;
         }
 
-
-        /*
-        Случайно выбираем один
-        из разрешённых товаров.
-        */
 
         const randomIndex =
             Math.floor(
@@ -1208,21 +1500,6 @@ function buildWeightedDiverseFeed(
         0;
 
 
-    /*
-    Чем меньше пользовательских данных,
-    тем больше случайности.
-
-    Например:
-
-    10% персонализации
-    90% случайности
-
-    ...
-
-    70% персонализации
-    30% случайности
-    */
-
     const randomRatio =
         MAX_RANDOM_RATIO -
         (
@@ -1235,11 +1512,6 @@ function buildWeightedDiverseFeed(
     while (
         remaining.length
     ) {
-
-        /*
-        Сначала отбрасываем товары,
-        которые нарушают разнообразие.
-        */
 
         let available =
             remaining.filter(
@@ -1294,16 +1566,6 @@ function buildWeightedDiverseFeed(
         }
 
 
-        /*
-        Решаем:
-
-        взять случайный товар
-
-        ИЛИ
-
-        взять рекомендованный.
-        */
-
         let selected;
 
 
@@ -1315,10 +1577,6 @@ function buildWeightedDiverseFeed(
         if (
             useRandom
         ) {
-
-            /*
-            Случайный товар.
-            */
 
             const randomIndex =
                 Math.floor(
@@ -1332,28 +1590,12 @@ function buildWeightedDiverseFeed(
 
         } else {
 
-            /*
-            Выбираем рекомендованный товар.
-
-            Не просто первый по score.
-            Используем weighted random.
-
-            Это предотвращает ситуацию,
-            когда один товар с высоким score
-            всегда стоит первым.
-            */
-
             selected =
                 weightedRandomScoreChoice(
                     available
                 );
         }
 
-
-        /*
-        Удаляем выбранный товар
-        из оставшихся.
-        */
 
         const originalIndex =
             remaining.indexOf(
@@ -1371,11 +1613,6 @@ function buildWeightedDiverseFeed(
             );
         }
 
-
-        /*
-        Обновляем ограничения
-        разнообразия.
-        */
 
         const category =
             normalizeText(
@@ -1449,11 +1686,6 @@ function weightedRandomScoreChoice(
     }
 
 
-    /*
-    Находим максимальный score,
-    чтобы нормализовать веса.
-    */
-
     let maxScore =
         0;
 
@@ -1472,11 +1704,6 @@ function weightedRandomScoreChoice(
     );
 
 
-    /*
-    Даже слабые товары должны иметь
-    ненулевой шанс попасть в ленту.
-    */
-
     let totalWeight =
         0;
 
@@ -1491,13 +1718,6 @@ function weightedRandomScoreChoice(
                           maxScore
                         : 0;
 
-
-                /*
-                Кубический коэффициент делает
-                хорошие рекомендации заметнее,
-                но не превращает их в 100%
-                сортировку.
-                */
 
                 const weight =
                     0.15 +
@@ -1571,10 +1791,6 @@ function buildUserProfile() {
     };
 
 
-    /*
-    Просмотры дают самый слабый сигнал.
-    */
-
     viewedProducts.forEach(
         id => {
 
@@ -1596,11 +1812,6 @@ function buildUserProfile() {
     );
 
 
-    /*
-    Открытие товара —
-    сильнее просмотра.
-    */
-
     openedProducts.forEach(
         id => {
 
@@ -1621,11 +1832,6 @@ function buildUserProfile() {
         }
     );
 
-
-    /*
-    Лайк —
-    самый сильный сигнал.
-    */
 
     favorites.forEach(
         product => {
@@ -1664,10 +1870,6 @@ function addProfileSignal(
     }
 
 
-    /*
-    CATEGORY
-    */
-
     const category =
         normalizeText(
             product.category
@@ -1687,10 +1889,6 @@ function addProfileSignal(
             weight;
     }
 
-
-    /*
-    BRAND
-    */
 
     const brand =
         normalizeText(
@@ -1712,10 +1910,6 @@ function addProfileSignal(
     }
 
 
-    /*
-    MARKETPLACE
-    */
-
     const source =
         normalizeText(
             product.source
@@ -1735,10 +1929,6 @@ function addProfileSignal(
             weight;
     }
 
-
-    /*
-    PRICE
-    */
 
     if (
         product.price !== null &&
@@ -1776,10 +1966,6 @@ function calculateRecommendationScore(
     let score = 0;
 
 
-    /*
-    CATEGORY
-    */
-
     const category =
         normalizeText(
             product.category
@@ -1800,10 +1986,6 @@ function calculateRecommendationScore(
             5;
     }
 
-
-    /*
-    BRAND
-    */
 
     const brand =
         normalizeText(
@@ -1826,10 +2008,6 @@ function calculateRecommendationScore(
     }
 
 
-    /*
-    MARKETPLACE
-    */
-
     const source =
         normalizeText(
             product.source
@@ -1850,10 +2028,6 @@ function calculateRecommendationScore(
             2;
     }
 
-
-    /*
-    PRICE SIMILARITY
-    */
 
     if (
         product.price !== null &&
@@ -1905,10 +2079,6 @@ function calculateRecommendationScore(
         }
     }
 
-
-    /*
-    Небольшой случайный фактор.
-    */
 
     score +=
         Math.random() * 4;
@@ -2190,10 +2360,6 @@ function showProduct() {
         ];
 
 
-    /*
-    Защита от повторного показа.
-    */
-
     if (
         isProductViewed(
             currentProduct
@@ -2348,11 +2514,6 @@ function showProduct() {
 
     updateLikeButton();
 
-
-    /*
-    Реально показали товар —
-    записываем просмотр.
-    */
 
     registerView(
         currentProduct
@@ -2594,11 +2755,6 @@ function toggleLike() {
     );
 
 
-    /*
-    Новый сигнал сразу учитывается
-    при построении следующих товаров.
-    */
-
     rebuildFeedAfterSignal();
 
 
@@ -2685,11 +2841,6 @@ function rebuildFeedAfterSignal() {
     buildPersonalizedFeed();
 
 
-    /*
-    Текущий товар уже просмотрен
-    и поэтому не должен возвращаться.
-    */
-
     if (
         currentId
     ) {
@@ -2716,14 +2867,6 @@ function rebuildFeedAfterSignal() {
 
         return;
     }
-
-
-    /*
-    Текущую карточку мгновенно
-    не меняем.
-    Следующая карточка появится
-    после свайпа.
-    */
 }
 
 
@@ -3785,6 +3928,20 @@ function registerView(
 
 
         updateProfile();
+
+
+        /*
+        Сохраняем просмотр
+        на сервере.
+
+        Это выполняется асинхронно
+        и не блокирует интерфейс.
+        */
+
+        syncUserAction(
+            "view",
+            id
+        );
     }
 }
 
@@ -3829,9 +3986,15 @@ function registerOpen(
 
 
     /*
-    Открытие товара —
-    сильный сигнал интереса.
+    Сохраняем открытие
+    на сервере.
     */
+
+    syncUserAction(
+        "open",
+        id
+    );
+
 
     rebuildFeedAfterSignal();
 
@@ -4125,10 +4288,6 @@ function nextProduct() {
     }
 
 
-    /*
-    Ищем следующий непросмотренный.
-    */
-
     const nextIndex =
         findNextUnviewedIndex(
             currentIndex,
@@ -4152,10 +4311,6 @@ function nextProduct() {
         return;
     }
 
-
-    /*
-    В текущем наборе всё просмотрено.
-    */
 
     const unviewed =
         allProducts.filter(
@@ -4195,42 +4350,27 @@ function nextProduct() {
 
 
     /*
-    Полностью закончился пул.
-    Начинаем новый круг.
+    НОВОЕ ПОВЕДЕНИЕ:
+
+    Не начинаем новый круг.
+
+    Пользователь просмотрел всё,
+    что было доступно.
+
+    Ждём появления новых товаров.
     */
 
     console.log(
-        "[StyleFlow] Все товары просмотрены — новый круг"
+        "[StyleFlow] Все доступные товары просмотрены."
     );
 
 
-    viewedProducts = [];
+    showEmptyFeed();
 
 
-    saveJSON(
-        "styleflow_viewed",
-        viewedProducts
+    showToast(
+        "Ты просмотрел все доступные товары"
     );
-
-
-    buildPersonalizedFeed();
-
-
-    currentIndex = 0;
-
-
-    if (
-        products.length > 0
-    ) {
-
-        animateCardChange(
-            "next"
-        );
-
-    } else {
-
-        showEmptyFeed();
-    }
 }
 
 
