@@ -162,7 +162,14 @@
             opacity: .45;
         }
 
-        .top-search {
+        .top-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .top-search,
+        .top-filter {
             width: 42px;
             height: 42px;
 
@@ -177,6 +184,19 @@
 
             cursor: pointer;
             font-size: 18px;
+
+            transition:
+                transform .15s ease,
+                background .15s ease;
+        }
+
+        .top-search:active,
+        .top-filter:active {
+            transform: scale(.9);
+        }
+
+        .top-filter.active {
+            background: rgba(139,92,246,.28);
         }
 
         /* =========================
@@ -1076,6 +1096,233 @@
         }
 
         /* =========================
+           FILTERS
+        ========================= */
+
+        .filters-overlay {
+            position: fixed;
+            z-index: 120;
+
+            inset: 0;
+
+            display: none;
+
+            background: rgba(0,0,0,.58);
+            backdrop-filter: blur(6px);
+        }
+
+        .filters-overlay.show {
+            display: block;
+        }
+
+        .filters-sheet {
+            position: absolute;
+
+            left: 50%;
+            right: 0;
+            bottom: 0;
+
+            width: min(520px, 100%);
+
+            max-height: 82vh;
+
+            transform: translateX(-50%);
+
+            overflow-y: auto;
+
+            padding: 10px 18px 22px;
+
+            border-radius: 28px 28px 0 0;
+
+            background:
+                linear-gradient(
+                    180deg,
+                    #1b1b23 0%,
+                    #14141a 100%
+                );
+
+            border-top: 1px solid rgba(255,255,255,.08);
+
+            box-shadow:
+                0 -20px 80px rgba(0,0,0,.55);
+        }
+
+        .filters-handle {
+            width: 44px;
+            height: 4px;
+
+            margin: 0 auto 14px;
+
+            border-radius: 999px;
+
+            background: rgba(255,255,255,.2);
+        }
+
+        .filters-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            margin-bottom: 20px;
+        }
+
+        .filters-title {
+            font-size: 22px;
+            font-weight: 850;
+            letter-spacing: -.4px;
+        }
+
+        .filters-close {
+            width: 38px;
+            height: 38px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            border-radius: 50%;
+
+            background: rgba(255,255,255,.08);
+
+            color: rgba(255,255,255,.8);
+
+            font-size: 24px;
+            line-height: 1;
+
+            cursor: pointer;
+        }
+
+        .filter-section {
+            margin-bottom: 22px;
+        }
+
+        .filter-section-title {
+            margin-bottom: 10px;
+
+            font-size: 13px;
+            font-weight: 800;
+
+            color: rgba(255,255,255,.65);
+        }
+
+        .price-inputs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 9px;
+        }
+
+        .price-input {
+            width: 100%;
+            height: 48px;
+
+            padding: 0 14px;
+
+            outline: none;
+
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px;
+
+            background: rgba(255,255,255,.07);
+
+            color: white;
+
+            font-size: 14px;
+        }
+
+        .price-input::placeholder {
+            color: rgba(255,255,255,.35);
+        }
+
+        .price-input:focus {
+            border-color: rgba(139,92,246,.55);
+            background: rgba(139,92,246,.08);
+        }
+
+        .filter-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .filter-chip {
+            min-height: 40px;
+
+            padding: 8px 12px;
+
+            border-radius: 13px;
+
+            background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.07);
+
+            color: rgba(255,255,255,.78);
+
+            font-size: 12px;
+            font-weight: 650;
+
+            cursor: pointer;
+
+            transition:
+                background .15s ease,
+                border-color .15s ease,
+                transform .15s ease;
+        }
+
+        .filter-chip:active {
+            transform: scale(.96);
+        }
+
+        .filter-chip.active {
+            background: rgba(139,92,246,.25);
+            border-color: rgba(139,92,246,.65);
+            color: white;
+        }
+
+        .filter-actions {
+            position: sticky;
+            bottom: 0;
+
+            display: grid;
+            grid-template-columns: 1fr 1.4fr;
+
+            gap: 9px;
+
+            padding-top: 12px;
+
+            background: linear-gradient(
+                to bottom,
+                rgba(20,20,26,0),
+                #14141a 22%
+            );
+        }
+
+        .filter-reset,
+        .filter-apply {
+            height: 50px;
+
+            border-radius: 15px;
+
+            font-size: 13px;
+            font-weight: 800;
+
+            cursor: pointer;
+        }
+
+        .filter-reset {
+            background: rgba(255,255,255,.07);
+            color: rgba(255,255,255,.78);
+        }
+
+        .filter-apply {
+            background: white;
+            color: #111116;
+        }
+
+        .filter-reset:active,
+        .filter-apply:active {
+            transform: scale(.98);
+        }
+
+        /* =========================
            COMMENTS
         ========================= */
 
@@ -1214,6 +1461,11 @@
                 width: 470px;
                 margin: auto;
             }
+
+            .filters-sheet {
+                bottom: 10px;
+                border-radius: 28px;
+            }
         }
 
         /* =========================
@@ -1260,16 +1512,30 @@
     <section id="feedScreen" class="screen active feed-screen">
 
         <header class="topbar">
+
             <div class="logo">
                 Style<span>Flow</span>
             </div>
 
-            <button
-                class="top-search"
-                onclick="switchTab('search')"
-            >
-                🔎
-            </button>
+            <div class="top-actions">
+
+                <button
+                    class="top-search"
+                    onclick="switchTab('search')"
+                >
+                    🔎
+                </button>
+
+                <button
+                    id="filterButton"
+                    class="top-filter"
+                    onclick="openFilters()"
+                >
+                    ⚙️
+                </button>
+
+            </div>
+
         </header>
 
         <main class="feed">
@@ -1722,7 +1988,167 @@
 
 </div>
 
-<!-- COMMENTS -->
+<!-- =========================
+     FILTERS
+========================= -->
+
+<div
+    id="filtersOverlay"
+    class="filters-overlay"
+    onclick="closeFilters(event)"
+>
+
+    <div
+        class="filters-sheet"
+        onclick="event.stopPropagation()"
+    >
+
+        <div class="filters-handle"></div>
+
+        <div class="filters-header">
+
+            <div class="filters-title">
+                Фильтры
+            </div>
+
+            <button
+                class="filters-close"
+                onclick="closeFilters()"
+            >
+                ×
+            </button>
+
+        </div>
+
+        <!-- PRICE -->
+
+        <div class="filter-section">
+
+            <div class="filter-section-title">
+                Цена
+            </div>
+
+            <div class="price-inputs">
+
+                <input
+                    id="filterMinPrice"
+                    class="price-input"
+                    type="number"
+                    inputmode="decimal"
+                    min="0"
+                    step="0.01"
+                    placeholder="От"
+                >
+
+                <input
+                    id="filterMaxPrice"
+                    class="price-input"
+                    type="number"
+                    inputmode="decimal"
+                    min="0"
+                    step="0.01"
+                    placeholder="До"
+                >
+
+            </div>
+
+        </div>
+
+        <!-- CATEGORY -->
+
+        <div class="filter-section">
+
+            <div class="filter-section-title">
+                Категория
+            </div>
+
+            <div
+                id="filterCategories"
+                class="filter-chips"
+            >
+
+                <!-- Категории будут добавляться через script.js -->
+
+            </div>
+
+        </div>
+
+        <!-- SOURCES -->
+
+        <div class="filter-section">
+
+            <div class="filter-section-title">
+                Площадки
+            </div>
+
+            <div
+                id="filterSources"
+                class="filter-chips"
+            >
+
+                <button
+                    class="filter-chip"
+                    data-source="kufar"
+                    onclick="toggleSourceFilter(this)"
+                >
+                    🟢 Kufar
+                </button>
+
+                <button
+                    class="filter-chip"
+                    data-source="wildberries"
+                    onclick="toggleSourceFilter(this)"
+                >
+                    🟣 Wildberries
+                </button>
+
+                <button
+                    class="filter-chip"
+                    data-source="ozon"
+                    onclick="toggleSourceFilter(this)"
+                >
+                    🔵 Ozon
+                </button>
+
+                <button
+                    class="filter-chip"
+                    data-source="aliexpress"
+                    onclick="toggleSourceFilter(this)"
+                >
+                    🟠 AliExpress
+                </button>
+
+            </div>
+
+        </div>
+
+        <!-- ACTIONS -->
+
+        <div class="filter-actions">
+
+            <button
+                class="filter-reset"
+                onclick="resetFilters()"
+            >
+                Сбросить
+            </button>
+
+            <button
+                class="filter-apply"
+                onclick="applyFilters()"
+            >
+                Применить
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+<!-- =========================
+     COMMENTS
+========================= -->
 
 <div
     id="commentsOverlay"
