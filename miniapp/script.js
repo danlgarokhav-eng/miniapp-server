@@ -1,16 +1,25 @@
 /* =========================================================
-   STYLEFLOW
-   Frontend for marketplace aggregation
+STYLEFLOW
+Personalized marketplace feed
 
-   IMPORTANT:
-   Product objects are normalized in one place.
-   This allows us to connect WB / Ozon / AliExpress /
-   Kufar / other marketplaces later without rebuilding UI.
+ЭТАП 1:
+- не показываем уже просмотренные товары
+- собираем интересы пользователя
+- ранжируем товары под пользователя
+- учитываем:
+    * категории
+    * бренды
+    * маркетплейсы
+    * цены
+    * лайки
+    * открытия товаров
+- сохраняем историю в localStorage
+
+Product objects are normalized in one place.
 ========================================================= */
 
 let allProducts = [];
 let products = [];
-
 let currentIndex = 0;
 let currentProduct = null;
 
@@ -23,14 +32,12 @@ let currentTab = "feed";
 let touchStartY = 0;
 let touchStartX = 0;
 let isDragging = false;
-
 let lastTapTime = 0;
-
 let searchTimer = null;
 
 
 /* =========================================================
-   TELEGRAM
+TELEGRAM
 ========================================================= */
 
 if (window.Telegram && Telegram.WebApp) {
@@ -45,30 +52,23 @@ if (window.Telegram && Telegram.WebApp) {
 
 
 /* =========================================================
-   INIT
+START
 ========================================================= */
 
-document.addEventListener("DOMContentLoaded", () {
-
+document.addEventListener("DOMContentLoaded", () => {
     setupSearch();
-
     setupSwipe();
-
     loadFeed();
-
     updateProfile();
-
 });
 
 
 /* =========================================================
-   LOAD FEED
+LOAD FEED
 ========================================================= */
 
 async function loadFeed() {
-
     try {
-
         const response = await fetch("/api/feed", {
             cache: "no-store"
         });
@@ -79,6 +79,8 @@ async function loadFeed() {
 
         const data = await response.json();
 
+        console.log("[StyleFlow] Feed response:", data);
+
         const rawProducts =
             Array.isArray(data)
                 ? data
@@ -88,20 +90,32 @@ async function loadFeed() {
                         ? data.items
                         : [];
 
-        allProducts = rawProducts.map(normalizeProduct);
+        console.log(
+            "[StyleFlow] Получено товаров:",
+            rawProducts.length
+        );
 
-        // Персональная лента: исключаем товары, которые
-        // пользователь уже просмотрел на этом устройстве.
-        products = allProducts.filter(product => {
-            return !viewedProducts.some(viewedId => {
-                return String(viewedId) === String(product.id);
-            });
-        });
+        allProducts =
+            rawProducts.map(normalizeProduct);
+
+        console.log(
+            "[StyleFlow] Нормализовано товаров:",
+            allProducts.length
+        );
+
+        if (allProducts.length > 0) {
+            console.log(
+                "[StyleFlow] Первый товар:",
+                allProducts[0]
+            );
+        }
 
         localStorage.setItem(
             "styleflow_main_feed",
             JSON.stringify(allProducts)
         );
+
+        buildPersonalizedFeed();
 
         currentIndex = 0;
 
@@ -112,43 +126,44 @@ async function loadFeed() {
         }
 
     } catch (error) {
-
-        console.error("Feed error:", error);
+        console.error(
+            "[StyleFlow] Feed error:",
+            error
+        );
 
         const cached =
-            loadJSON("styleflow_main_feed", []);
+            loadJSON(
+                "styleflow_main_feed",
+                []
+            );
 
         if (cached.length > 0) {
+            allProducts =
+                cached.map(normalizeProduct);
 
-            allProducts = cached.map(normalizeProduct);
-
-            // Кеш тоже фильтруем по истории просмотра.
-            products = allProducts.filter(product => {
-                return !viewedProducts.some(viewedId => {
-                    return String(viewedId) === String(product.id);
-                });
-            });
+            buildPersonalizedFeed();
 
             currentIndex = 0;
 
-            showProduct();
+            if (products.length > 0) {
+                showProduct();
+            } else {
+                showEmptyFeed();
+            }
 
-            showToast("Показана последняя сохранённая лента");
+            showToast(
+                "Показана последняя сохранённая лента"
+            );
 
         } else {
-
             showEmptyFeed();
-
         }
-
     }
-
 }
 
 
 /* =========================================================
-   PRODUCT NORMALIZATION
-   THE MOST IMPORTANT PART FOR FUTURE MARKETPLACES
+NORMALIZE PRODUCT
 ========================================================= */
 
 function normalizeProduct(item, index = 0) {
@@ -157,7 +172,11 @@ function normalizeProduct(item, index = 0) {
         item.source ||
         item.marketplace ||
         item.platform ||
-        detectSource(item.url || item.link || "");
+        detectSource(
+            item.url ||
+            item.link ||
+            ""
+        );
 
     const title =
         item.title ||
@@ -220,10 +239,10 @@ function normalizeProduct(item, index = 0) {
         );
 
     return {
-
         id,
 
-        source: normalizeSource(source),
+        source:
+            normalizeSource(source),
 
         external_id:
             String(
@@ -234,10 +253,13 @@ function normalizeProduct(item, index = 0) {
             ),
 
         title,
+
         brand,
+
         category,
 
         price,
+
         oldPrice,
 
         currency:
@@ -255,22 +277,20 @@ function normalizeProduct(item, index = 0) {
 
         url,
 
-        // Keep the original object.
-        // This is useful when we connect real marketplaces.
         raw: item
-
     };
-
 }
 
 
 /* =========================================================
-   SOURCE HELPERS
+SOURCE
 ========================================================= */
 
 function detectSource(url) {
 
-    const value = String(url).toLowerCase();
+    const value =
+        String(url)
+            .toLowerCase();
 
     if (value.includes("wildberries")) {
         return "wildberries";
@@ -335,12 +355,15 @@ function sourceLabel(source) {
         marketplace: "🛍 Marketplace"
     };
 
-    return labels[source] || "🛍 " + capitalize(source);
+    return (
+        labels[source] ||
+        "🛍 " + capitalize(source)
+    );
 }
 
 
 /* =========================================================
-   PRICE
+PRICE
 ========================================================= */
 
 function parsePrice(value) {
@@ -362,7 +385,8 @@ function parsePrice(value) {
             .replace(/[^\d.,-]/g, "")
             .replace(",", ".");
 
-    const number = Number(cleaned);
+    const number =
+        Number(cleaned);
 
     return Number.isFinite(number)
         ? number
@@ -422,13 +446,17 @@ function formatPrice(product) {
     };
 
     const symbol =
-        symbols[currency] || currency;
+        symbols[currency] ||
+        currency;
 
     return (
         Number(product.price)
-            .toLocaleString("ru-RU", {
-                maximumFractionDigits: 2
-            })
+            .toLocaleString(
+                "ru-RU",
+                {
+                    maximumFractionDigits: 2
+                }
+            )
         + " "
         + symbol
     );
@@ -436,7 +464,548 @@ function formatPrice(product) {
 
 
 /* =========================================================
-   FEED DISPLAY
+PERSONALIZED FEED
+========================================================= */
+
+function buildPersonalizedFeed() {
+
+    if (!allProducts.length) {
+        products = [];
+        return;
+    }
+
+    const viewedSet =
+        new Set(
+            viewedProducts.map(String)
+        );
+
+    const unviewed =
+        allProducts.filter(
+            product =>
+                !viewedSet.has(
+                    String(product.id)
+                )
+        );
+
+    console.log(
+        "[StyleFlow] Всего товаров:",
+        allProducts.length
+    );
+
+    console.log(
+        "[StyleFlow] Просмотрено:",
+        viewedSet.size
+    );
+
+    console.log(
+        "[StyleFlow] Непросмотренных:",
+        unviewed.length
+    );
+
+
+    /*
+    Если остались непросмотренные товары —
+    используем только их.
+
+    Если пользователь просмотрел абсолютно всё,
+    начинаем новый круг.
+    */
+
+    let candidates;
+
+    if (unviewed.length > 0) {
+        candidates = unviewed;
+    } else {
+
+        console.log(
+            "[StyleFlow] Все товары просмотрены. Начинаем новый круг."
+        );
+
+        candidates = [...allProducts];
+
+        /*
+        Очищаем историю просмотров,
+        чтобы лента снова была доступна.
+        */
+
+        viewedProducts = [];
+
+        saveJSON(
+            "styleflow_viewed",
+            viewedProducts
+        );
+    }
+
+
+    /*
+    Получаем профиль интересов пользователя.
+    */
+
+    const profile =
+        buildUserProfile();
+
+
+    /*
+    Если пользователь новый,
+    просто перемешиваем товары.
+
+    Если уже есть история —
+    сортируем по персональному score.
+    */
+
+    const hasProfile =
+        profile.totalSignals > 0;
+
+    if (!hasProfile) {
+
+        products =
+            shuffleArray(
+                candidates
+            );
+
+        console.log(
+            "[StyleFlow] Новый пользователь — случайная лента"
+        );
+
+        return;
+    }
+
+
+    products =
+        candidates
+            .map(product => ({
+                product,
+                score:
+                    calculateRecommendationScore(
+                        product,
+                        profile
+                    )
+            }))
+            .sort(
+                (a, b) =>
+                    b.score - a.score
+            )
+            .map(
+                item =>
+                    item.product
+            );
+
+
+    console.log(
+        "[StyleFlow] Персональная лента построена"
+    );
+
+    console.log(
+        "[StyleFlow] Профиль:",
+        profile
+    );
+}
+
+
+/* =========================================================
+USER PROFILE
+========================================================= */
+
+function buildUserProfile() {
+
+    const profile = {
+
+        categories: {},
+
+        brands: {},
+
+        sources: {},
+
+        prices: [],
+
+        totalSignals: 0
+    };
+
+
+    /*
+    Просмотренные товары дают слабый сигнал.
+    */
+
+    viewedProducts.forEach(
+        id => {
+
+            const product =
+                findProductById(id);
+
+            if (!product) return;
+
+            addProfileSignal(
+                profile,
+                product,
+                1
+            );
+        }
+    );
+
+
+    /*
+    Открытие карточки товара —
+    более сильный сигнал.
+    */
+
+    openedProducts.forEach(
+        id => {
+
+            const product =
+                findProductById(id);
+
+            if (!product) return;
+
+            addProfileSignal(
+                profile,
+                product,
+                3
+            );
+        }
+    );
+
+
+    /*
+    Лайк —
+    самый сильный сигнал.
+    */
+
+    favorites.forEach(
+        product => {
+
+            const normalized =
+                normalizeProduct(
+                    product
+                );
+
+            addProfileSignal(
+                profile,
+                normalized,
+                6
+            );
+        }
+    );
+
+
+    return profile;
+}
+
+
+function addProfileSignal(
+    profile,
+    product,
+    weight
+) {
+
+    if (!product) return;
+
+
+    /*
+    CATEGORY
+    */
+
+    const category =
+        normalizeText(
+            product.category
+        );
+
+    if (category) {
+
+        profile.categories[category] =
+            (
+                profile.categories[category] ||
+                0
+            ) + weight;
+    }
+
+
+    /*
+    BRAND
+    */
+
+    const brand =
+        normalizeText(
+            product.brand
+        );
+
+    if (brand) {
+
+        profile.brands[brand] =
+            (
+                profile.brands[brand] ||
+                0
+            ) + weight;
+    }
+
+
+    /*
+    MARKETPLACE
+    */
+
+    const source =
+        normalizeText(
+            product.source
+        );
+
+    if (source) {
+
+        profile.sources[source] =
+            (
+                profile.sources[source] ||
+                0
+            ) + weight;
+    }
+
+
+    /*
+    PRICE
+    */
+
+    if (
+        product.price !== null &&
+        Number.isFinite(
+            Number(product.price)
+        )
+    ) {
+
+        profile.prices.push({
+            price:
+                Number(product.price),
+
+            weight
+        });
+    }
+
+
+    profile.totalSignals += weight;
+}
+
+
+/* =========================================================
+RECOMMENDATION SCORE
+========================================================= */
+
+function calculateRecommendationScore(
+    product,
+    profile
+) {
+
+    let score = 0;
+
+
+    /*
+    CATEGORY
+    */
+
+    const category =
+        normalizeText(
+            product.category
+        );
+
+    if (
+        category &&
+        profile.categories[category]
+    ) {
+
+        score +=
+            profile.categories[category] *
+            5;
+    }
+
+
+    /*
+    BRAND
+    */
+
+    const brand =
+        normalizeText(
+            product.brand
+        );
+
+    if (
+        brand &&
+        profile.brands[brand]
+    ) {
+
+        score +=
+            profile.brands[brand] *
+            7;
+    }
+
+
+    /*
+    MARKETPLACE
+    */
+
+    const source =
+        normalizeText(
+            product.source
+        );
+
+    if (
+        source &&
+        profile.sources[source]
+    ) {
+
+        score +=
+            profile.sources[source] *
+            2;
+    }
+
+
+    /*
+    PRICE SIMILARITY
+    */
+
+    if (
+        product.price !== null &&
+        profile.prices.length > 0
+    ) {
+
+        const averagePrice =
+            getWeightedAveragePrice(
+                profile.prices
+            );
+
+        if (
+            averagePrice > 0
+        ) {
+
+            const difference =
+                Math.abs(
+                    Number(product.price) -
+                    averagePrice
+                );
+
+            const percentage =
+                difference /
+                averagePrice;
+
+            /*
+            Чем ближе цена к привычному
+            диапазону пользователя,
+            тем выше score.
+            */
+
+            if (percentage <= 0.10) {
+                score += 12;
+            } else if (percentage <= 0.25) {
+                score += 7;
+            } else if (percentage <= 0.50) {
+                score += 3;
+            }
+        }
+    }
+
+
+    /*
+    Небольшой случайный фактор.
+
+    Он нужен, чтобы лента не была
+    абсолютно одинаковой каждый раз.
+    */
+
+    score +=
+        Math.random() * 4;
+
+
+    return score;
+}
+
+
+/* =========================================================
+WEIGHTED PRICE
+========================================================= */
+
+function getWeightedAveragePrice(
+    prices
+) {
+
+    let total =
+        0;
+
+    let weight =
+        0;
+
+    prices.forEach(
+        item => {
+
+            total +=
+                item.price *
+                item.weight;
+
+            weight +=
+                item.weight;
+        }
+    );
+
+    if (!weight) {
+        return 0;
+    }
+
+    return total / weight;
+}
+
+
+/* =========================================================
+HELPERS FOR RECOMMENDATIONS
+========================================================= */
+
+function normalizeText(value) {
+
+    return String(
+        value || ""
+    )
+        .toLowerCase()
+        .trim();
+}
+
+
+function findProductById(id) {
+
+    const target =
+        String(id);
+
+    return allProducts.find(
+        product =>
+            String(product.id) === target
+    );
+}
+
+
+function shuffleArray(array) {
+
+    const result =
+        [...array];
+
+    for (
+        let i = result.length - 1;
+        i > 0;
+        i--
+    ) {
+
+        const j =
+            Math.floor(
+                Math.random() *
+                (i + 1)
+            );
+
+        [
+            result[i],
+            result[j]
+        ] =
+        [
+            result[j],
+            result[i]
+        ];
+    }
+
+    return result;
+}
+
+
+/* =========================================================
+SHOW PRODUCT
 ========================================================= */
 
 function showProduct() {
@@ -446,11 +1015,16 @@ function showProduct() {
         return;
     }
 
-    if (currentIndex < 0) {
-        currentIndex = products.length - 1;
+    if (
+        currentIndex < 0
+    ) {
+        currentIndex =
+            products.length - 1;
     }
 
-    if (currentIndex >= products.length) {
+    if (
+        currentIndex >= products.length
+    ) {
         currentIndex = 0;
     }
 
@@ -458,28 +1032,45 @@ function showProduct() {
         products[currentIndex];
 
     const image =
-        document.getElementById("productImage");
+        document.getElementById(
+            "productImage"
+        );
 
     const title =
-        document.getElementById("productTitle");
+        document.getElementById(
+            "productTitle"
+        );
 
     const brand =
-        document.getElementById("productBrand");
+        document.getElementById(
+            "productBrand"
+        );
 
     const source =
-        document.getElementById("productSource");
+        document.getElementById(
+            "productSource"
+        );
 
     const price =
-        document.getElementById("productPrice");
+        document.getElementById(
+            "productPrice"
+        );
 
     const oldPrice =
-        document.getElementById("productOldPrice");
+        document.getElementById(
+            "productOldPrice"
+        );
 
     const rating =
-        document.getElementById("productRating");
+        document.getElementById(
+            "productRating"
+        );
 
     const category =
-        document.getElementById("productCategory");
+        document.getElementById(
+            "productCategory"
+        );
+
 
     image.src =
         currentProduct.image;
@@ -495,67 +1086,83 @@ function showProduct() {
         "StyleFlow";
 
     source.textContent =
-        sourceLabel(currentProduct.source);
+        sourceLabel(
+            currentProduct.source
+        );
 
     price.textContent =
-        formatPrice(currentProduct);
+        formatPrice(
+            currentProduct
+        );
 
-    if (currentProduct.oldPrice) {
+
+    if (
+        currentProduct.oldPrice
+    ) {
 
         oldPrice.textContent =
             formatPrice({
-                price: currentProduct.oldPrice,
-                currency: currentProduct.currency
+                price:
+                    currentProduct.oldPrice,
+
+                currency:
+                    currentProduct.currency
             });
 
     } else {
 
         oldPrice.textContent = "";
-
     }
 
-    if (currentProduct.rating !== "") {
+
+    if (
+        currentProduct.rating !== ""
+    ) {
 
         rating.textContent =
-            "★ " + currentProduct.rating;
+            "★ " +
+            currentProduct.rating;
 
     } else {
 
         rating.textContent =
             "★ —";
-
     }
+
 
     category.textContent =
         currentProduct.category ||
         "Одежда";
 
+
     updateLikeButton();
 
-    registerView(currentProduct);
+    registerView(
+        currentProduct
+    );
 
     resetCardPosition();
-
 }
 
 
 /* =========================================================
-   EMPTY FEED
+EMPTY FEED
 ========================================================= */
 
 function showEmptyFeed() {
 
-    document.getElementById("productCard").style.display =
-        "none";
+    document.getElementById(
+        "productCard"
+    ).style.display = "none";
 
-    document.getElementById("feedEmpty").style.display =
-        "flex";
-
+    document.getElementById(
+        "feedEmpty"
+    ).style.display = "flex";
 }
 
 
 /* =========================================================
-   NAVIGATION
+TABS
 ========================================================= */
 
 function switchTab(tab) {
@@ -563,78 +1170,126 @@ function switchTab(tab) {
     currentTab = tab;
 
     const screens = {
-        feed: "feedScreen",
-        favorites: "favoritesScreen",
-        search: "searchScreen",
-        profile: "profileScreen"
+
+        feed:
+            "feedScreen",
+
+        favorites:
+            "favoritesScreen",
+
+        search:
+            "searchScreen",
+
+        profile:
+            "profileScreen"
     };
 
-    Object.values(screens).forEach(id => {
 
-        document
-            .getElementById(id)
-            .classList.remove("active");
+    Object.values(
+        screens
+    ).forEach(
+        id => {
 
-    });
+            document
+                .getElementById(id)
+                .classList
+                .remove("active");
+        }
+    );
+
 
     document
-        .getElementById(screens[tab])
-        .classList.add("active");
+        .getElementById(
+            screens[tab]
+        )
+        .classList
+        .add("active");
 
 
     const navs = {
-        feed: "navFeed",
-        favorites: "navFavorites",
-        search: "navSearch",
-        profile: "navProfile"
+
+        feed:
+            "navFeed",
+
+        favorites:
+            "navFavorites",
+
+        search:
+            "navSearch",
+
+        profile:
+            "navProfile"
     };
 
-    Object.values(navs).forEach(id => {
 
-        document
-            .getElementById(id)
-            .classList.remove("active");
+    Object.values(
+        navs
+    ).forEach(
+        id => {
 
-    });
+            document
+                .getElementById(id)
+                .classList
+                .remove("active");
+        }
+    );
+
 
     document
-        .getElementById(navs[tab])
-        .classList.add("active");
+        .getElementById(
+            navs[tab]
+        )
+        .classList
+        .add("active");
 
 
-    if (tab === "favorites") {
+    if (
+        tab === "favorites"
+    ) {
         renderFavorites();
     }
 
-    if (tab === "profile") {
+
+    if (
+        tab === "profile"
+    ) {
         updateProfile();
     }
 
-    if (tab === "search") {
 
-        setTimeout(() => {
+    if (
+        tab === "search"
+    ) {
 
-            document
-                .getElementById("searchInput")
-                .focus();
+        setTimeout(
+            () => {
 
-        }, 100);
+                document
+                    .getElementById(
+                        "searchInput"
+                    )
+                    .focus();
 
+            },
+            100
+        );
     }
-
 }
 
 
 /* =========================================================
-   FAVORITES
+FAVORITES
 ========================================================= */
 
-function isFavorite(productId) {
+function isFavorite(
+    productId
+) {
 
     return favorites.some(
-        item => String(item.id) === String(productId)
+        item =>
+            String(item.id) ===
+            String(productId)
     );
-
 }
 
 
@@ -644,6 +1299,7 @@ function toggleLike() {
         return;
     }
 
+
     const index =
         favorites.findIndex(
             item =>
@@ -651,127 +1307,230 @@ function toggleLike() {
                 String(currentProduct.id)
         );
 
+
     if (index >= 0) {
 
-        favorites.splice(index, 1);
+        favorites.splice(
+            index,
+            1
+        );
 
-        showToast("Удалено из избранного");
+        showToast(
+            "Удалено из избранного"
+        );
 
     } else {
 
-        favorites.unshift(currentProduct);
+        favorites.unshift(
+            currentProduct
+        );
 
-        showToast("❤️ Добавлено в избранное");
+        showToast(
+            "❤️ Добавлено в избранное"
+        );
 
         showHeart();
-
     }
+
 
     saveJSON(
         "styleflow_favorites",
         favorites
     );
 
+
+    /*
+    После лайка перестраиваем
+    персональную ленту.
+
+    Новый интерес пользователя
+    сразу начинает влиять
+    на следующие товары.
+    */
+
+    rebuildFeedAfterSignal();
+
     updateLikeButton();
 
     updateProfile();
-
 }
 
 
 function updateLikeButton() {
 
     const button =
-        document.getElementById("likeButton");
+        document.getElementById(
+            "likeButton"
+        );
 
     if (!currentProduct) {
         return;
     }
 
-    if (isFavorite(currentProduct.id)) {
 
-        button.classList.add("liked");
+    if (
+        isFavorite(
+            currentProduct.id
+        )
+    ) {
 
-        button.querySelector(".action-icon")
-            .textContent = "❤️";
+        button.classList.add(
+            "liked"
+        );
+
+        button
+            .querySelector(
+                ".action-icon"
+            )
+            .textContent =
+                "❤️";
 
     } else {
 
-        button.classList.remove("liked");
+        button.classList.remove(
+            "liked"
+        );
 
-        button.querySelector(".action-icon")
-            .textContent = "♥";
-
+        button
+            .querySelector(
+                ".action-icon"
+            )
+            .textContent =
+                "♥";
     }
-
-}
-
-
-function renderFavorites() {
-
-    const grid =
-        document.getElementById("favoritesGrid");
-
-    const empty =
-        document.getElementById("favoritesEmpty");
-
-    grid.innerHTML = "";
-
-    if (!favorites.length) {
-
-        empty.style.display = "flex";
-
-        return;
-
-    }
-
-    empty.style.display = "none";
-
-
-    favorites.forEach(product => {
-
-        const card =
-            document.createElement("div");
-
-        card.className =
-            "favorite-card";
-
-        card.innerHTML = `
-
-            <img
-                src="${escapeAttribute(product.image)}"
-                alt="${escapeAttribute(product.title)}"
-            >
-
-            <div class="favorite-info">
-
-                <div class="favorite-title">
-                    ${escapeHTML(product.title)}
-                </div>
-
-                <div class="favorite-price">
-                    ${escapeHTML(formatPrice(product))}
-                </div>
-
-            </div>
-
-        `;
-
-        card.onclick = () => {
-
-            openProductFromObject(product);
-
-        };
-
-        grid.appendChild(card);
-
-    });
-
 }
 
 
 /* =========================================================
-   OPEN PRODUCT
+REBUILD AFTER USER ACTION
+========================================================= */
+
+function rebuildFeedAfterSignal() {
+
+    const currentId =
+        currentProduct
+            ? String(currentProduct.id)
+            : null;
+
+
+    buildPersonalizedFeed();
+
+
+    /*
+    Текущий товар уже просмотрен,
+    поэтому он не должен возвращаться
+    в новую ленту.
+    */
+
+    if (
+        currentId
+    ) {
+
+        const index =
+            products.findIndex(
+                product =>
+                    String(product.id) ===
+                    currentId
+            );
+
+        if (index >= 0) {
+
+            products.splice(
+                index,
+                1
+            );
+        }
+    }
+
+
+    currentIndex = 0;
+}
+
+
+/* =========================================================
+FAVORITES RENDER
+========================================================= */
+
+function renderFavorites() {
+
+    const grid =
+        document.getElementById(
+            "favoritesGrid"
+        );
+
+    const empty =
+        document.getElementById(
+            "favoritesEmpty"
+        );
+
+
+    grid.innerHTML = "";
+
+
+    if (!favorites.length) {
+
+        empty.style.display =
+            "flex";
+
+        return;
+    }
+
+
+    empty.style.display =
+        "none";
+
+
+    favorites.forEach(
+        product => {
+
+            const card =
+                document.createElement(
+                    "div"
+                );
+
+            card.className =
+                "favorite-card";
+
+
+            card.innerHTML = `
+                <img
+                    src="${escapeAttribute(product.image)}"
+                    alt="${escapeAttribute(product.title)}"
+                >
+
+                <div class="favorite-info">
+
+                    <div class="favorite-title">
+                        ${escapeHTML(product.title)}
+                    </div>
+
+                    <div class="favorite-price">
+                        ${escapeHTML(formatPrice(product))}
+                    </div>
+
+                </div>
+            `;
+
+
+            card.onclick =
+                () => {
+
+                    openProductFromObject(
+                        product
+                    );
+                };
+
+
+            grid.appendChild(
+                card
+            );
+        }
+    );
+}
+
+
+/* =========================================================
+OPEN PRODUCT
 ========================================================= */
 
 function openCurrentProduct() {
@@ -779,6 +1538,7 @@ function openCurrentProduct() {
     if (!currentProduct) {
         return;
     }
+
 
     if (
         !currentProduct.url ||
@@ -790,10 +1550,13 @@ function openCurrentProduct() {
         );
 
         return;
-
     }
 
-    registerOpen(currentProduct);
+
+    registerOpen(
+        currentProduct
+    );
+
 
     try {
 
@@ -813,7 +1576,6 @@ function openCurrentProduct() {
                 currentProduct.url,
                 "_blank"
             );
-
         }
 
     } catch (error) {
@@ -822,13 +1584,13 @@ function openCurrentProduct() {
             currentProduct.url,
             "_blank"
         );
-
     }
-
 }
 
 
-function openProductFromObject(product) {
+function openProductFromObject(
+    product
+) {
 
     const index =
         products.findIndex(
@@ -837,67 +1599,110 @@ function openProductFromObject(product) {
                 String(product.id)
         );
 
+
     if (index >= 0) {
 
-        currentIndex = index;
+        currentIndex =
+            index;
 
         showProduct();
 
-        switchTab("feed");
+        switchTab(
+            "feed"
+        );
 
         return;
-
     }
 
-    currentProduct = product;
 
-    renderSingleProductObject(product);
+    currentProduct =
+        product;
 
-    switchTab("feed");
+    renderSingleProductObject(
+        product
+    );
 
+    switchTab(
+        "feed"
+    );
 }
 
 
-function renderSingleProductObject(product) {
+function renderSingleProductObject(
+    product
+) {
 
-    document.getElementById("productImage").src =
+    document.getElementById(
+        "productImage"
+    ).src =
         product.image;
 
-    document.getElementById("productTitle").textContent =
+
+    document.getElementById(
+        "productTitle"
+    ).textContent =
         product.title;
 
-    document.getElementById("productBrand").textContent =
-        product.brand || "StyleFlow";
 
-    document.getElementById("productSource").textContent =
-        sourceLabel(product.source);
+    document.getElementById(
+        "productBrand"
+    ).textContent =
+        product.brand ||
+        "StyleFlow";
 
-    document.getElementById("productPrice").textContent =
-        formatPrice(product);
 
-    document.getElementById("productOldPrice").textContent =
+    document.getElementById(
+        "productSource"
+    ).textContent =
+        sourceLabel(
+            product.source
+        );
+
+
+    document.getElementById(
+        "productPrice"
+    ).textContent =
+        formatPrice(
+            product
+        );
+
+
+    document.getElementById(
+        "productOldPrice"
+    ).textContent =
         product.oldPrice
             ? formatPrice({
-                price: product.oldPrice,
-                currency: product.currency
+                price:
+                    product.oldPrice,
+
+                currency:
+                    product.currency
             })
             : "";
 
-    document.getElementById("productRating").textContent =
+
+    document.getElementById(
+        "productRating"
+    ).textContent =
         product.rating
-            ? "★ " + product.rating
+            ? "★ " +
+              product.rating
             : "★ —";
 
-    document.getElementById("productCategory").textContent =
-        product.category || "Одежда";
+
+    document.getElementById(
+        "productCategory"
+    ).textContent =
+        product.category ||
+        "Одежда";
+
 
     updateLikeButton();
-
 }
 
 
 /* =========================================================
-   SHARE
+SHARE
 ========================================================= */
 
 async function shareCurrentProduct() {
@@ -906,8 +1711,10 @@ async function shareCurrentProduct() {
         return;
     }
 
+
     const text =
         `${currentProduct.title} — ${formatPrice(currentProduct)}`;
+
 
     try {
 
@@ -922,7 +1729,6 @@ async function shareCurrentProduct() {
 
                 url:
                     currentProduct.url
-
             });
 
         } else {
@@ -934,19 +1740,17 @@ async function shareCurrentProduct() {
             showToast(
                 "🔗 Ссылка скопирована"
             );
-
         }
 
     } catch (error) {
 
         // User cancelled share.
     }
-
 }
 
 
 /* =========================================================
-   COMMENTS
+COMMENTS
 ========================================================= */
 
 function openComments() {
@@ -960,6 +1764,7 @@ function openComments() {
         document.getElementById(
             "commentsList"
         );
+
 
     const comments = [
 
@@ -982,28 +1787,34 @@ function openComments() {
             user: "Катя",
             text: "Размер подошёл идеально"
         }
-
     ];
 
+
     list.innerHTML =
-        comments.map(comment => `
+        comments
+            .map(
+                comment => `
 
-            <div class="comment">
+                    <div class="comment">
 
-                <div class="comment-user">
-                    ${escapeHTML(comment.user)}
-                </div>
+                        <div class="comment-user">
+                            ${escapeHTML(comment.user)}
+                        </div>
 
-                <div class="comment-text">
-                    ${escapeHTML(comment.text)}
-                </div>
+                        <div class="comment-text">
+                            ${escapeHTML(comment.text)}
+                        </div>
 
-            </div>
+                    </div>
 
-        `).join("");
+                `
+            )
+            .join("");
 
-    overlay.classList.add("show");
 
+    overlay.classList.add(
+        "show"
+    );
 }
 
 
@@ -1012,20 +1823,21 @@ function closeComments(event) {
     if (
         !event ||
         event.target.id ===
-        "commentsOverlay"
+            "commentsOverlay"
     ) {
 
         document
-            .getElementById("commentsOverlay")
-            .classList.remove("show");
-
+            .getElementById(
+                "commentsOverlay"
+            )
+            .classList
+            .remove("show");
     }
-
 }
 
 
 /* =========================================================
-   SEARCH
+SEARCH
 ========================================================= */
 
 function setupSearch() {
@@ -1035,6 +1847,7 @@ function setupSearch() {
             "searchInput"
         );
 
+
     input.addEventListener(
         "input",
         () => {
@@ -1042,61 +1855,82 @@ function setupSearch() {
             const value =
                 input.value.trim();
 
+
             document
-                .getElementById("searchClear")
+                .getElementById(
+                    "searchClear"
+                )
                 .style.display =
                     value
                         ? "flex"
                         : "none";
 
-            clearTimeout(searchTimer);
+
+            clearTimeout(
+                searchTimer
+            );
+
 
             searchTimer =
                 setTimeout(
-                    () => performSearch(value),
+                    () =>
+                        performSearch(
+                            value
+                        ),
                     150
                 );
-
         }
     );
+
 
     input.addEventListener(
         "keydown",
         event => {
 
-            if (event.key === "Enter") {
+            if (
+                event.key ===
+                "Enter"
+            ) {
 
                 event.preventDefault();
 
                 performSearch(
                     input.value.trim()
                 );
-
             }
-
         }
     );
-
 }
 
 
 function quickSearch(query) {
 
-    switchTab("search");
+    switchTab(
+        "search"
+    );
+
 
     const input =
         document.getElementById(
             "searchInput"
         );
 
-    input.value = query;
+
+    input.value =
+        query;
+
 
     document
-        .getElementById("searchClear")
-        .style.display = "flex";
+        .getElementById(
+            "searchClear"
+        )
+        .style.display =
+            "flex";
 
-    performSearch(query);
 
+    performSearch(
+        query
+    );
 }
 
 
@@ -1107,26 +1941,41 @@ function clearSearch() {
             "searchInput"
         );
 
+
     input.value = "";
 
-    document
-        .getElementById("searchClear")
-        .style.display = "none";
 
     document
-        .getElementById("searchResults")
-        .classList.remove("active");
+        .getElementById(
+            "searchClear"
+        )
+        .style.display =
+            "none";
+
 
     document
-        .getElementById("searchHome")
-        .style.display = "block";
+        .getElementById(
+            "searchResults"
+        )
+        .classList
+        .remove("active");
+
+
+    document
+        .getElementById(
+            "searchHome"
+        )
+        .style.display =
+            "block";
+
 
     input.focus();
-
 }
 
 
-function performSearch(query) {
+function performSearch(
+    query
+) {
 
     const home =
         document.getElementById(
@@ -1151,18 +2000,23 @@ function performSearch(query) {
 
     if (!query) {
 
-        home.style.display = "block";
+        home.style.display =
+            "block";
 
-        results.classList.remove("active");
+        results.classList.remove(
+            "active"
+        );
 
         return;
-
     }
 
 
-    home.style.display = "none";
+    home.style.display =
+        "none";
 
-    results.classList.add("active");
+    results.classList.add(
+        "active"
+    );
 
 
     const normalizedQuery =
@@ -1178,31 +2032,36 @@ function performSearch(query) {
 
 
     const filtered =
-        allProducts.filter(product => {
+        allProducts.filter(
+            product => {
 
-            const searchable = [
+                const searchable = [
 
-                product.title,
+                    product.title,
 
-                product.brand,
+                    product.brand,
 
-                product.category,
+                    product.category,
 
-                product.source,
+                    product.source,
 
-                sourceLabel(product.source)
+                    sourceLabel(
+                        product.source
+                    )
 
-            ]
-                .join(" ")
-                .toLowerCase();
+                ]
+                    .join(" ")
+                    .toLowerCase();
 
 
-            return tokens.every(
-                token =>
-                    searchable.includes(token)
-            );
-
-        });
+                return tokens.every(
+                    token =>
+                        searchable.includes(
+                            token
+                        )
+                );
+            }
+        );
 
 
     resultCount.textContent =
@@ -1218,7 +2077,13 @@ function performSearch(query) {
 
         resultList.innerHTML = `
 
-            <div class="empty" style="position:relative; min-height:300px;">
+            <div
+                class="empty"
+                style="
+                    position:relative;
+                    min-height:300px;
+                "
+            >
 
                 <div class="empty-inner">
 
@@ -1242,64 +2107,78 @@ function performSearch(query) {
         `;
 
         return;
-
     }
 
 
-    filtered.forEach(product => {
+    filtered.forEach(
+        product => {
 
-        const card =
-            document.createElement("div");
+            const card =
+                document.createElement(
+                    "div"
+                );
 
-        card.className =
-            "result-card";
+            card.className =
+                "result-card";
 
-        card.innerHTML = `
 
-            <img
-                class="result-image"
-                src="${escapeAttribute(product.image)}"
-                alt="${escapeAttribute(product.title)}"
-            >
+            card.innerHTML = `
 
-            <div class="result-info">
+                <img
+                    class="result-image"
+                    src="${escapeAttribute(product.image)}"
+                    alt="${escapeAttribute(product.title)}"
+                >
 
-                <div class="result-brand">
-                    ${escapeHTML(
-                        product.brand ||
-                        sourceLabel(product.source)
-                    )}
+                <div class="result-info">
+
+                    <div class="result-brand">
+                        ${escapeHTML(
+                            product.brand ||
+                            sourceLabel(
+                                product.source
+                            )
+                        )}
+                    </div>
+
+                    <div class="result-title">
+                        ${escapeHTML(
+                            product.title
+                        )}
+                    </div>
+
+                    <div class="result-price">
+                        ${escapeHTML(
+                            formatPrice(
+                                product
+                            )
+                        )}
+                    </div>
+
                 </div>
 
-                <div class="result-title">
-                    ${escapeHTML(product.title)}
-                </div>
+            `;
 
-                <div class="result-price">
-                    ${escapeHTML(
-                        formatPrice(product)
-                    )}
-                </div>
 
-            </div>
+            card.onclick =
+                () => {
 
-        `;
+                    openProductFromObject(
+                        product
+                    );
+                };
 
-        card.onclick = () => {
 
-            openProductFromObject(product);
-
-        };
-
-        resultList.appendChild(card);
-
-    });
-
+            resultList.appendChild(
+                card
+            );
+        }
+    );
 }
 
 
 /* =========================================================
-   PROFILE
+PROFILE
 ========================================================= */
 
 function updateProfile() {
@@ -1328,11 +2207,14 @@ function updateProfile() {
     likedCount.textContent =
         favorites.length;
 
+
     viewedCount.textContent =
         viewedProducts.length;
 
+
     openedCount.textContent =
         openedProducts.length;
+
 
     collectionCount.textContent =
         `${favorites.length} ${
@@ -1346,7 +2228,6 @@ function updateProfile() {
 
 
     renderRecentProducts();
-
 }
 
 
@@ -1356,6 +2237,7 @@ function renderRecentProducts() {
         document.getElementById(
             "recentGrid"
         );
+
 
     grid.innerHTML = "";
 
@@ -1368,92 +2250,115 @@ function renderRecentProducts() {
 
     const recent =
         recentIds
-            .map(id =>
-                allProducts.find(
-                    product =>
-                        String(product.id) ===
-                        String(id)
-                )
+            .map(
+                id =>
+                    allProducts.find(
+                        product =>
+                            String(product.id) ===
+                            String(id)
+                    )
             )
             .filter(Boolean);
 
 
-    recent.forEach(product => {
+    recent.forEach(
+        product => {
 
-        const card =
-            document.createElement("div");
+            const card =
+                document.createElement(
+                    "div"
+                );
 
-        card.className =
-            "recent-card";
+            card.className =
+                "recent-card";
 
-        card.innerHTML = `
 
-            <img
-                src="${escapeAttribute(product.image)}"
-                alt="${escapeAttribute(product.title)}"
-            >
+            card.innerHTML = `
 
-            <div class="recent-price">
-                ${escapeHTML(formatPrice(product))}
-            </div>
+                <img
+                    src="${escapeAttribute(product.image)}"
+                    alt="${escapeAttribute(product.title)}"
+                >
 
-        `;
+                <div class="recent-price">
+                    ${escapeHTML(
+                        formatPrice(
+                            product
+                        )
+                    )}
+                </div>
 
-        card.onclick = () => {
+            `;
 
-            openProductFromObject(product);
 
-        };
+            card.onclick =
+                () => {
 
-        grid.appendChild(card);
+                    openProductFromObject(
+                        product
+                    );
+                };
 
-    });
+
+            grid.appendChild(
+                card
+            );
+        }
+    );
 
 
     if (!recent.length) {
 
         grid.innerHTML = `
 
-            <div style="
-                grid-column:1/-1;
-                padding:25px 5px;
-                color:rgba(255,255,255,.4);
-                font-size:13px;
-            ">
+            <div
+                style="
+                    grid-column:1/-1;
+                    padding:25px 5px;
+                    color:rgba(255,255,255,.4);
+                    font-size:13px;
+                "
+            >
                 Начни листать ленту —
                 здесь появятся твои находки.
             </div>
 
         `;
-
     }
-
 }
 
 
-function openCollection(type) {
+function openCollection(
+    type
+) {
 
-    if (type === "favorites") {
+    if (
+        type === "favorites"
+    ) {
 
-        switchTab("favorites");
-
+        switchTab(
+            "favorites"
+        );
     }
-
 }
 
 
 /* =========================================================
-   VIEW / OPEN TRACKING
+VIEW TRACKING
 ========================================================= */
 
-function registerView(product) {
+function registerView(
+    product
+) {
 
     if (!product) {
         return;
     }
 
+
     const id =
         String(product.id);
+
 
     if (
         !viewedProducts
@@ -1461,49 +2366,84 @@ function registerView(product) {
             .includes(id)
     ) {
 
-        viewedProducts.push(id);
+        viewedProducts.push(
+            id
+        );
 
-        if (viewedProducts.length > 500) {
+
+        if (
+            viewedProducts.length >
+            500
+        ) {
+
             viewedProducts.shift();
         }
+
 
         saveJSON(
             "styleflow_viewed",
             viewedProducts
         );
 
-    }
 
+        console.log(
+            "[StyleFlow] Просмотрен товар:",
+            product.title
+        );
+    }
 }
 
 
-function registerOpen(product) {
+function registerOpen(
+    product
+) {
 
     if (!product) {
         return;
     }
 
+
     const id =
         String(product.id);
 
-    openedProducts.push(id);
 
-    if (openedProducts.length > 500) {
+    openedProducts.push(
+        id
+    );
+
+
+    if (
+        openedProducts.length >
+        500
+    ) {
+
         openedProducts.shift();
     }
+
 
     saveJSON(
         "styleflow_opened",
         openedProducts
     );
 
-    updateProfile();
 
+    /*
+    Открытие товара —
+    сильный сигнал интереса.
+
+    Пересобираем оставшуюся ленту
+    под новое действие пользователя.
+    */
+
+    rebuildFeedAfterSignal();
+
+
+    updateProfile();
 }
 
 
 /* =========================================================
-   SWIPE
+SWIPE
 ========================================================= */
 
 function setupSwipe() {
@@ -1522,18 +2462,28 @@ function setupSwipe() {
                 return;
             }
 
+
             touchStartY =
-                event.touches[0].clientY;
+                event.touches[0]
+                    .clientY;
+
 
             touchStartX =
-                event.touches[0].clientX;
+                event.touches[0]
+                    .clientX;
 
-            isDragging = true;
 
-            card.classList.add("dragging");
+            isDragging =
+                true;
 
+
+            card.classList.add(
+                "dragging"
+            );
         },
-        { passive: true }
+        {
+            passive: true
+        }
     );
 
 
@@ -1545,11 +2495,15 @@ function setupSwipe() {
                 return;
             }
 
+
             const y =
-                event.touches[0].clientY;
+                event.touches[0]
+                    .clientY;
 
             const x =
-                event.touches[0].clientX;
+                event.touches[0]
+                    .clientX;
+
 
             const deltaY =
                 y - touchStartY;
@@ -1565,14 +2519,15 @@ function setupSwipe() {
 
                 event.preventDefault();
 
+
                 card.style.transform =
                     `translateY(${deltaY}px)
                      rotate(${deltaY * -.025}deg)`;
-
             }
-
         },
-        { passive: false }
+        {
+            passive: false
+        }
     );
 
 
@@ -1584,38 +2539,53 @@ function setupSwipe() {
                 return;
             }
 
-            isDragging = false;
 
-            card.classList.remove("dragging");
+            isDragging =
+                false;
+
+
+            card.classList.remove(
+                "dragging"
+            );
 
 
             const touch =
                 event.changedTouches[0];
+
 
             const deltaY =
                 touch.clientY -
                 touchStartY;
 
 
-            card.style.transform = "";
+            card.style.transform =
+                "";
 
 
-            if (Math.abs(deltaY) > 80) {
+            if (
+                Math.abs(deltaY) >
+                80
+            ) {
 
-                if (deltaY < 0) {
+                if (
+                    deltaY < 0
+                ) {
+
                     nextProduct();
+
                 } else {
+
                     previousProduct();
                 }
 
-                return;
 
+                return;
             }
 
 
-            // Double tap
             const now =
                 Date.now();
+
 
             if (
                 now - lastTapTime <
@@ -1623,18 +2593,21 @@ function setupSwipe() {
             ) {
 
                 toggleLike();
-
             }
 
-            lastTapTime = now;
 
+            lastTapTime =
+                now;
         },
-        { passive: true }
+        {
+            passive: true
+        }
     );
 
 
-    // Mouse wheel
-    let wheelLocked = false;
+    let wheelLocked =
+        false;
+
 
     card.addEventListener(
         "wheel",
@@ -1644,51 +2617,79 @@ function setupSwipe() {
                 return;
             }
 
-            wheelLocked = true;
 
-            if (event.deltaY > 0) {
+            wheelLocked =
+                true;
+
+
+            if (
+                event.deltaY > 0
+            ) {
+
                 nextProduct();
+
             } else {
+
                 previousProduct();
             }
 
-            setTimeout(() => {
-                wheelLocked = false;
-            }, 300);
 
+            setTimeout(
+                () => {
+
+                    wheelLocked =
+                        false;
+
+                },
+                300
+            );
         },
-        { passive: true }
+        {
+            passive: true
+        }
     );
 
 
-    // Keyboard
     document.addEventListener(
         "keydown",
         event => {
 
-            if (currentTab !== "feed") {
+            if (
+                currentTab !==
+                "feed"
+            ) {
                 return;
             }
 
+
             if (
-                event.key === "ArrowDown" ||
-                event.key === "ArrowRight"
+                event.key ===
+                    "ArrowDown" ||
+                event.key ===
+                    "ArrowRight"
             ) {
+
                 nextProduct();
             }
 
+
             if (
-                event.key === "ArrowUp" ||
-                event.key === "ArrowLeft"
+                event.key ===
+                    "ArrowUp" ||
+                event.key ===
+                    "ArrowLeft"
             ) {
+
                 previousProduct();
             }
-
         }
     );
-
 }
 
+
+/* =========================================================
+NEXT / PREVIOUS
+========================================================= */
 
 function nextProduct() {
 
@@ -1696,19 +2697,38 @@ function nextProduct() {
         return;
     }
 
+
     currentIndex++;
+
 
     if (
         currentIndex >=
         products.length
     ) {
+
+        /*
+        Пользователь дошёл до конца
+        персональной пачки.
+
+        Строим новую пачку из
+        оставшихся товаров.
+        */
+
+        buildPersonalizedFeed();
+
         currentIndex = 0;
+
+
+        if (!products.length) {
+            showEmptyFeed();
+            return;
+        }
     }
+
 
     animateCardChange(
         "next"
     );
-
 }
 
 
@@ -1718,28 +2738,42 @@ function previousProduct() {
         return;
     }
 
+
     currentIndex--;
 
-    if (currentIndex < 0) {
+
+    if (
+        currentIndex < 0
+    ) {
+
         currentIndex =
             products.length - 1;
     }
 
+
     animateCardChange(
         "previous"
     );
-
 }
 
 
-function animateCardChange(direction) {
+/* =========================================================
+CARD ANIMATION
+========================================================= */
+
+function animateCardChange(
+    direction
+) {
 
     const card =
         document.getElementById(
             "productCard"
         );
 
-    card.style.opacity = "0";
+
+    card.style.opacity =
+        "0";
+
 
     card.style.transform =
         direction === "next"
@@ -1747,19 +2781,26 @@ function animateCardChange(direction) {
             : "translateY(20px)";
 
 
-    setTimeout(() => {
+    setTimeout(
+        () => {
 
-        showProduct();
+            showProduct();
 
-        requestAnimationFrame(() => {
 
-            card.style.opacity = "1";
-            card.style.transform = "";
+            requestAnimationFrame(
+                () => {
 
-        });
+                    card.style.opacity =
+                        "1";
 
-    }, 100);
+                    card.style.transform =
+                        "";
+                }
+            );
 
+        },
+        100
+    );
 }
 
 
@@ -1770,14 +2811,17 @@ function resetCardPosition() {
             "productCard"
         );
 
-    card.style.opacity = "1";
-    card.style.transform = "";
 
+    card.style.opacity =
+        "1";
+
+    card.style.transform =
+        "";
 }
 
 
 /* =========================================================
-   HEART
+HEART
 ========================================================= */
 
 function showHeart() {
@@ -1787,75 +2831,107 @@ function showHeart() {
             "bigHeart"
         );
 
-    heart.classList.remove("show");
+
+    heart.classList.remove(
+        "show"
+    );
+
 
     void heart.offsetWidth;
 
-    heart.classList.add("show");
 
+    heart.classList.add(
+        "show"
+    );
 }
 
 
 /* =========================================================
-   TOAST
+TOAST
 ========================================================= */
 
-let toastTimer = null;
+let toastTimer =
+    null;
 
-function showToast(message) {
+
+function showToast(
+    message
+) {
 
     const toast =
         document.getElementById(
             "toast"
         );
 
+
     toast.textContent =
         message;
 
-    toast.classList.add("show");
 
-    clearTimeout(toastTimer);
+    toast.classList.add(
+        "show"
+    );
+
+
+    clearTimeout(
+        toastTimer
+    );
+
 
     toastTimer =
-        setTimeout(() => {
+        setTimeout(
+            () => {
 
-            toast.classList.remove("show");
+                toast.classList.remove(
+                    "show"
+                );
 
-        }, 1800);
-
+            },
+            1800
+        );
 }
 
 
 /* =========================================================
-   LOCAL STORAGE
+LOCAL STORAGE
 ========================================================= */
 
-function loadJSON(key, fallback) {
+function loadJSON(
+    key,
+    fallback
+) {
 
     try {
 
         const value =
-            localStorage.getItem(key);
+            localStorage.getItem(
+                key
+            );
+
 
         if (!value) {
             return fallback;
         }
 
+
         const parsed =
             JSON.parse(value);
 
-        return parsed ?? fallback;
+
+        return parsed ??
+            fallback;
 
     } catch (error) {
 
         return fallback;
-
     }
-
 }
 
 
-function saveJSON(key, value) {
+function saveJSON(
+    key,
+    value
+) {
 
     try {
 
@@ -1870,53 +2946,74 @@ function saveJSON(key, value) {
             "localStorage error:",
             error
         );
-
     }
-
 }
 
 
 /* =========================================================
-   SECURITY / HTML HELPERS
+ESCAPING
 ========================================================= */
 
-function escapeHTML(value) {
+function escapeHTML(
+    value
+) {
 
-    return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-
+    return String(
+        value ?? ""
+    )
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+        .replace(
+            /</g,
+            "&lt;"
+        )
+        .replace(
+            />/g,
+            "&gt;"
+        )
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+        .replace(
+            /'/g,
+            "&#039;"
+        );
 }
 
 
-function escapeAttribute(value) {
+function escapeAttribute(
+    value
+) {
 
-    return escapeHTML(value);
-
+    return escapeHTML(
+        value
+    );
 }
 
 
-/* =========================================================
-   UTILS
-========================================================= */
-
-function capitalize(value) {
+function capitalize(
+    value
+) {
 
     const text =
-        String(value || "");
+        String(
+            value || ""
+        );
+
 
     if (!text) {
         return "";
     }
 
+
     return (
-        text.charAt(0).toUpperCase() +
+        text.charAt(0)
+            .toUpperCase() +
         text.slice(1)
     );
-
 }
 
 
@@ -1928,10 +3025,12 @@ function getRussianPlural(
 ) {
 
     const n =
-        Math.abs(number) % 100;
+        Math.abs(number) %
+        100;
 
     const n1 =
         n % 10;
+
 
     if (
         n > 10 &&
@@ -1940,9 +3039,13 @@ function getRussianPlural(
         return many;
     }
 
-    if (n1 === 1) {
+
+    if (
+        n1 === 1
+    ) {
         return one;
     }
+
 
     if (
         n1 >= 2 &&
@@ -1951,6 +3054,6 @@ function getRussianPlural(
         return few;
     }
 
-    return many;
 
+    return many;
 }
