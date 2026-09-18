@@ -2,20 +2,30 @@
 STYLEFLOW
 Personalized marketplace feed
 
-ЭТАП 1:
-- не показываем уже просмотренные товары
-- собираем интересы пользователя
-- ранжируем товары под пользователя
-- учитываем:
+ЭТАП 2:
+
+1. Новая лента сначала максимально случайная.
+2. Не показываем уже просмотренные товары.
+3. Постепенно собираем интересы пользователя.
+4. Персонализация усиливается по мере накопления сигналов.
+5. Даже персонализированная лента сохраняет случайные товары.
+6. Не допускаем длинных серий одной категории/площадки.
+7. Учитываем:
     * категории
     * бренды
     * маркетплейсы
     * цены
     * лайки
     * открытия товаров
-- сохраняем историю в localStorage
+    * просмотры
+8. История сохраняется в localStorage.
 
 Product objects are normalized in one place.
+========================================================= */
+
+
+/* =========================================================
+GLOBAL
 ========================================================= */
 
 let allProducts = [];
@@ -37,16 +47,77 @@ let searchTimer = null;
 
 
 /* =========================================================
+RECOMMENDATION SETTINGS
+========================================================= */
+
+/*
+Сколько пользователь должен совершить действий,
+чтобы персонализация начала заметно влиять.
+
+Важно:
+мы не включаем персонализацию резко.
+
+Она постепенно усиливается:
+0 сигналов -> 0%
+10 сигналов -> небольшая
+20+ сигналов -> заметная
+50+ сигналов -> сильная
+*/
+
+const PERSONALIZATION_START =
+    5;
+
+const PERSONALIZATION_FULL =
+    50;
+
+
+/*
+Часть ленты всегда остаётся случайной.
+
+Даже при сильной персонализации
+не хотим превращать StyleFlow
+в список одинаковых товаров.
+*/
+
+const MIN_RANDOM_RATIO =
+    0.20;
+
+const MAX_RANDOM_RATIO =
+    0.75;
+
+
+/*
+Максимальная длина серии одной категории
+или одного источника.
+*/
+
+const MAX_SAME_CATEGORY_STREAK =
+    2;
+
+const MAX_SAME_SOURCE_STREAK =
+    3;
+
+
+/* =========================================================
 TELEGRAM
 ========================================================= */
 
 if (window.Telegram && Telegram.WebApp) {
+
     Telegram.WebApp.ready();
+
     Telegram.WebApp.expand();
 
     try {
-        Telegram.WebApp.setHeaderColor("#09090d");
-        Telegram.WebApp.setBackgroundColor("#09090d");
+
+        Telegram.WebApp.setHeaderColor(
+            "#09090d"
+        );
+
+        Telegram.WebApp.setBackgroundColor(
+            "#09090d"
+        );
+
     } catch (e) {}
 }
 
@@ -55,12 +126,19 @@ if (window.Telegram && Telegram.WebApp) {
 START
 ========================================================= */
 
-document.addEventListener("DOMContentLoaded", () => {
-    setupSearch();
-    setupSwipe();
-    loadFeed();
-    updateProfile();
-});
+document.addEventListener(
+    "DOMContentLoaded",
+    () => {
+
+        setupSearch();
+
+        setupSwipe();
+
+        loadFeed();
+
+        updateProfile();
+    }
+);
 
 
 /* =========================================================
@@ -68,18 +146,35 @@ LOAD FEED
 ========================================================= */
 
 async function loadFeed() {
+
     try {
-        const response = await fetch("/api/feed", {
-            cache: "no-store"
-        });
+
+        const response =
+            await fetch(
+                "/api/feed",
+                {
+                    cache: "no-store"
+                }
+            );
+
 
         if (!response.ok) {
-            throw new Error("Feed request failed");
+
+            throw new Error(
+                "Feed request failed"
+            );
         }
 
-        const data = await response.json();
 
-        console.log("[StyleFlow] Feed response:", data);
+        const data =
+            await response.json();
+
+
+        console.log(
+            "[StyleFlow] Feed response:",
+            data
+        );
+
 
         const rawProducts =
             Array.isArray(data)
@@ -90,46 +185,69 @@ async function loadFeed() {
                         ? data.items
                         : [];
 
+
         console.log(
             "[StyleFlow] Получено товаров:",
             rawProducts.length
         );
 
+
         allProducts =
-            rawProducts.map(normalizeProduct);
+            rawProducts.map(
+                normalizeProduct
+            );
+
 
         console.log(
             "[StyleFlow] Нормализовано товаров:",
             allProducts.length
         );
 
-        if (allProducts.length > 0) {
+
+        if (
+            allProducts.length > 0
+        ) {
+
             console.log(
                 "[StyleFlow] Первый товар:",
                 allProducts[0]
             );
         }
 
+
         localStorage.setItem(
             "styleflow_main_feed",
-            JSON.stringify(allProducts)
+            JSON.stringify(
+                allProducts
+            )
         );
+
 
         buildPersonalizedFeed();
 
+
         currentIndex = 0;
 
-        if (products.length > 0) {
+
+        if (
+            products.length > 0
+        ) {
+
             showProduct();
+
         } else {
+
             showEmptyFeed();
         }
 
+
     } catch (error) {
+
         console.error(
             "[StyleFlow] Feed error:",
             error
         );
+
 
         const cached =
             loadJSON(
@@ -137,25 +255,42 @@ async function loadFeed() {
                 []
             );
 
-        if (cached.length > 0) {
+
+        if (
+            cached.length > 0
+        ) {
+
             allProducts =
-                cached.map(normalizeProduct);
+                cached.map(
+                    normalizeProduct
+                );
+
 
             buildPersonalizedFeed();
 
+
             currentIndex = 0;
 
-            if (products.length > 0) {
+
+            if (
+                products.length > 0
+            ) {
+
                 showProduct();
+
             } else {
+
                 showEmptyFeed();
             }
+
 
             showToast(
                 "Показана последняя сохранённая лента"
             );
 
+
         } else {
+
             showEmptyFeed();
         }
     }
@@ -166,7 +301,10 @@ async function loadFeed() {
 NORMALIZE PRODUCT
 ========================================================= */
 
-function normalizeProduct(item, index = 0) {
+function normalizeProduct(
+    item,
+    index = 0
+) {
 
     const source =
         item.source ||
@@ -178,11 +316,13 @@ function normalizeProduct(item, index = 0) {
             ""
         );
 
+
     const title =
         item.title ||
         item.name ||
         item.product_name ||
         "Товар";
+
 
     const image =
         item.image ||
@@ -195,11 +335,13 @@ function normalizeProduct(item, index = 0) {
         ) ||
         "https://via.placeholder.com/600x800?text=StyleFlow";
 
+
     const url =
         item.url ||
         item.link ||
         item.product_url ||
         "#";
+
 
     const price =
         parsePrice(
@@ -208,6 +350,7 @@ function normalizeProduct(item, index = 0) {
             item.sale_price
         );
 
+
     const oldPrice =
         parsePrice(
             item.old_price ??
@@ -215,20 +358,24 @@ function normalizeProduct(item, index = 0) {
             item.original_price
         );
 
+
     const rating =
         item.rating ??
         item.stars ??
         "";
+
 
     const brand =
         item.brand ||
         item.vendor ||
         "";
 
+
     const category =
         item.category ||
         item.type ||
         "Одежда";
+
 
     const id =
         String(
@@ -238,11 +385,15 @@ function normalizeProduct(item, index = 0) {
             `${source}_${index}_${title}`
         );
 
+
     return {
+
         id,
 
         source:
-            normalizeSource(source),
+            normalizeSource(
+                source
+            ),
 
         external_id:
             String(
@@ -292,72 +443,125 @@ function detectSource(url) {
         String(url)
             .toLowerCase();
 
-    if (value.includes("wildberries")) {
+
+    if (
+        value.includes(
+            "wildberries"
+        )
+    ) {
+
         return "wildberries";
     }
 
-    if (value.includes("ozon")) {
+
+    if (
+        value.includes("ozon")
+    ) {
+
         return "ozon";
     }
 
-    if (value.includes("aliexpress")) {
+
+    if (
+        value.includes(
+            "aliexpress"
+        )
+    ) {
+
         return "aliexpress";
     }
 
-    if (value.includes("kufar")) {
+
+    if (
+        value.includes("kufar")
+    ) {
+
         return "kufar";
     }
+
 
     return "marketplace";
 }
 
 
-function normalizeSource(source) {
+function normalizeSource(
+    source
+) {
 
     const value =
-        String(source || "")
+        String(
+            source || ""
+        )
             .toLowerCase()
             .trim();
+
 
     if (
         value.includes("wild") ||
         value === "wb"
     ) {
+
         return "wildberries";
     }
 
-    if (value.includes("ozon")) {
+
+    if (
+        value.includes("ozon")
+    ) {
+
         return "ozon";
     }
+
 
     if (
         value.includes("ali") ||
         value.includes("aliexpress")
     ) {
+
         return "aliexpress";
     }
 
-    if (value.includes("kufar")) {
+
+    if (
+        value.includes("kufar")
+    ) {
+
         return "kufar";
     }
 
-    return value || "marketplace";
+
+    return value ||
+        "marketplace";
 }
 
 
-function sourceLabel(source) {
+function sourceLabel(
+    source
+) {
 
     const labels = {
-        wildberries: "🟣 Wildberries",
-        ozon: "🔵 Ozon",
-        aliexpress: "🟠 AliExpress",
-        kufar: "🟢 Kufar",
-        marketplace: "🛍 Marketplace"
+
+        wildberries:
+            "🟣 Wildberries",
+
+        ozon:
+            "🔵 Ozon",
+
+        aliexpress:
+            "🟠 AliExpress",
+
+        kufar:
+            "🟢 Kufar",
+
+        marketplace:
+            "🛍 Marketplace"
     };
+
 
     return (
         labels[source] ||
-        "🛍 " + capitalize(source)
+        "🛍 " +
+        capitalize(source)
     );
 }
 
@@ -366,27 +570,43 @@ function sourceLabel(source) {
 PRICE
 ========================================================= */
 
-function parsePrice(value) {
+function parsePrice(
+    value
+) {
 
     if (
         value === null ||
         value === undefined ||
         value === ""
     ) {
+
         return null;
     }
 
-    if (typeof value === "number") {
+
+    if (
+        typeof value === "number"
+    ) {
+
         return value;
     }
 
+
     const cleaned =
         String(value)
-            .replace(/[^\d.,-]/g, "")
-            .replace(",", ".");
+            .replace(
+                /[^\d.,-]/g,
+                ""
+            )
+            .replace(
+                ",",
+                "."
+            );
+
 
     const number =
         Number(cleaned);
+
 
     return Number.isFinite(number)
         ? number
@@ -394,71 +614,97 @@ function parsePrice(value) {
 }
 
 
-function detectCurrency(item) {
+function detectCurrency(
+    item
+) {
 
     const raw =
         String(
             item.currency ||
             item.price ||
             ""
-        ).toLowerCase();
+        )
+            .toLowerCase();
+
 
     if (
         raw.includes("byn") ||
         raw.includes("бел")
     ) {
+
         return "BYN";
     }
+
 
     if (
         raw.includes("₽") ||
         raw.includes("rub") ||
         raw.includes("руб")
     ) {
+
         return "RUB";
     }
+
 
     if (
         raw.includes("$") ||
         raw.includes("usd")
     ) {
+
         return "USD";
     }
+
 
     return "BYN";
 }
 
 
-function formatPrice(product) {
+function formatPrice(
+    product
+) {
 
-    if (product.price === null) {
+    if (
+        product.price === null
+    ) {
+
         return "Цена уточняется";
     }
 
+
     const currency =
-        product.currency || "BYN";
+        product.currency ||
+        "BYN";
+
 
     const symbols = {
+
         BYN: "BYN",
+
         RUB: "₽",
+
         USD: "$",
+
         EUR: "€"
     };
+
 
     const symbol =
         symbols[currency] ||
         currency;
+
 
     return (
         Number(product.price)
             .toLocaleString(
                 "ru-RU",
                 {
-                    maximumFractionDigits: 2
+                    maximumFractionDigits:
+                        2
                 }
             )
-        + " "
-        + symbol
+        +
+        " " +
+        symbol
     );
 }
 
@@ -467,21 +713,50 @@ function formatPrice(product) {
 PERSONALIZED FEED
 ========================================================= */
 
+/*
+Главное изменение.
+
+Раньше здесь было:
+
+    score -> sort -> вся лента по score
+
+Из-за этого один запрос мог практически
+полностью заполнить верх ленты.
+
+Теперь:
+
+    1. убираем просмотренные
+    2. определяем силу профиля
+    3. строим score
+    4. перемешиваем товары
+    5. постепенно добавляем персонализацию
+    6. контролируем разнообразие
+
+В результате лента не превращается
+в "осень → осень → осень".
+*/
+
 function buildPersonalizedFeed() {
 
-    if (!allProducts.length) {
+    if (
+        !allProducts.length
+    ) {
+
         products = [];
+
         return;
     }
 
 
     const viewedSet =
         new Set(
-            viewedProducts.map(String)
+            viewedProducts.map(
+                String
+            )
         );
 
 
-    const unviewed =
+    let unviewed =
         allProducts.filter(
             product =>
                 !viewedSet.has(
@@ -495,10 +770,12 @@ function buildPersonalizedFeed() {
         allProducts.length
     );
 
+
     console.log(
         "[StyleFlow] Просмотрено:",
         viewedSet.size
     );
+
 
     console.log(
         "[StyleFlow] Непросмотренных:",
@@ -507,17 +784,19 @@ function buildPersonalizedFeed() {
 
 
     /*
-    Если остались непросмотренные товары —
-    используем только их.
+    Если остались непросмотренные —
+    используем их.
 
-    Если пользователь просмотрел абсолютно всё —
+    Если всё просмотрено —
     начинаем новый круг.
     */
 
     let candidates;
 
 
-    if (unviewed.length > 0) {
+    if (
+        unviewed.length > 0
+    ) {
 
         candidates =
             unviewed;
@@ -530,12 +809,10 @@ function buildPersonalizedFeed() {
 
 
         candidates =
-            [...allProducts];
+            [
+                ...allProducts
+            ];
 
-
-        /*
-        Начинаем новый круг.
-        */
 
         viewedProducts = [];
 
@@ -547,8 +824,18 @@ function buildPersonalizedFeed() {
     }
 
 
+    if (
+        !candidates.length
+    ) {
+
+        products = [];
+
+        return;
+    }
+
+
     /*
-    Получаем профиль интересов пользователя.
+    Профиль пользователя.
     */
 
     const profile =
@@ -556,35 +843,79 @@ function buildPersonalizedFeed() {
 
 
     /*
-    Если пользователь новый —
-    просто перемешиваем товары.
+    Сколько у нас накоплено сигналов.
 
-    Если уже есть история —
-    сортируем по персональному score.
+    0-5:
+        полностью случайно
+
+    5-50:
+        постепенное усиление
+
+    50+:
+        полноценная персонализация
     */
 
-    const hasProfile =
-        profile.totalSignals > 0;
+    const personalization =
+        getPersonalizationStrength(
+            profile.totalSignals
+        );
 
 
-    if (!hasProfile) {
+    console.log(
+        "[StyleFlow] Сила персонализации:",
+        personalization
+    );
+
+
+    /*
+    Строим случайную базу.
+
+    Это важно:
+    даже если API вернул товары блоками,
+    здесь они перемешаются.
+    */
+
+    const shuffled =
+        shuffleArray(
+            candidates
+        );
+
+
+    /*
+    Новый пользователь.
+
+    Просто случайная лента,
+    но с контролем разнообразия.
+    */
+
+    if (
+        personalization <= 0
+    ) {
 
         products =
-            shuffleArray(
-                candidates
+            buildDiverseRandomFeed(
+                shuffled
             );
 
+
         console.log(
-            "[StyleFlow] Новый пользователь — случайная лента"
+            "[StyleFlow] Новая лента — полностью случайная"
         );
+
 
         return;
     }
 
 
-    products =
-        candidates
-            .map(product => ({
+    /*
+    Для каждого товара рассчитываем
+    персональный score.
+    */
+
+    const scored =
+        candidates.map(
+            product => ({
+
                 product,
 
                 score:
@@ -592,25 +923,631 @@ function buildPersonalizedFeed() {
                         product,
                         profile
                     )
-            }))
-            .sort(
-                (a, b) =>
-                    b.score - a.score
-            )
-            .map(
-                item =>
-                    item.product
-            );
+            })
+        );
+
+
+    /*
+    Теперь не сортируем всё по score.
+
+    Вместо этого делаем взвешенный выбор.
+
+    Чем выше score —
+    тем выше шанс попасть раньше.
+
+    Но случайные товары всё равно
+    регулярно попадают в ленту.
+    */
+
+    products =
+        buildWeightedDiverseFeed(
+            scored,
+            personalization
+        );
 
 
     console.log(
         "[StyleFlow] Персональная лента построена"
     );
 
+
     console.log(
         "[StyleFlow] Профиль:",
         profile
     );
+}
+
+
+/* =========================================================
+PERSONALIZATION STRENGTH
+========================================================= */
+
+function getPersonalizationStrength(
+    totalSignals
+) {
+
+    const signals =
+        Number(totalSignals) || 0;
+
+
+    if (
+        signals <= PERSONALIZATION_START
+    ) {
+
+        return 0;
+    }
+
+
+    const progress =
+        (
+            signals -
+            PERSONALIZATION_START
+        ) /
+        (
+            PERSONALIZATION_FULL -
+            PERSONALIZATION_START
+        );
+
+
+    return Math.max(
+        0,
+        Math.min(
+            1,
+            progress
+        )
+    );
+}
+
+
+/* =========================================================
+RANDOM FEED WITH DIVERSITY
+========================================================= */
+
+function buildDiverseRandomFeed(
+    source
+) {
+
+    const remaining =
+        [
+            ...source
+        ];
+
+
+    const result = [];
+
+
+    let lastCategory =
+        null;
+
+    let lastSource =
+        null;
+
+    let categoryStreak =
+        0;
+
+    let sourceStreak =
+        0;
+
+
+    while (
+        remaining.length
+    ) {
+
+        let available =
+            remaining.filter(
+                product => {
+
+                    const category =
+                        normalizeText(
+                            product.category
+                        );
+
+                    const source =
+                        normalizeText(
+                            product.source
+                        );
+
+
+                    const categoryBlocked =
+                        category &&
+                        category ===
+                            lastCategory &&
+                        categoryStreak >=
+                            MAX_SAME_CATEGORY_STREAK;
+
+
+                    const sourceBlocked =
+                        source &&
+                        source ===
+                            lastSource &&
+                        sourceStreak >=
+                            MAX_SAME_SOURCE_STREAK;
+
+
+                    return !(
+                        categoryBlocked ||
+                        sourceBlocked
+                    );
+                }
+            );
+
+
+        /*
+        Если ограничения слишком строгие —
+        разрешаем любой оставшийся товар.
+        */
+
+        if (
+            !available.length
+        ) {
+
+            available =
+                remaining;
+        }
+
+
+        /*
+        Случайно выбираем один
+        из разрешённых товаров.
+        */
+
+        const randomIndex =
+            Math.floor(
+                Math.random() *
+                available.length
+            );
+
+
+        const selected =
+            available[randomIndex];
+
+
+        const originalIndex =
+            remaining.indexOf(
+                selected
+            );
+
+
+        if (
+            originalIndex >= 0
+        ) {
+
+            remaining.splice(
+                originalIndex,
+                1
+            );
+        }
+
+
+        const category =
+            normalizeText(
+                selected.category
+            );
+
+
+        const sourceName =
+            normalizeText(
+                selected.source
+            );
+
+
+        if (
+            category ===
+            lastCategory
+        ) {
+
+            categoryStreak++;
+
+        } else {
+
+            lastCategory =
+                category;
+
+            categoryStreak =
+                1;
+        }
+
+
+        if (
+            sourceName ===
+            lastSource
+        ) {
+
+            sourceStreak++;
+
+        } else {
+
+            lastSource =
+                sourceName;
+
+            sourceStreak =
+                1;
+        }
+
+
+        result.push(
+            selected
+        );
+    }
+
+
+    return result;
+}
+
+
+/* =========================================================
+WEIGHTED DIVERSE FEED
+========================================================= */
+
+function buildWeightedDiverseFeed(
+    scoredProducts,
+    personalization
+) {
+
+    const remaining =
+        scoredProducts.map(
+            item => ({
+                ...item
+            })
+        );
+
+
+    const result = [];
+
+
+    let lastCategory =
+        null;
+
+    let lastSource =
+        null;
+
+    let categoryStreak =
+        0;
+
+    let sourceStreak =
+        0;
+
+
+    /*
+    Чем меньше пользовательских данных,
+    тем больше случайности.
+
+    Например:
+
+    10% персонализации
+    90% случайности
+
+    ...
+
+    70% персонализации
+    30% случайности
+    */
+
+    const randomRatio =
+        MAX_RANDOM_RATIO -
+        (
+            MAX_RANDOM_RATIO -
+            MIN_RANDOM_RATIO
+        ) *
+        personalization;
+
+
+    while (
+        remaining.length
+    ) {
+
+        /*
+        Сначала отбрасываем товары,
+        которые нарушают разнообразие.
+        */
+
+        let available =
+            remaining.filter(
+                item => {
+
+                    const product =
+                        item.product;
+
+
+                    const category =
+                        normalizeText(
+                            product.category
+                        );
+
+
+                    const source =
+                        normalizeText(
+                            product.source
+                        );
+
+
+                    const categoryBlocked =
+                        category &&
+                        category ===
+                            lastCategory &&
+                        categoryStreak >=
+                            MAX_SAME_CATEGORY_STREAK;
+
+
+                    const sourceBlocked =
+                        source &&
+                        source ===
+                            lastSource &&
+                        sourceStreak >=
+                            MAX_SAME_SOURCE_STREAK;
+
+
+                    return !(
+                        categoryBlocked ||
+                        sourceBlocked
+                    );
+                }
+            );
+
+
+        if (
+            !available.length
+        ) {
+
+            available =
+                remaining;
+        }
+
+
+        /*
+        Решаем:
+
+        взять случайный товар
+
+        ИЛИ
+
+        взять рекомендованный.
+        */
+
+        let selected;
+
+
+        const useRandom =
+            Math.random() <
+            randomRatio;
+
+
+        if (
+            useRandom
+        ) {
+
+            /*
+            Случайный товар.
+            */
+
+            const randomIndex =
+                Math.floor(
+                    Math.random() *
+                    available.length
+                );
+
+
+            selected =
+                available[randomIndex];
+
+        } else {
+
+            /*
+            Выбираем рекомендованный товар.
+
+            Не просто первый по score.
+            Используем weighted random.
+
+            Это предотвращает ситуацию,
+            когда один товар с высоким score
+            всегда стоит первым.
+            */
+
+            selected =
+                weightedRandomScoreChoice(
+                    available
+                );
+        }
+
+
+        /*
+        Удаляем выбранный товар
+        из оставшихся.
+        */
+
+        const originalIndex =
+            remaining.indexOf(
+                selected
+            );
+
+
+        if (
+            originalIndex >= 0
+        ) {
+
+            remaining.splice(
+                originalIndex,
+                1
+            );
+        }
+
+
+        /*
+        Обновляем ограничения
+        разнообразия.
+        */
+
+        const category =
+            normalizeText(
+                selected.product.category
+            );
+
+
+        const source =
+            normalizeText(
+                selected.product.source
+            );
+
+
+        if (
+            category ===
+            lastCategory
+        ) {
+
+            categoryStreak++;
+
+        } else {
+
+            lastCategory =
+                category;
+
+            categoryStreak =
+                1;
+        }
+
+
+        if (
+            source ===
+            lastSource
+        ) {
+
+            sourceStreak++;
+
+        } else {
+
+            lastSource =
+                source;
+
+            sourceStreak =
+                1;
+        }
+
+
+        result.push(
+            selected.product
+        );
+    }
+
+
+    return result;
+}
+
+
+/* =========================================================
+WEIGHTED SCORE CHOICE
+========================================================= */
+
+function weightedRandomScoreChoice(
+    items
+) {
+
+    if (
+        !items.length
+    ) {
+
+        return null;
+    }
+
+
+    /*
+    Находим максимальный score,
+    чтобы нормализовать веса.
+    */
+
+    let maxScore =
+        0;
+
+
+    items.forEach(
+        item => {
+
+            if (
+                item.score > maxScore
+            ) {
+
+                maxScore =
+                    item.score;
+            }
+        }
+    );
+
+
+    /*
+    Даже слабые товары должны иметь
+    ненулевой шанс попасть в ленту.
+    */
+
+    let totalWeight =
+        0;
+
+
+    const weighted =
+        items.map(
+            item => {
+
+                const normalized =
+                    maxScore > 0
+                        ? item.score /
+                          maxScore
+                        : 0;
+
+
+                /*
+                Кубический коэффициент делает
+                хорошие рекомендации заметнее,
+                но не превращает их в 100%
+                сортировку.
+                */
+
+                const weight =
+                    0.15 +
+                    Math.pow(
+                        Math.max(
+                            0,
+                            normalized
+                        ),
+                        2
+                    ) *
+                    10;
+
+
+                totalWeight +=
+                    weight;
+
+
+                return {
+                    item,
+                    weight
+                };
+            }
+        );
+
+
+    let random =
+        Math.random() *
+        totalWeight;
+
+
+    for (
+        const entry of weighted
+    ) {
+
+        random -=
+            entry.weight;
+
+
+        if (
+            random <= 0
+        ) {
+
+            return entry.item;
+        }
+    }
+
+
+    return weighted[
+        weighted.length - 1
+    ].item;
 }
 
 
@@ -635,7 +1572,7 @@ function buildUserProfile() {
 
 
     /*
-    Просмотренные товары дают слабый сигнал.
+    Просмотры дают самый слабый сигнал.
     */
 
     viewedProducts.forEach(
@@ -644,7 +1581,11 @@ function buildUserProfile() {
             const product =
                 findProductById(id);
 
-            if (!product) return;
+
+            if (!product) {
+                return;
+            }
+
 
             addProfileSignal(
                 profile,
@@ -656,8 +1597,8 @@ function buildUserProfile() {
 
 
     /*
-    Открытие карточки товара —
-    более сильный сигнал.
+    Открытие товара —
+    сильнее просмотра.
     */
 
     openedProducts.forEach(
@@ -666,7 +1607,11 @@ function buildUserProfile() {
             const product =
                 findProductById(id);
 
-            if (!product) return;
+
+            if (!product) {
+                return;
+            }
+
 
             addProfileSignal(
                 profile,
@@ -690,6 +1635,7 @@ function buildUserProfile() {
                     product
                 );
 
+
             addProfileSignal(
                 profile,
                 normalized,
@@ -703,13 +1649,19 @@ function buildUserProfile() {
 }
 
 
+/* =========================================================
+PROFILE SIGNAL
+========================================================= */
+
 function addProfileSignal(
     profile,
     product,
     weight
 ) {
 
-    if (!product) return;
+    if (!product) {
+        return;
+    }
 
 
     /*
@@ -721,13 +1673,18 @@ function addProfileSignal(
             product.category
         );
 
+
     if (category) {
 
-        profile.categories[category] =
+        profile.categories[
+            category
+        ] =
             (
-                profile.categories[category] ||
-                0
-            ) + weight;
+                profile.categories[
+                    category
+                ] || 0
+            ) +
+            weight;
     }
 
 
@@ -740,13 +1697,18 @@ function addProfileSignal(
             product.brand
         );
 
+
     if (brand) {
 
-        profile.brands[brand] =
+        profile.brands[
+            brand
+        ] =
             (
-                profile.brands[brand] ||
-                0
-            ) + weight;
+                profile.brands[
+                    brand
+                ] || 0
+            ) +
+            weight;
     }
 
 
@@ -759,13 +1721,18 @@ function addProfileSignal(
             product.source
         );
 
+
     if (source) {
 
-        profile.sources[source] =
+        profile.sources[
+            source
+        ] =
             (
-                profile.sources[source] ||
-                0
-            ) + weight;
+                profile.sources[
+                    source
+                ] || 0
+            ) +
+            weight;
     }
 
 
@@ -781,15 +1748,19 @@ function addProfileSignal(
     ) {
 
         profile.prices.push({
+
             price:
-                Number(product.price),
+                Number(
+                    product.price
+                ),
 
             weight
         });
     }
 
 
-    profile.totalSignals += weight;
+    profile.totalSignals +=
+        weight;
 }
 
 
@@ -814,13 +1785,18 @@ function calculateRecommendationScore(
             product.category
         );
 
+
     if (
         category &&
-        profile.categories[category]
+        profile.categories[
+            category
+        ]
     ) {
 
         score +=
-            profile.categories[category] *
+            profile.categories[
+                category
+            ] *
             5;
     }
 
@@ -834,13 +1810,18 @@ function calculateRecommendationScore(
             product.brand
         );
 
+
     if (
         brand &&
-        profile.brands[brand]
+        profile.brands[
+            brand
+        ]
     ) {
 
         score +=
-            profile.brands[brand] *
+            profile.brands[
+                brand
+            ] *
             7;
     }
 
@@ -854,13 +1835,18 @@ function calculateRecommendationScore(
             product.source
         );
 
+
     if (
         source &&
-        profile.sources[source]
+        profile.sources[
+            source
+        ]
     ) {
 
         score +=
-            profile.sources[source] *
+            profile.sources[
+                source
+            ] *
             2;
     }
 
@@ -886,7 +1872,9 @@ function calculateRecommendationScore(
 
             const difference =
                 Math.abs(
-                    Number(product.price) -
+                    Number(
+                        product.price
+                    ) -
                     averagePrice
                 );
 
@@ -896,21 +1884,21 @@ function calculateRecommendationScore(
                 averagePrice;
 
 
-            /*
-            Чем ближе цена к привычному
-            диапазону пользователя,
-            тем выше score.
-            */
-
-            if (percentage <= 0.10) {
+            if (
+                percentage <= 0.10
+            ) {
 
                 score += 12;
 
-            } else if (percentage <= 0.25) {
+            } else if (
+                percentage <= 0.25
+            ) {
 
                 score += 7;
 
-            } else if (percentage <= 0.50) {
+            } else if (
+                percentage <= 0.50
+            ) {
 
                 score += 3;
             }
@@ -920,16 +1908,16 @@ function calculateRecommendationScore(
 
     /*
     Небольшой случайный фактор.
-
-    Он нужен, чтобы товары с одинаковым
-    score не шли всегда в одном порядке.
     */
 
     score +=
         Math.random() * 4;
 
 
-    return score;
+    return Math.max(
+        0,
+        score
+    );
 }
 
 
@@ -955,6 +1943,7 @@ function getWeightedAveragePrice(
                 item.price *
                 item.weight;
 
+
             weight +=
                 item.weight;
         }
@@ -974,7 +1963,9 @@ function getWeightedAveragePrice(
 HELPERS FOR RECOMMENDATIONS
 ========================================================= */
 
-function normalizeText(value) {
+function normalizeText(
+    value
+) {
 
     return String(
         value || ""
@@ -984,7 +1975,9 @@ function normalizeText(value) {
 }
 
 
-function findProductById(id) {
+function findProductById(
+    id
+) {
 
     const target =
         String(id);
@@ -992,20 +1985,27 @@ function findProductById(id) {
 
     return allProducts.find(
         product =>
-            String(product.id) ===
+            String(
+                product.id
+            ) ===
             target
     );
 }
 
 
-function shuffleArray(array) {
+function shuffleArray(
+    array
+) {
 
     const result =
-        [...array];
+        [
+            ...array
+        ];
 
 
     for (
-        let i = result.length - 1;
+        let i =
+            result.length - 1;
         i > 0;
         i--
     ) {
@@ -1046,12 +2046,17 @@ function isProductViewed(
 
 
     const id =
-        String(product.id);
+        String(
+            product.id
+        );
 
 
     return viewedProducts.some(
         viewedId =>
-            String(viewedId) === id
+            String(
+                viewedId
+            ) ===
+            id
     );
 }
 
@@ -1061,19 +2066,13 @@ function findNextUnviewedIndex(
     direction
 ) {
 
-    if (!products.length) {
+    if (
+        !products.length
+    ) {
+
         return -1;
     }
 
-
-    /*
-    Ищем следующий товар,
-    который ещё не просмотрен.
-
-    direction:
-    +1 = вперёд
-    -1 = назад
-    */
 
     for (
         let step = 1;
@@ -1090,14 +2089,17 @@ function findNextUnviewedIndex(
         while (
             index < 0
         ) {
+
             index +=
                 products.length;
         }
 
 
         while (
-            index >= products.length
+            index >=
+            products.length
         ) {
+
             index -=
                 products.length;
         }
@@ -1128,8 +2130,12 @@ SHOW PRODUCT
 
 function showProduct() {
 
-    if (!products.length) {
+    if (
+        !products.length
+    ) {
+
         showEmptyFeed();
+
         return;
     }
 
@@ -1139,24 +2145,22 @@ function showProduct() {
             "productCard"
         );
 
+
     const feedEmpty =
         document.getElementById(
             "feedEmpty"
         );
 
 
-    /*
-    Если до этого была пустая лента,
-    возвращаем карточку.
-    */
-
     if (productCard) {
+
         productCard.style.display =
             "";
     }
 
 
     if (feedEmpty) {
+
         feedEmpty.style.display =
             "none";
     }
@@ -1172,7 +2176,8 @@ function showProduct() {
 
 
     if (
-        currentIndex >= products.length
+        currentIndex >=
+        products.length
     ) {
 
         currentIndex = 0;
@@ -1180,12 +2185,13 @@ function showProduct() {
 
 
     currentProduct =
-        products[currentIndex];
+        products[
+            currentIndex
+        ];
 
 
     /*
-    На всякий случай не показываем
-    уже просмотренный товар.
+    Защита от повторного показа.
     */
 
     if (
@@ -1216,7 +2222,9 @@ function showProduct() {
 
 
         currentProduct =
-            products[currentIndex];
+            products[
+                currentIndex
+            ];
     }
 
 
@@ -1225,35 +2233,42 @@ function showProduct() {
             "productImage"
         );
 
+
     const title =
         document.getElementById(
             "productTitle"
         );
+
 
     const brand =
         document.getElementById(
             "productBrand"
         );
 
+
     const source =
         document.getElementById(
             "productSource"
         );
+
 
     const price =
         document.getElementById(
             "productPrice"
         );
 
+
     const oldPrice =
         document.getElementById(
             "productOldPrice"
         );
 
+
     const rating =
         document.getElementById(
             "productRating"
         );
+
 
     const category =
         document.getElementById(
@@ -1263,6 +2278,7 @@ function showProduct() {
 
     image.src =
         currentProduct.image;
+
 
     image.alt =
         currentProduct.title;
@@ -1295,6 +2311,7 @@ function showProduct() {
 
         oldPrice.textContent =
             formatPrice({
+
                 price:
                     currentProduct.oldPrice,
 
@@ -1333,8 +2350,8 @@ function showProduct() {
 
 
     /*
-    Товар считается просмотренным,
-    когда реально показан пользователю.
+    Реально показали товар —
+    записываем просмотр.
     */
 
     registerView(
@@ -1356,6 +2373,7 @@ function showEmptyFeed() {
         document.getElementById(
             "productCard"
         );
+
 
     const feedEmpty =
         document.getElementById(
@@ -1382,7 +2400,9 @@ function showEmptyFeed() {
 TABS
 ========================================================= */
 
-function switchTab(tab) {
+function switchTab(
+    tab
+) {
 
     currentTab = tab;
 
@@ -1411,7 +2431,9 @@ function switchTab(tab) {
             document
                 .getElementById(id)
                 .classList
-                .remove("active");
+                .remove(
+                    "active"
+                );
         }
     );
 
@@ -1421,7 +2443,9 @@ function switchTab(tab) {
             screens[tab]
         )
         .classList
-        .add("active");
+        .add(
+            "active"
+        );
 
 
     const navs = {
@@ -1448,7 +2472,9 @@ function switchTab(tab) {
             document
                 .getElementById(id)
                 .classList
-                .remove("active");
+                .remove(
+                    "active"
+                );
         }
     );
 
@@ -1458,7 +2484,9 @@ function switchTab(tab) {
             navs[tab]
         )
         .classList
-        .add("active");
+        .add(
+            "active"
+        );
 
 
     if (
@@ -1524,11 +2552,15 @@ function toggleLike() {
         favorites.findIndex(
             item =>
                 String(item.id) ===
-                String(currentProduct.id)
+                String(
+                    currentProduct.id
+                )
         );
 
 
-    if (index >= 0) {
+    if (
+        index >= 0
+    ) {
 
         favorites.splice(
             index,
@@ -1563,12 +2595,8 @@ function toggleLike() {
 
 
     /*
-    После лайка перестраиваем
-    персональную ленту.
-
-    Новый интерес пользователя
-    сразу начинает влиять
-    на следующие товары.
+    Новый сигнал сразу учитывается
+    при построении следующих товаров.
     */
 
     rebuildFeedAfterSignal();
@@ -1592,7 +2620,11 @@ function updateLikeButton() {
         );
 
 
-    if (!button || !currentProduct) {
+    if (
+        !button ||
+        !currentProduct
+    ) {
+
         return;
     }
 
@@ -1644,7 +2676,9 @@ function rebuildFeedAfterSignal() {
 
     const currentId =
         currentProduct
-            ? String(currentProduct.id)
+            ? String(
+                currentProduct.id
+            )
             : null;
 
 
@@ -1652,9 +2686,8 @@ function rebuildFeedAfterSignal() {
 
 
     /*
-    Текущий товар уже просмотрен,
-    поэтому он не должен возвращаться
-    в новую ленту.
+    Текущий товар уже просмотрен
+    и поэтому не должен возвращаться.
     */
 
     if (
@@ -1664,26 +2697,20 @@ function rebuildFeedAfterSignal() {
         products =
             products.filter(
                 product =>
-                    String(product.id) !==
+                    String(
+                        product.id
+                    ) !==
                     currentId
             );
     }
 
 
-    /*
-    После перестроения начинаем
-    с первого подходящего товара.
-    */
-
     currentIndex = 0;
 
 
-    /*
-    Если после перестроения товаров нет,
-    показываем пустую ленту.
-    */
-
-    if (!products.length) {
+    if (
+        !products.length
+    ) {
 
         showEmptyFeed();
 
@@ -1692,11 +2719,10 @@ function rebuildFeedAfterSignal() {
 
 
     /*
-    Важно:
-    текущую карточку не меняем мгновенно.
-    Пользователь сначала может открыть
-    товар/лайкнуть его, а следующая
-    карточка будет выбрана при свайпе.
+    Текущую карточку мгновенно
+    не меняем.
+    Следующая карточка появится
+    после свайпа.
     */
 }
 
@@ -1712,6 +2738,7 @@ function renderFavorites() {
             "favoritesGrid"
         );
 
+
     const empty =
         document.getElementById(
             "favoritesEmpty"
@@ -1721,7 +2748,9 @@ function renderFavorites() {
     grid.innerHTML = "";
 
 
-    if (!favorites.length) {
+    if (
+        !favorites.length
+    ) {
 
         empty.style.display =
             "flex";
@@ -1748,6 +2777,7 @@ function renderFavorites() {
 
 
             card.innerHTML = `
+
                 <img
                     src="${escapeAttribute(product.image)}"
                     alt="${escapeAttribute(product.title)}"
@@ -1760,7 +2790,9 @@ function renderFavorites() {
                     </div>
 
                     <div class="favorite-price">
-                        ${escapeHTML(formatPrice(product))}
+                        ${escapeHTML(
+                            formatPrice(product)
+                        )}
                     </div>
 
                 </div>
@@ -1855,7 +2887,9 @@ function openProductFromObject(
         );
 
 
-    if (index >= 0) {
+    if (
+        index >= 0
+    ) {
 
         currentIndex =
             index;
@@ -1901,6 +2935,7 @@ function renderSingleProductObject(
         document.getElementById(
             "productCard"
         );
+
 
     const feedEmpty =
         document.getElementById(
@@ -1962,6 +2997,7 @@ function renderSingleProductObject(
     ).textContent =
         product.oldPrice
             ? formatPrice({
+
                 price:
                     product.oldPrice,
 
@@ -2010,7 +3046,9 @@ async function shareCurrentProduct() {
 
     try {
 
-        if (navigator.share) {
+        if (
+            navigator.share
+        ) {
 
             await navigator.share({
 
@@ -2053,6 +3091,7 @@ function openComments() {
             "commentsOverlay"
         );
 
+
     const list =
         document.getElementById(
             "commentsList"
@@ -2091,11 +3130,15 @@ function openComments() {
                     <div class="comment">
 
                         <div class="comment-user">
-                            ${escapeHTML(comment.user)}
+                            ${escapeHTML(
+                                comment.user
+                            )}
                         </div>
 
                         <div class="comment-text">
-                            ${escapeHTML(comment.text)}
+                            ${escapeHTML(
+                                comment.text
+                            )}
                         </div>
 
                     </div>
@@ -2111,7 +3154,9 @@ function openComments() {
 }
 
 
-function closeComments(event) {
+function closeComments(
+    event
+) {
 
     if (
         !event ||
@@ -2124,7 +3169,9 @@ function closeComments(event) {
                 "commentsOverlay"
             )
             .classList
-            .remove("show");
+            .remove(
+                "show"
+            );
     }
 }
 
@@ -2202,7 +3249,9 @@ function setupSearch() {
 }
 
 
-function quickSearch(query) {
+function quickSearch(
+    query
+) {
 
     switchTab(
         "search"
@@ -2257,7 +3306,9 @@ function clearSearch() {
             "searchResults"
         )
         .classList
-        .remove("active");
+        .remove(
+            "active"
+        );
 
 
     document
@@ -2281,15 +3332,18 @@ function performSearch(
             "searchHome"
         );
 
+
     const results =
         document.getElementById(
             "searchResults"
         );
 
+
     const resultList =
         document.getElementById(
             "resultList"
         );
+
 
     const resultCount =
         document.getElementById(
@@ -2375,7 +3429,9 @@ function performSearch(
     resultList.innerHTML = "";
 
 
-    if (!filtered.length) {
+    if (
+        !filtered.length
+    ) {
 
         resultList.innerHTML = `
 
@@ -2492,15 +3548,18 @@ function updateProfile() {
             "likedCount"
         );
 
+
     const viewedCount =
         document.getElementById(
             "viewedCount"
         );
 
+
     const openedCount =
         document.getElementById(
             "openedCount"
         );
+
 
     const collectionCount =
         document.getElementById(
@@ -2564,9 +3623,14 @@ function renderRecentProducts() {
 
 
     const recentIds =
-        [...viewedProducts]
+        [
+            ...viewedProducts
+        ]
             .reverse()
-            .slice(0, 6);
+            .slice(
+                0,
+                6
+            );
 
 
     const recent =
@@ -2575,7 +3639,9 @@ function renderRecentProducts() {
                 id =>
                     allProducts.find(
                         product =>
-                            String(product.id) ===
+                            String(
+                                product.id
+                            ) ===
                             String(id)
                     )
             )
@@ -2629,7 +3695,9 @@ function renderRecentProducts() {
     );
 
 
-    if (!recent.length) {
+    if (
+        !recent.length
+    ) {
 
         grid.innerHTML = `
 
@@ -2679,7 +3747,9 @@ function registerView(
 
 
     const id =
-        String(product.id);
+        String(
+            product.id
+        );
 
 
     if (
@@ -2733,7 +3803,9 @@ function registerOpen(
 
 
     const id =
-        String(product.id);
+        String(
+            product.id
+        );
 
 
     openedProducts.push(
@@ -2759,9 +3831,6 @@ function registerOpen(
     /*
     Открытие товара —
     сильный сигнал интереса.
-
-    Пересобираем оставшуюся ленту
-    под новое действие пользователя.
     */
 
     rebuildFeedAfterSignal();
@@ -2994,6 +4063,7 @@ function setupSwipe() {
                 currentTab !==
                 "feed"
             ) {
+
                 return;
             }
 
@@ -3029,14 +4099,19 @@ NEXT / PREVIOUS
 
 function nextProduct() {
 
-    if (!products.length) {
+    if (
+        !products.length
+    ) {
 
         buildPersonalizedFeed();
+
 
         currentIndex = 0;
 
 
-        if (!products.length) {
+        if (
+            !products.length
+        ) {
 
             showEmptyFeed();
 
@@ -3051,7 +4126,7 @@ function nextProduct() {
 
 
     /*
-    Ищем следующий непросмотренный товар.
+    Ищем следующий непросмотренный.
     */
 
     const nextIndex =
@@ -3079,12 +4154,7 @@ function nextProduct() {
 
 
     /*
-    Все товары из текущего набора
-    уже просмотрены.
-
-    Проверяем, остались ли вообще
-    какие-либо товары, которые можно
-    показать.
+    В текущем наборе всё просмотрено.
     */
 
     const unviewed =
@@ -3096,14 +4166,19 @@ function nextProduct() {
         );
 
 
-    if (unviewed.length > 0) {
+    if (
+        unviewed.length > 0
+    ) {
 
         buildPersonalizedFeed();
+
 
         currentIndex = 0;
 
 
-        if (products.length > 0) {
+        if (
+            products.length > 0
+        ) {
 
             animateCardChange(
                 "next"
@@ -3120,9 +4195,7 @@ function nextProduct() {
 
 
     /*
-    Пользователь просмотрел абсолютно
-    все товары.
-
+    Полностью закончился пул.
     Начинаем новый круг.
     */
 
@@ -3146,7 +4219,9 @@ function nextProduct() {
     currentIndex = 0;
 
 
-    if (products.length > 0) {
+    if (
+        products.length > 0
+    ) {
 
         animateCardChange(
             "next"
@@ -3161,19 +4236,13 @@ function nextProduct() {
 
 function previousProduct() {
 
-    if (!products.length) {
+    if (
+        !products.length
+    ) {
+
         return;
     }
 
-
-    /*
-    Назад также ищет только
-    непросмотренный товар.
-
-    Это не позволяет пользователю
-    случайно вернуть уже просмотренную
-    карточку.
-    */
 
     const previousIndex =
         findNextUnviewedIndex(
@@ -3497,6 +4566,7 @@ function getRussianPlural(
     const n =
         Math.abs(number) %
         100;
+
 
     const n1 =
         n % 10;
