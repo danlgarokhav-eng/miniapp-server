@@ -48,7 +48,7 @@ if (window.Telegram && Telegram.WebApp) {
    INIT
 ========================================================= */
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", () {
 
     setupSearch();
 
@@ -90,7 +90,13 @@ async function loadFeed() {
 
         allProducts = rawProducts.map(normalizeProduct);
 
-        products = [...allProducts];
+        // Персональная лента: исключаем товары, которые
+        // пользователь уже просмотрел на этом устройстве.
+        products = allProducts.filter(product => {
+            return !viewedProducts.some(viewedId => {
+                return String(viewedId) === String(product.id);
+            });
+        });
 
         localStorage.setItem(
             "styleflow_main_feed",
@@ -115,7 +121,13 @@ async function loadFeed() {
         if (cached.length > 0) {
 
             allProducts = cached.map(normalizeProduct);
-            products = [...allProducts];
+
+            // Кеш тоже фильтруем по истории просмотра.
+            products = allProducts.filter(product => {
+                return !viewedProducts.some(viewedId => {
+                    return String(viewedId) === String(product.id);
+                });
+            });
 
             currentIndex = 0;
 
