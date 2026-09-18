@@ -1,34 +1,397 @@
 from flask import Flask, request, jsonify, send_from_directory
 import json
 import os
+import sqlite3
 import requests
+
 
 app = Flask(__name__)
 
-FEED_PATH = "feed.json"
-SETTINGS_PATH = "settings.json"
+
+# =========================
+# PATHS
+# =========================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DB_PATH = os.path.join(
+    BASE_DIR,
+    "products.db"
+)
+
+FEED_PATH = os.path.join(
+    BASE_DIR,
+    "feed.json"
+)
+
+SETTINGS_PATH = os.path.join(
+    BASE_DIR,
+    "settings.json"
+)
 
 
 # =========================
-# FEED
+# DATABASE
 # =========================
 
-@app.route("/update_feed", methods=["POST"])
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+
+    conn.row_factory = sqlite3.Row
+
+    return conn
+
+
+def init_db():
+    conn = get_db()
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            source TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+
+            title TEXT,
+            price REAL,
+            old_price REAL,
+            currency TEXT,
+
+            brand TEXT,
+            category TEXT,
+
+            image TEXT,
+            link TEXT,
+
+            rating REAL,
+            reviews INTEGER,
+
+            is_available INTEGER DEFAULT 1,
+
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+            UNIQUE(source, external_id)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+    print("========================================")
+    print("База данных инициализирована")
+    print(f"DB: {DB_PATH}")
+    print("========================================")
+
+
+def save_products(products):
+    if not isinstance(products, list):
+        return 0
+
+    if not products:
+        return 0
+
+    conn = get_db()
+
+    saved = 0
+
+    for product in products:
+
+        if not isinstance(product, dict):
+            continue
+
+        source = str(
+            product.get("source", "unknown")
+        )
+
+        external_id = product.get(
+            "external_id"
+        )
+
+        if not external_id:
+            external_id = product.get(
+                "id"
+            )
+
+        if not external_id:
+            continue
+
+        external_id = str(external_id)
+
+        title = product.get(
+            "title",
+            product.get("name", "")
+        )
+
+        price = product.get(
+            "price",
+            0
+        )
+
+        old_price = product.get(
+            "oldPrice",
+            product.get("old_price")
+        )
+
+        currency = product.get(
+            "currency",
+            "RUB"
+        )
+
+        brand = product.get(
+            "brand",
+            ""
+        )
+
+        category = product.get(
+            "category",
+            ""
+        )
+
+        image = product.get(
+            "image",
+            ""
+        )
+
+        if not image:
+            images = product.get(
+                "images",
+                []
+            )
+
+            if isinstance(images, list) and images:
+                image = images[0]
+
+        link = product.get(
+            "link",
+            product.get("url", "")
+        )
+
+        rating = product.get(
+            "rating"
+        )
+
+        reviews = product.get(
+            "reviews"
+        )
+
+        available = product.get(
+            "available",
+            product.get("stock", True)
+        )
+
+        is_available = 1 if available else 0
+
+        conn.execute("""
+            INSERT INTO products (
+                source,
+                external_id,
+                title,
+                price,
+                old_price,
+                currency,
+                brand,
+                category,
+                image,
+                link,
+                rating,
+                reviews,
+                is_available,
+                updated_at
+            )
+
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+
+            ON CONFLICT(source, external_id)
+            DO UPDATE SET
+                title = excluded.title,
+                price = excluded.price,
+                old_price = excluded.old_price,
+                currency = excluded.currency,
+                brand = excluded.brand,
+                category = excluded.category,
+                image = excluded.image,
+                link = excluded.link,
+                rating = excluded.rating,
+                reviews = excluded.reviews,
+                is_available = excluded.is_available,
+                updated_at = CURRENT_TIMESTAMP
+        """, (
+            source,
+            external_id,
+            title,
+            price,
+            old_price,
+            currency,
+            brand,
+            category,
+            image,
+            link,
+            rating,
+            reviews,
+            is_available
+        ))
+
+        saved += 1
+
+    conn.commit()
+    conn.close()
+
+    return saved
+
+
+def get_all_products():
+    conn = get_db()
+
+    rows = conn.execute("""
+        SELECT
+            source,
+            external_id,
+            title,
+            price,
+            old_price,
+            currency,
+            brand,
+            category,
+            image,
+            link,
+            rating,
+            reviews,
+            is_available
+        FROM products
+        WHERE is_available = 1
+        ORDER BY updated_at DESC
+    """).fetchall()
+
+    conn.close()
+
+    products = []
+
+    for row in rows:
+
+        products.append({
+            "id": f"{row['source']}_{row['external_id']}",
+
+            "source": row["source"],
+            "external_id": row["external_id"],
+
+            "title": row["title"],
+            "name": row["title"],
+
+            "price": row["price"],
+            "oldPrice": row["old_price"],
+            "currency": row["currency"],
+
+            "brand": row["brand"],
+            "category": row["category"],
+
+            "image": row["image"],
+            "images": (
+                [row["image"]]
+                if row["image"]
+                else []
+            ),
+
+            "link": row["link"],
+            "url": row["link"],
+
+            "rating": row["rating"],
+            "reviews": row["reviews"],
+
+            "available": bool(
+                row["is_available"]
+            ),
+
+            "stock": bool(
+                row["is_available"]
+            )
+        })
+
+    return products
+
+
+def get_database_stats():
+
+    conn = get_db()
+
+    total = conn.execute("""
+        SELECT COUNT(*)
+        FROM products
+    """).fetchone()[0]
+
+    available = conn.execute("""
+        SELECT COUNT(*)
+        FROM products
+        WHERE is_available = 1
+    """).fetchone()[0]
+
+    kufar = conn.execute("""
+        SELECT COUNT(*)
+        FROM products
+        WHERE source = 'kufar'
+    """).fetchone()[0]
+
+    wildberries = conn.execute("""
+        SELECT COUNT(*)
+        FROM products
+        WHERE source = 'wildberries'
+    """).fetchone()[0]
+
+    conn.close()
+
+    return {
+        "total": total,
+        "available": available,
+        "kufar": kufar,
+        "wildberries": wildberries
+    }
+
+
+# =========================
+# INITIALIZE DATABASE
+# =========================
+
+init_db()
+
+
+# =========================
+# FEED UPDATE
+# =========================
+
+@app.route(
+    "/update_feed",
+    methods=["POST"]
+)
 def update_feed():
+
     data = request.json
 
     if not isinstance(data, list):
+
         return jsonify({
             "status": "error",
             "message": "Ожидался список товаров"
         }), 400
 
     try:
+
+        saved = save_products(data)
+
+        products = get_all_products()
+
+        stats = get_database_stats()
+
+        # ---------------------------------
+        # Сохраняем последнюю загрузку
+        # только для совместимости
+        # ---------------------------------
+
         with open(
             FEED_PATH,
             "w",
             encoding="utf-8"
         ) as f:
+
             json.dump(
                 data,
                 f,
@@ -37,17 +400,59 @@ def update_feed():
             )
 
         print(
-            f"Feed обновлён: {len(data)} товаров"
+            "========================================"
+        )
+
+        print(
+            f"Получено товаров: {len(data)}"
+        )
+
+        print(
+            f"Сохранено/обновлено: {saved}"
+        )
+
+        print(
+            f"Всего в базе: {stats['total']}"
+        )
+
+        print(
+            f"Доступно: {stats['available']}"
+        )
+
+        print(
+            f"Kufar: {stats['kufar']}"
+        )
+
+        print(
+            f"Wildberries: {stats['wildberries']}"
+        )
+
+        print(
+            "========================================"
         )
 
         return jsonify({
             "status": "ok",
-            "count": len(data)
+
+            "received": len(data),
+
+            "saved": saved,
+
+            "total": stats["total"],
+
+            "available": stats["available"],
+
+            "kufar": stats["kufar"],
+
+            "wildberries": stats["wildberries"],
+
+            "products": products
         })
 
     except Exception as e:
+
         print(
-            f"Ошибка сохранения feed.json: {e}"
+            f"Ошибка сохранения товаров: {e}"
         )
 
         return jsonify({
@@ -56,36 +461,54 @@ def update_feed():
         }), 500
 
 
+# =========================
+# API FEED
+# =========================
+
 @app.route("/api/feed")
 def api_feed():
-    if not os.path.exists(FEED_PATH):
-        print("feed.json не найден")
-
-        return jsonify([])
 
     try:
-        with open(
-            FEED_PATH,
-            "r",
-            encoding="utf-8"
-        ) as f:
-            data = json.load(f)
 
-        if not isinstance(data, list):
-            return jsonify([])
+        products = get_all_products()
 
         print(
-            f"Отдаю feed: {len(data)} товаров"
+            f"Отдаю из базы: {len(products)} товаров"
         )
 
-        return jsonify(data)
+        return jsonify(products)
 
     except Exception as e:
+
         print(
-            f"Ошибка чтения feed.json: {e}"
+            f"Ошибка чтения базы: {e}"
         )
 
         return jsonify([])
+
+
+# =========================
+# DATABASE INFO
+# =========================
+
+@app.route("/api/database")
+def api_database():
+
+    try:
+
+        stats = get_database_stats()
+
+        return jsonify({
+            "status": "ok",
+            **stats
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 
 # =========================
@@ -94,23 +517,30 @@ def api_feed():
 
 @app.route("/api/settings")
 def api_settings():
-    if not os.path.exists(SETTINGS_PATH):
+
+    if not os.path.exists(
+        SETTINGS_PATH
+    ):
+
         return jsonify({
             "query": "кроссовки",
             "limit": 50
         })
 
     try:
+
         with open(
             SETTINGS_PATH,
             "r",
             encoding="utf-8"
         ) as f:
+
             return jsonify(
                 json.load(f)
             )
 
     except Exception as e:
+
         print(
             f"Ошибка чтения settings.json: {e}"
         )
@@ -126,14 +556,17 @@ def api_settings():
     methods=["POST"]
 )
 def api_settings_save():
+
     data = request.json
 
     try:
+
         with open(
             SETTINGS_PATH,
             "w",
             encoding="utf-8"
         ) as f:
+
             json.dump(
                 data,
                 f,
@@ -146,6 +579,7 @@ def api_settings_save():
         })
 
     except Exception as e:
+
         return jsonify({
             "status": "error",
             "message": str(e)
@@ -158,19 +592,23 @@ def api_settings_save():
 
 @app.route("/api/parse_wb")
 def parse_wb_server():
+
     query = request.args.get(
         "query",
         "кроссовки"
     )
 
     try:
+
         limit = int(
             request.args.get(
                 "limit",
                 50
             )
         )
+
     except ValueError:
+
         limit = 50
 
     proxy = {
@@ -179,6 +617,7 @@ def parse_wb_server():
     }
 
     products = []
+
     page = 1
 
     while len(products) < limit:
@@ -198,6 +637,7 @@ def parse_wb_server():
         )
 
         try:
+
             response = requests.get(
                 url,
                 proxies=proxy,
@@ -234,17 +674,28 @@ def parse_wb_server():
                 "id"
             )
 
+            sale_price = item.get(
+                "salePriceU",
+                0
+            )
+
             products.append({
+
+                "id": str(product_id),
+
+                "source": "wildberries",
+
+                "external_id": str(
+                    product_id
+                ),
+
                 "title": item.get(
                     "name",
                     "Без названия"
                 ),
 
                 "price": (
-                    item.get(
-                        "salePriceU",
-                        0
-                    ) // 100
+                    sale_price / 100
                 ),
 
                 "brand": item.get(
@@ -261,7 +712,12 @@ def parse_wb_server():
                 "link": (
                     "https://www.wildberries.ru/"
                     f"catalog/{product_id}/detail.aspx"
-                )
+                ),
+
+                "currency": "RUB",
+
+                "available": True
+
             })
 
             if len(products) >= limit:
@@ -282,6 +738,7 @@ def parse_wb_server():
 
 @app.route("/")
 def index():
+
     return send_from_directory(
         "miniapp",
         "index.html"
@@ -294,6 +751,7 @@ def index():
 
 @app.route("/script.js")
 def script():
+
     return send_from_directory(
         "miniapp",
         "script.js"
@@ -306,6 +764,7 @@ def script():
 
 @app.route("/admin")
 def admin():
+
     return send_from_directory(
         "miniapp",
         "admin.html"
@@ -316,8 +775,11 @@ def admin():
 # OTHER MINIAPP FILES
 # =========================
 
-@app.route("/miniapp/<path:path>")
+@app.route(
+    "/miniapp/<path:path>"
+)
 def static_files(path):
+
     return send_from_directory(
         "miniapp",
         path
@@ -329,6 +791,7 @@ def static_files(path):
 # =========================
 
 if __name__ == "__main__":
+
     app.run(
         host="0.0.0.0",
         port=8000
