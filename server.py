@@ -45,6 +45,10 @@ def get_db():
 def init_db():
     conn = get_db()
 
+    # ---------------------------------
+    # PRODUCTS
+    # ---------------------------------
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,16 +79,51 @@ def init_db():
         )
     """)
 
+    # ---------------------------------
+    # USER HISTORY
+    # ---------------------------------
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            user_id TEXT NOT NULL,
+            product_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Индекс для быстрого получения истории конкретного пользователя
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_history_user
+        ON user_history(user_id)
+    """)
+
+    # Индекс для поиска конкретного товара пользователя
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_history_product
+        ON user_history(user_id, product_id)
+    """)
+
     conn.commit()
     conn.close()
 
     print("========================================")
     print("База данных инициализирована")
     print(f"DB: {DB_PATH}")
+    print("Таблица товаров: OK")
+    print("Таблица истории пользователей: OK")
     print("========================================")
 
 
+# =========================
+# PRODUCTS
+# =========================
+
 def save_products(products):
+
     if not isinstance(products, list):
         return 0
 
@@ -241,6 +280,7 @@ def save_products(products):
 
 
 def get_all_products():
+
     conn = get_db()
 
     rows = conn.execute("""
@@ -344,6 +384,146 @@ def get_database_stats():
         "available": available,
         "kufar": kufar,
         "wildberries": wildberries
+    }
+
+
+# =========================
+# USER HISTORY
+# =========================
+
+def save_user_action(
+    user_id,
+    product_id,
+    action
+):
+
+    if not user_id:
+        return False
+
+    if not product_id:
+        return False
+
+    if action not in {
+        "view",
+        "open"
+    }:
+        return False
+
+    user_id = str(user_id)
+    product_id = str(product_id)
+
+    conn = get_db()
+
+    # ---------------------------------
+    # VIEW
+    #
+    # Один товар считается просмотренным
+    # только один раз.
+    # ---------------------------------
+
+    if action == "view":
+
+        existing = conn.execute("""
+            SELECT id
+            FROM user_history
+            WHERE user_id = ?
+              AND product_id = ?
+              AND action = 'view'
+            LIMIT 1
+        """, (
+            user_id,
+            product_id
+        )).fetchone()
+
+        if existing:
+
+            conn.close()
+
+            return True
+
+    # ---------------------------------
+    # OPEN
+    #
+    # Открытия сохраняем как события.
+    # Это пригодится позже для алгоритма
+    # рекомендаций.
+    # ---------------------------------
+
+    conn.execute("""
+        INSERT INTO user_history (
+            user_id,
+            product_id,
+            action
+        )
+
+        VALUES (?, ?, ?)
+    """, (
+        user_id,
+        product_id,
+        action
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return True
+
+
+def get_user_history(user_id):
+
+    if not user_id:
+        return {
+            "viewed": [],
+            "opened": []
+        }
+
+    user_id = str(user_id)
+
+    conn = get_db()
+
+    # ---------------------------------
+    # VIEWED
+    # ---------------------------------
+
+    viewed_rows = conn.execute("""
+        SELECT DISTINCT product_id
+        FROM user_history
+        WHERE user_id = ?
+          AND action = 'view'
+        ORDER BY product_id
+    """, (
+        user_id,
+    )).fetchall()
+
+    # ---------------------------------
+    # OPENED
+    # ---------------------------------
+
+    opened_rows = conn.execute("""
+        SELECT product_id
+        FROM user_history
+        WHERE user_id = ?
+          AND action = 'open'
+        ORDER BY id ASC
+    """, (
+        user_id,
+    )).fetchall()
+
+    conn.close()
+
+    viewed = [
+        str(row["product_id"])
+        for row in viewed_rows
+    ]
+
+    opened = [
+        str(row["product_id"])
+        for row in opened_rows
+    ]
+
+    return {
+        "viewed": viewed,
+        "opened": opened
     }
 
 
@@ -488,6 +668,195 @@ def api_feed():
 
 
 # =========================
+# USER HISTORY API
+# =========================
+
+@app.route(
+    "/api/user/history",
+    methods=["GET"]
+)
+def api_user_history():
+
+    user_id = request.args.get(
+        "user_id",
+        ""
+    )
+
+    if not user_id:
+
+        return jsonify({
+            "status": "error",
+            "message": "Не указан user_id"
+        }), 400
+
+    try:
+
+        history = get_user_history(
+            user_id
+        )
+
+        print(
+            "История пользователя "
+            f"{user_id}: "
+            f"viewed={len(history['viewed'])}, "
+            f"opened={len(history['opened'])}"
+        )
+
+        return jsonify({
+            "status": "ok",
+            "user_id": str(user_id),
+
+            "viewed": history["viewed"],
+            "opened": history["opened"]
+        })
+
+    except Exception as e:
+
+        print(
+            f"Ошибка получения истории пользователя: {e}"
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+# =========================
+# USER VIEW
+# =========================
+
+@app.route(
+    "/api/user/view",
+    methods=["POST"]
+)
+def api_user_view():
+
+    data = request.get_json(
+        silent=True
+    ) or {}
+
+    user_id = data.get(
+        "user_id"
+    )
+
+    product_id = data.get(
+        "product_id"
+    )
+
+    if not user_id or not product_id:
+
+        return jsonify({
+            "status": "error",
+            "message": "Нужны user_id и product_id"
+        }), 400
+
+    try:
+
+        saved = save_user_action(
+            user_id,
+            product_id,
+            "view"
+        )
+
+        if not saved:
+
+            return jsonify({
+                "status": "error",
+                "message": "Не удалось сохранить просмотр"
+            }), 400
+
+        print(
+            f"VIEW | user={user_id} | product={product_id}"
+        )
+
+        return jsonify({
+            "status": "ok",
+            "action": "view",
+            "user_id": str(user_id),
+            "product_id": str(product_id)
+        })
+
+    except Exception as e:
+
+        print(
+            f"Ошибка сохранения VIEW: {e}"
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+# =========================
+# USER OPEN
+# =========================
+
+@app.route(
+    "/api/user/open",
+    methods=["POST"]
+)
+def api_user_open():
+
+    data = request.get_json(
+        silent=True
+    ) or {}
+
+    user_id = data.get(
+        "user_id"
+    )
+
+    product_id = data.get(
+        "product_id"
+    )
+
+    if not user_id or not product_id:
+
+        return jsonify({
+            "status": "error",
+            "message": "Нужны user_id и product_id"
+        }), 400
+
+    try:
+
+        saved = save_user_action(
+            user_id,
+            product_id,
+            "open"
+        )
+
+        if not saved:
+
+            return jsonify({
+                "status": "error",
+                "message": "Не удалось сохранить открытие"
+            }), 400
+
+        print(
+            f"OPEN | user={user_id} | product={product_id}"
+        )
+
+        return jsonify({
+            "status": "ok",
+            "action": "open",
+            "user_id": str(user_id),
+            "product_id": str(product_id)
+        })
+
+    except Exception as e:
+
+        print(
+            f"Ошибка сохранения OPEN: {e}"
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+# =========================
 # DATABASE INFO
 # =========================
 
@@ -498,9 +867,30 @@ def api_database():
 
         stats = get_database_stats()
 
+        conn = get_db()
+
+        users = conn.execute("""
+            SELECT COUNT(DISTINCT user_id)
+            FROM user_history
+        """).fetchone()[0]
+
+        history_events = conn.execute("""
+            SELECT COUNT(*)
+            FROM user_history
+        """).fetchone()[0]
+
+        conn.close()
+
         return jsonify({
             "status": "ok",
-            **stats
+
+            "total": stats["total"],
+            "available": stats["available"],
+            "kufar": stats["kufar"],
+            "wildberries": stats["wildberries"],
+
+            "users": users,
+            "history_events": history_events
         })
 
     except Exception as e:
