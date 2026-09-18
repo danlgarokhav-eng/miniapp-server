@@ -2,7 +2,7 @@
 STYLEFLOW
 Personalized marketplace feed
 
-ЭТАП 3:
+ЭТАП 4:
 
 1. Новая лента сначала максимально случайная.
 2. Не показываем уже просмотренные товары.
@@ -20,6 +20,14 @@ Personalized marketplace feed
     * лайки
     * открытия товаров
     * просмотры
+
+10. Добавлены фильтры:
+    * минимальная цена
+    * максимальная цена
+    * категория
+    * маркетплейс
+
+Фильтры применяются ДО персонализации.
 
 Локальный localStorage используется как кэш,
 а сервер является источником пользовательской истории.
@@ -67,6 +75,59 @@ SERVER USER HISTORY
 let telegramUserId = null;
 
 let userHistoryLoaded = false;
+
+
+/* =========================================================
+FILTERS
+========================================================= */
+
+let activeFilters = loadJSON(
+    "styleflow_filters",
+    {
+        minPrice: null,
+        maxPrice: null,
+        categories: [],
+        sources: []
+    }
+);
+
+
+/*
+Защита от старого/битого localStorage.
+*/
+
+if (
+    !activeFilters ||
+    typeof activeFilters !== "object"
+) {
+
+    activeFilters = {
+        minPrice: null,
+        maxPrice: null,
+        categories: [],
+        sources: []
+    };
+}
+
+
+if (
+    !Array.isArray(
+        activeFilters.categories
+    )
+) {
+
+    activeFilters.categories = [];
+}
+
+
+if (
+    !Array.isArray(
+        activeFilters.sources
+    )
+) {
+
+    activeFilters.sources = [];
+}
 
 
 /* =========================================================
@@ -170,11 +231,6 @@ document.addEventListener(
         setupSwipe();
 
 
-        /*
-        Получаем Telegram пользователя
-        до загрузки товаров.
-        */
-
         telegramUserId =
             getTelegramUserId();
 
@@ -186,25 +242,22 @@ document.addEventListener(
 
 
         /*
-        Сначала загружаем историю.
-
-        Это очень важно.
-
-        Если сначала загрузить товары,
-        а историю получить позже,
-        пользователь может увидеть
-        уже просмотренный товар.
+        Сначала история.
         */
 
         await loadUserHistory();
 
 
         /*
-        Теперь загружаем каталог.
+        Потом каталог.
         */
 
         await loadFeed();
 
+
+        /*
+        Обновляем профиль.
+        */
 
         updateProfile();
     }
@@ -216,12 +269,6 @@ LOAD USER HISTORY
 ========================================================= */
 
 async function loadUserHistory() {
-
-    /*
-    Если Mini App открыт не внутри Telegram
-    или Telegram user.id недоступен,
-    продолжаем работать на localStorage.
-    */
 
     if (!telegramUserId) {
 
@@ -272,13 +319,6 @@ async function loadUserHistory() {
             data.status === "ok"
         ) {
 
-            /*
-            Объединяем серверную историю
-            с локальной.
-
-            Дубликаты удаляются.
-            */
-
             viewedProducts =
                 mergeUniqueIds(
                     viewedProducts,
@@ -300,10 +340,6 @@ async function loadUserHistory() {
                         : []
                 );
 
-
-            /*
-            Ограничиваем локальный кэш.
-            */
 
             if (
                 viewedProducts.length >
@@ -360,12 +396,6 @@ async function loadUserHistory() {
             error
         );
 
-
-        /*
-        Даже если сервер истории временно
-        недоступен, приложение продолжает
-        работать через localStorage.
-        */
 
         userHistoryLoaded = true;
     }
@@ -616,6 +646,21 @@ async function loadFeed() {
         );
 
 
+        /*
+        Обновляем категории
+        фильтров после загрузки каталога.
+        */
+
+        populateFilterCategories();
+
+
+        /*
+        Строим ленту.
+
+        Фильтры применятся внутри
+        buildPersonalizedFeed().
+        */
+
         buildPersonalizedFeed();
 
 
@@ -657,6 +702,9 @@ async function loadFeed() {
                 cached.map(
                     normalizeProduct
                 );
+
+
+            populateFilterCategories();
 
 
             buildPersonalizedFeed();
@@ -1103,6 +1151,1140 @@ function formatPrice(
 
 
 /* =========================================================
+FILTERS
+========================================================= */
+
+
+/*
+Возвращает количество активных фильтров.
+*/
+
+function getActiveFilterCount() {
+
+    let count = 0;
+
+
+    if (
+        activeFilters.minPrice !== null &&
+        activeFilters.minPrice !== ""
+    ) {
+
+        count++;
+    }
+
+
+    if (
+        activeFilters.maxPrice !== null &&
+        activeFilters.maxPrice !== ""
+    ) {
+
+        count++;
+    }
+
+
+    if (
+        Array.isArray(
+            activeFilters.categories
+        ) &&
+        activeFilters.categories.length
+    ) {
+
+        count +=
+            activeFilters.categories.length;
+    }
+
+
+    if (
+        Array.isArray(
+            activeFilters.sources
+        ) &&
+        activeFilters.sources.length
+    ) {
+
+        count +=
+            activeFilters.sources.length;
+    }
+
+
+    return count;
+}
+
+
+/*
+Открытие панели фильтров.
+*/
+
+function openFilters() {
+
+    const overlay =
+        document.getElementById(
+            "filtersOverlay"
+        );
+
+
+    if (!overlay) {
+
+        console.warn(
+            "[StyleFlow] filtersOverlay не найден"
+        );
+
+        return;
+    }
+
+
+    populateFilterCategories();
+
+
+    syncFilterUI();
+
+
+    overlay.classList.add(
+        "show"
+    );
+
+
+    document.body.classList.add(
+        "filters-open"
+    );
+}
+
+
+/*
+Закрытие панели фильтров.
+*/
+
+function closeFilters(
+    event
+) {
+
+    if (
+        event &&
+        event.target &&
+        event.target.id !==
+            "filtersOverlay"
+    ) {
+
+        return;
+    }
+
+
+    const overlay =
+        document.getElementById(
+            "filtersOverlay"
+        );
+
+
+    if (overlay) {
+
+        overlay.classList.remove(
+            "show"
+        );
+    }
+
+
+    document.body.classList.remove(
+        "filters-open"
+    );
+}
+
+
+/*
+Применить фильтры.
+*/
+
+function applyFilters() {
+
+    const minInput =
+        document.getElementById(
+            "filterMinPrice"
+        );
+
+
+    const maxInput =
+        document.getElementById(
+            "filterMaxPrice"
+        );
+
+
+    let minPrice =
+        minInput
+            ? parsePrice(
+                minInput.value
+            )
+            : null;
+
+
+    let maxPrice =
+        maxInput
+            ? parsePrice(
+                maxInput.value
+            )
+            : null;
+
+
+    /*
+    Если пользователь случайно
+    поставил максимум меньше минимума —
+    меняем местами.
+    */
+
+    if (
+        minPrice !== null &&
+        maxPrice !== null &&
+        minPrice > maxPrice
+    ) {
+
+        const temp =
+            minPrice;
+
+        minPrice =
+            maxPrice;
+
+        maxPrice =
+            temp;
+    }
+
+
+    const categoryButtons =
+        document.querySelectorAll(
+            "#filterCategories .filter-chip.active"
+        );
+
+
+    const sourceButtons =
+        document.querySelectorAll(
+            "#filterSources .filter-chip.active"
+        );
+
+
+    const categories = [];
+
+
+    categoryButtons.forEach(
+        button => {
+
+            const value =
+                String(
+                    button.dataset.category ||
+                    ""
+                )
+                    .trim();
+
+
+            if (
+                value &&
+                value !== "__all__"
+            ) {
+
+                categories.push(
+                    value
+                );
+            }
+        }
+    );
+
+
+    const sources = [];
+
+
+    sourceButtons.forEach(
+        button => {
+
+            const value =
+                String(
+                    button.dataset.source ||
+                    ""
+                )
+                    .trim();
+
+
+            if (
+                value &&
+                value !== "__all__"
+            ) {
+
+                sources.push(
+                    value
+                );
+            }
+        }
+    );
+
+
+    activeFilters = {
+
+        minPrice,
+
+        maxPrice,
+
+        categories:
+            uniqueStrings(
+                categories
+            ),
+
+        sources:
+            uniqueStrings(
+                sources
+            )
+    };
+
+
+    saveJSON(
+        "styleflow_filters",
+        activeFilters
+    );
+
+
+    /*
+    После изменения фильтров
+    строим ленту заново.
+
+    Важно:
+    фильтр → кандидаты → персонализация.
+    */
+
+    currentIndex = 0;
+
+
+    buildPersonalizedFeed();
+
+
+    if (
+        products.length > 0
+    ) {
+
+        showProduct();
+
+    } else {
+
+        showEmptyFeed();
+
+        showToast(
+            "По выбранным фильтрам товаров нет"
+        );
+    }
+
+
+    closeFilters();
+
+
+    updateFilterButton();
+
+
+    console.log(
+        "[StyleFlow] Фильтры применены:",
+        activeFilters
+    );
+}
+
+
+/*
+Сброс фильтров.
+*/
+
+function resetFilters() {
+
+    activeFilters = {
+
+        minPrice: null,
+
+        maxPrice: null,
+
+        categories: [],
+
+        sources: []
+    };
+
+
+    saveJSON(
+        "styleflow_filters",
+        activeFilters
+    );
+
+
+    const minInput =
+        document.getElementById(
+            "filterMinPrice"
+        );
+
+
+    const maxInput =
+        document.getElementById(
+            "filterMaxPrice"
+        );
+
+
+    if (minInput) {
+
+        minInput.value = "";
+    }
+
+
+    if (maxInput) {
+
+        maxInput.value = "";
+    }
+
+
+    syncFilterUI();
+
+
+    currentIndex = 0;
+
+
+    buildPersonalizedFeed();
+
+
+    if (
+        products.length > 0
+    ) {
+
+        showProduct();
+
+    } else {
+
+        showEmptyFeed();
+    }
+
+
+    updateFilterButton();
+
+
+    showToast(
+        "Фильтры сброшены"
+    );
+}
+
+
+/*
+Выбор категории/источника.
+
+Можно вызывать из HTML:
+toggleFilterChip(this)
+*/
+
+function toggleFilterChip(
+    button
+) {
+
+    if (!button) {
+        return;
+    }
+
+
+    const isAll =
+        button.dataset.category ===
+            "__all__" ||
+        button.dataset.source ===
+            "__all__";
+
+
+    /*
+    Если нажали "Все",
+    снимаем остальные кнопки.
+    */
+
+    if (isAll) {
+
+        const container =
+            button.parentElement;
+
+
+        if (container) {
+
+            container
+                .querySelectorAll(
+                    ".filter-chip"
+                )
+                .forEach(
+                    chip => {
+
+                        chip.classList.remove(
+                            "active"
+                        );
+                    }
+                );
+        }
+
+
+        button.classList.add(
+            "active"
+        );
+
+
+        return;
+    }
+
+
+    /*
+    Обычная кнопка.
+
+    Если она включается —
+    выключаем "Все".
+    */
+
+    const container =
+        button.parentElement;
+
+
+    if (container) {
+
+        const allButton =
+            container.querySelector(
+                '[data-category="__all__"], [data-source="__all__"]'
+            );
+
+
+        if (allButton) {
+
+            allButton.classList.remove(
+                "active"
+            );
+        }
+    }
+
+
+    button.classList.toggle(
+        "active"
+    );
+
+
+    /*
+    Если после выключения
+    ничего не осталось —
+    включаем "Все".
+    */
+
+    if (container) {
+
+        const selected =
+            container.querySelectorAll(
+                ".filter-chip.active"
+            );
+
+
+        if (!selected.length) {
+
+            const allButton =
+                container.querySelector(
+                    '[data-category="__all__"], [data-source="__all__"]'
+                );
+
+
+            if (allButton) {
+
+                allButton.classList.add(
+                    "active"
+                );
+            }
+        }
+    }
+}
+
+
+/*
+Заполняем категории автоматически
+из текущего каталога.
+*/
+
+function populateFilterCategories() {
+
+    const container =
+        document.getElementById(
+            "filterCategories"
+        );
+
+
+    if (!container) {
+        return;
+    }
+
+
+    const categoryMap =
+        new Map();
+
+
+    allProducts.forEach(
+        product => {
+
+            const original =
+                String(
+                    product.category ||
+                    ""
+                )
+                    .trim();
+
+
+            if (!original) {
+                return;
+            }
+
+
+            const key =
+                normalizeText(
+                    original
+                );
+
+
+            if (
+                !categoryMap.has(key)
+            ) {
+
+                categoryMap.set(
+                    key,
+                    original
+                );
+            }
+        }
+    );
+
+
+    const categories =
+        Array.from(
+            categoryMap.entries()
+        )
+            .sort(
+                (a, b) =>
+                    a[1].localeCompare(
+                        b[1],
+                        "ru"
+                    )
+            );
+
+
+    /*
+    Сохраняем текущий выбор,
+    но удаляем категории,
+    которых больше нет в каталоге.
+    */
+
+    const availableKeys =
+        new Set(
+            categories.map(
+                item =>
+                    item[0]
+            )
+        );
+
+
+    activeFilters.categories =
+        activeFilters.categories.filter(
+            category =>
+                availableKeys.has(
+                    normalizeText(
+                        category
+                    )
+                )
+        );
+
+
+    container.innerHTML = "";
+
+
+    const allButton =
+        document.createElement(
+            "button"
+        );
+
+
+    allButton.type =
+        "button";
+
+
+    allButton.className =
+        "filter-chip";
+
+
+    allButton.dataset.category =
+        "__all__";
+
+
+    allButton.textContent =
+        "Все";
+
+
+    allButton.onclick =
+        () =>
+            toggleFilterChip(
+                allButton
+            );
+
+
+    container.appendChild(
+        allButton
+    );
+
+
+    categories.forEach(
+        ([key, label]) => {
+
+            const button =
+                document.createElement(
+                    "button"
+                );
+
+
+            button.type =
+                "button";
+
+
+            button.className =
+                "filter-chip";
+
+
+            button.dataset.category =
+                label;
+
+
+            button.textContent =
+                label;
+
+
+            button.onclick =
+                () =>
+                    toggleFilterChip(
+                        button
+                    );
+
+
+            container.appendChild(
+                button
+            );
+        }
+    );
+
+
+    syncCategoryFilterUI();
+}
+
+
+/*
+Синхронизация UI фильтров
+с activeFilters.
+*/
+
+function syncFilterUI() {
+
+    const minInput =
+        document.getElementById(
+            "filterMinPrice"
+        );
+
+
+    const maxInput =
+        document.getElementById(
+            "filterMaxPrice"
+        );
+
+
+    if (minInput) {
+
+        minInput.value =
+            activeFilters.minPrice !== null
+                ? activeFilters.minPrice
+                : "";
+    }
+
+
+    if (maxInput) {
+
+        maxInput.value =
+            activeFilters.maxPrice !== null
+                ? activeFilters.maxPrice
+                : "";
+    }
+
+
+    syncCategoryFilterUI();
+
+
+    syncSourceFilterUI();
+
+
+    updateFilterButton();
+}
+
+
+/*
+Категории.
+*/
+
+function syncCategoryFilterUI() {
+
+    const container =
+        document.getElementById(
+            "filterCategories"
+        );
+
+
+    if (!container) {
+        return;
+    }
+
+
+    const buttons =
+        container.querySelectorAll(
+            ".filter-chip"
+        );
+
+
+    const selected =
+        new Set(
+            activeFilters.categories.map(
+                category =>
+                    normalizeText(
+                        category
+                    )
+            )
+        );
+
+
+    buttons.forEach(
+        button => {
+
+            const value =
+                button.dataset.category;
+
+
+            if (
+                value === "__all__"
+            ) {
+
+                button.classList.toggle(
+                    "active",
+                    selected.size === 0
+                );
+
+                return;
+            }
+
+
+            button.classList.toggle(
+                "active",
+                selected.has(
+                    normalizeText(
+                        value
+                    )
+                )
+            );
+        }
+    );
+}
+
+
+/*
+Источники.
+*/
+
+function syncSourceFilterUI() {
+
+    const container =
+        document.getElementById(
+            "filterSources"
+        );
+
+
+    if (!container) {
+        return;
+    }
+
+
+    const selected =
+        new Set(
+            activeFilters.sources.map(
+                source =>
+                    normalizeSource(
+                        source
+                    )
+            )
+        );
+
+
+    const buttons =
+        container.querySelectorAll(
+            ".filter-chip"
+        );
+
+
+    buttons.forEach(
+        button => {
+
+            const value =
+                button.dataset.source;
+
+
+            if (
+                value === "__all__"
+            ) {
+
+                button.classList.toggle(
+                    "active",
+                    selected.size === 0
+                );
+
+                return;
+            }
+
+
+            button.classList.toggle(
+                "active",
+                selected.has(
+                    normalizeSource(
+                        value
+                    )
+                )
+            );
+        }
+    );
+}
+
+
+/*
+Обновляем маленький индикатор
+на кнопке фильтров, если он есть.
+*/
+
+function updateFilterButton() {
+
+    const button =
+        document.querySelector(
+            ".top-filter"
+        );
+
+
+    if (!button) {
+        return;
+    }
+
+
+    const count =
+        getActiveFilterCount();
+
+
+    button.classList.toggle(
+        "active",
+        count > 0
+    );
+
+
+    const existingBadge =
+        button.querySelector(
+            ".filter-badge"
+        );
+
+
+    if (existingBadge) {
+
+        existingBadge.remove();
+    }
+
+
+    if (
+        count > 0
+    ) {
+
+        const badge =
+            document.createElement(
+                "span"
+            );
+
+
+        badge.className =
+            "filter-badge";
+
+
+        badge.textContent =
+            count;
+
+
+        button.appendChild(
+            badge
+        );
+    }
+}
+
+
+/*
+Главная функция фильтрации.
+
+Сначала фильтруем весь каталог,
+после чего результат передаётся
+в алгоритм рекомендаций.
+*/
+
+function applyProductFilters(
+    source
+) {
+
+    const input =
+        Array.isArray(source)
+            ? source
+            : [];
+
+
+    const minPrice =
+        activeFilters.minPrice !== null
+            ? Number(
+                activeFilters.minPrice
+            )
+            : null;
+
+
+    const maxPrice =
+        activeFilters.maxPrice !== null
+            ? Number(
+                activeFilters.maxPrice
+            )
+            : null;
+
+
+    const categories =
+        new Set(
+            activeFilters.categories.map(
+                category =>
+                    normalizeText(
+                        category
+                    )
+            )
+        );
+
+
+    const sources =
+        new Set(
+            activeFilters.sources.map(
+                source =>
+                    normalizeSource(
+                        source
+                    )
+            )
+        );
+
+
+    const hasCategoryFilter =
+        categories.size > 0;
+
+
+    const hasSourceFilter =
+        sources.size > 0;
+
+
+    return input.filter(
+        product => {
+
+            if (!product) {
+                return false;
+            }
+
+
+            /*
+            Цена.
+
+            Товары без цены при активном
+            ценовом фильтре не показываем,
+            потому что невозможно понять,
+            подходят они или нет.
+            */
+
+            if (
+                minPrice !== null ||
+                maxPrice !== null
+            ) {
+
+                if (
+                    product.price === null ||
+                    !Number.isFinite(
+                        Number(
+                            product.price
+                        )
+                    )
+                ) {
+
+                    return false;
+                }
+
+
+                const price =
+                    Number(
+                        product.price
+                    );
+
+
+                if (
+                    minPrice !== null &&
+                    price < minPrice
+                ) {
+
+                    return false;
+                }
+
+
+                if (
+                    maxPrice !== null &&
+                    price > maxPrice
+                ) {
+
+                    return false;
+                }
+            }
+
+
+            /*
+            Категория.
+            */
+
+            if (
+                hasCategoryFilter
+            ) {
+
+                const category =
+                    normalizeText(
+                        product.category
+                    );
+
+
+                if (
+                    !categories.has(
+                        category
+                    )
+                ) {
+
+                    return false;
+                }
+            }
+
+
+            /*
+            Площадка.
+            */
+
+            if (
+                hasSourceFilter
+            ) {
+
+                const sourceName =
+                    normalizeSource(
+                        product.source
+                    );
+
+
+                if (
+                    !sources.has(
+                        sourceName
+                    )
+                ) {
+
+                    return false;
+                }
+            }
+
+
+            return true;
+        }
+    );
+}
+
+
+/* =========================================================
 PERSONALIZED FEED
 ========================================================= */
 
@@ -1118,6 +2300,53 @@ function buildPersonalizedFeed() {
     }
 
 
+    /*
+    ========================================================
+    ЭТАП 1
+
+    Сначала применяем пользовательские фильтры.
+
+    Только после этого запускаем
+    персонализацию.
+    ========================================================
+    */
+
+    const filteredProducts =
+        applyProductFilters(
+            allProducts
+        );
+
+
+    console.log(
+        "[StyleFlow] После фильтров:",
+        filteredProducts.length
+    );
+
+
+    if (
+        !filteredProducts.length
+    ) {
+
+        products = [];
+
+
+        console.log(
+            "[StyleFlow] Фильтры не дали результатов."
+        );
+
+
+        return;
+    }
+
+
+    /*
+    ========================================================
+    ЭТАП 2
+
+    Убираем просмотренные товары.
+    ========================================================
+    */
+
     const viewedSet =
         new Set(
             viewedProducts.map(
@@ -1127,7 +2356,7 @@ function buildPersonalizedFeed() {
 
 
     const unviewed =
-        allProducts.filter(
+        filteredProducts.filter(
             product =>
                 !viewedSet.has(
                     String(product.id)
@@ -1138,6 +2367,12 @@ function buildPersonalizedFeed() {
     console.log(
         "[StyleFlow] Всего товаров:",
         allProducts.length
+    );
+
+
+    console.log(
+        "[StyleFlow] После фильтров:",
+        filteredProducts.length
     );
 
 
@@ -1154,15 +2389,8 @@ function buildPersonalizedFeed() {
 
 
     /*
-    ВАЖНО:
-
-    Если товар уже просмотрен —
-    он больше не возвращается
-    автоматически.
-
-    Когда в базу добавятся новые товары,
-    они будут непросмотренными
-    и попадут в ленту.
+    Уже просмотренные товары
+    никогда не возвращаем автоматически.
     */
 
     const candidates =
@@ -1184,6 +2412,15 @@ function buildPersonalizedFeed() {
         return;
     }
 
+
+    /*
+    ========================================================
+    ЭТАП 3
+
+    Существующий алгоритм
+    персонализации.
+    ========================================================
+    */
 
     const profile =
         buildUserProfile();
@@ -1343,6 +2580,7 @@ function buildDiverseRandomFeed(
                         normalizeText(
                             product.category
                         );
+
 
                     const source =
                         normalizeText(
@@ -2202,6 +3440,59 @@ function shuffleArray(
 }
 
 
+function uniqueStrings(
+    values
+) {
+
+    const result = [];
+
+    const seen =
+        new Set();
+
+
+    (Array.isArray(values)
+        ? values
+        : []
+    ).forEach(
+        value => {
+
+            const normalized =
+                String(
+                    value
+                ).trim();
+
+
+            const key =
+                normalizeText(
+                    normalized
+                );
+
+
+            if (
+                !key ||
+                seen.has(key)
+            ) {
+
+                return;
+            }
+
+
+            seen.add(
+                key
+            );
+
+
+            result.push(
+                normalized
+            );
+        }
+    );
+
+
+    return result;
+}
+
+
 /* =========================================================
 VIEWED HELPERS
 ========================================================= */
@@ -2589,24 +3880,34 @@ function switchTab(
     ).forEach(
         id => {
 
-            document
-                .getElementById(id)
-                .classList
-                .remove(
+            const element =
+                document.getElementById(
+                    id
+                );
+
+
+            if (element) {
+
+                element.classList.remove(
                     "active"
                 );
+            }
         }
     );
 
 
-    document
-        .getElementById(
+    const targetScreen =
+        document.getElementById(
             screens[tab]
-        )
-        .classList
-        .add(
+        );
+
+
+    if (targetScreen) {
+
+        targetScreen.classList.add(
             "active"
         );
+    }
 
 
     const navs = {
@@ -2630,24 +3931,34 @@ function switchTab(
     ).forEach(
         id => {
 
-            document
-                .getElementById(id)
-                .classList
-                .remove(
+            const element =
+                document.getElementById(
+                    id
+                );
+
+
+            if (element) {
+
+                element.classList.remove(
                     "active"
                 );
+            }
         }
     );
 
 
-    document
-        .getElementById(
+    const targetNav =
+        document.getElementById(
             navs[tab]
-        )
-        .classList
-        .add(
+        );
+
+
+    if (targetNav) {
+
+        targetNav.classList.add(
             "active"
         );
+    }
 
 
     if (
@@ -2673,11 +3984,16 @@ function switchTab(
         setTimeout(
             () => {
 
-                document
-                    .getElementById(
+                const input =
+                    document.getElementById(
                         "searchInput"
-                    )
-                    .focus();
+                    );
+
+
+                if (input) {
+
+                    input.focus();
+                }
 
             },
             100
@@ -2886,6 +4202,11 @@ function renderFavorites() {
         document.getElementById(
             "favoritesEmpty"
         );
+
+
+    if (!grid || !empty) {
+        return;
+    }
 
 
     grid.innerHTML = "";
@@ -3100,70 +4421,126 @@ function renderSingleProductObject(
     }
 
 
-    document.getElementById(
-        "productImage"
-    ).src =
-        product.image;
-
-
-    document.getElementById(
-        "productTitle"
-    ).textContent =
-        product.title;
-
-
-    document.getElementById(
-        "productBrand"
-    ).textContent =
-        product.brand ||
-        "StyleFlow";
-
-
-    document.getElementById(
-        "productSource"
-    ).textContent =
-        sourceLabel(
-            product.source
+    const image =
+        document.getElementById(
+            "productImage"
         );
 
 
-    document.getElementById(
-        "productPrice"
-    ).textContent =
-        formatPrice(
-            product
+    if (image) {
+
+        image.src =
+            product.image;
+    }
+
+
+    const title =
+        document.getElementById(
+            "productTitle"
         );
 
 
-    document.getElementById(
-        "productOldPrice"
-    ).textContent =
-        product.oldPrice
-            ? formatPrice({
+    if (title) {
 
-                price:
-                    product.oldPrice,
-
-                currency:
-                    product.currency
-            })
-            : "";
+        title.textContent =
+            product.title;
+    }
 
 
-    document.getElementById(
-        "productRating"
-    ).textContent =
-        product.rating
-            ? "★ " +
-              product.rating
-            : "★ —";
+    const brand =
+        document.getElementById(
+            "productBrand"
+        );
 
 
-    document.getElementById(
-        "productCategory"
-    ).textContent =
-        product.category ||
-        "Одежда";
+    if (brand) {
+
+        brand.textContent =
+            product.brand ||
+            "StyleFlow";
+    }
+
+
+    const source =
+        document.getElementById(
+            "productSource"
+        );
+
+
+    if (source) {
+
+        source.textContent =
+            sourceLabel(
+                product.source
+            );
+    }
+
+
+    const price =
+        document.getElementById(
+            "productPrice"
+        );
+
+
+    if (price) {
+
+        price.textContent =
+            formatPrice(
+                product
+            );
+    }
+
+
+    const oldPrice =
+        document.getElementById(
+            "productOldPrice"
+        );
+
+
+    if (oldPrice) {
+
+        oldPrice.textContent =
+            product.oldPrice
+                ? formatPrice({
+
+                    price:
+                        product.oldPrice,
+
+                    currency:
+                        product.currency
+                })
+                : "";
+    }
+
+
+    const rating =
+        document.getElementById(
+            "productRating"
+        );
+
+
+    if (rating) {
+
+        rating.textContent =
+            product.rating
+                ? "★ " +
+                  product.rating
+                : "★ —";
+    }
+
+
+    const category =
+        document.getElementById(
+            "productCategory"
+        );
+
+
+    if (category) {
+
+        category.textContent =
+            product.category ||
+            "Одежда";
+    }
 
 
     updateLikeButton();
@@ -3241,6 +4618,11 @@ function openComments() {
         );
 
 
+    if (!overlay || !list) {
+        return;
+    }
+
+
     const comments = [
 
         {
@@ -3307,14 +4689,18 @@ function closeComments(
             "commentsOverlay"
     ) {
 
-        document
-            .getElementById(
+        const overlay =
+            document.getElementById(
                 "commentsOverlay"
-            )
-            .classList
-            .remove(
+            );
+
+
+        if (overlay) {
+
+            overlay.classList.remove(
                 "show"
             );
+        }
     }
 }
 
@@ -3344,14 +4730,19 @@ function setupSearch() {
                 input.value.trim();
 
 
-            document
-                .getElementById(
+            const clearButton =
+                document.getElementById(
                     "searchClear"
-                )
-                .style.display =
+                );
+
+
+            if (clearButton) {
+
+                clearButton.style.display =
                     value
                         ? "flex"
                         : "none";
+            }
 
 
             clearTimeout(
@@ -3407,16 +4798,26 @@ function quickSearch(
         );
 
 
+    if (!input) {
+        return;
+    }
+
+
     input.value =
         query;
 
 
-    document
-        .getElementById(
+    const clearButton =
+        document.getElementById(
             "searchClear"
-        )
-        .style.display =
+        );
+
+
+    if (clearButton) {
+
+        clearButton.style.display =
             "flex";
+    }
 
 
     performSearch(
@@ -3433,33 +4834,52 @@ function clearSearch() {
         );
 
 
+    if (!input) {
+        return;
+    }
+
+
     input.value = "";
 
 
-    document
-        .getElementById(
+    const clearButton =
+        document.getElementById(
             "searchClear"
-        )
-        .style.display =
-            "none";
-
-
-    document
-        .getElementById(
-            "searchResults"
-        )
-        .classList
-        .remove(
-            "active"
         );
 
 
-    document
-        .getElementById(
+    if (clearButton) {
+
+        clearButton.style.display =
+            "none";
+    }
+
+
+    const results =
+        document.getElementById(
+            "searchResults"
+        );
+
+
+    if (results) {
+
+        results.classList.remove(
+            "active"
+        );
+    }
+
+
+    const home =
+        document.getElementById(
             "searchHome"
-        )
-        .style.display =
+        );
+
+
+    if (home) {
+
+        home.style.display =
             "block";
+    }
 
 
     input.focus();
@@ -3492,6 +4912,17 @@ function performSearch(
         document.getElementById(
             "resultCount"
         );
+
+
+    if (
+        !home ||
+        !results ||
+        !resultList ||
+        !resultCount
+    ) {
+
+        return;
+    }
 
 
     if (!query) {
@@ -3930,14 +5361,6 @@ function registerView(
         updateProfile();
 
 
-        /*
-        Сохраняем просмотр
-        на сервере.
-
-        Это выполняется асинхронно
-        и не блокирует интерфейс.
-        */
-
         syncUserAction(
             "view",
             id
@@ -3984,11 +5407,6 @@ function registerOpen(
         openedProducts
     );
 
-
-    /*
-    Сохраняем открытие
-    на сервере.
-    */
 
     syncUserAction(
         "open",
@@ -4312,8 +5730,19 @@ function nextProduct() {
     }
 
 
+    /*
+    Проверяем новые товары
+    с учётом текущих фильтров.
+    */
+
+    const filteredProducts =
+        applyProductFilters(
+            allProducts
+        );
+
+
     const unviewed =
-        allProducts.filter(
+        filteredProducts.filter(
             product =>
                 !isProductViewed(
                     product
@@ -4350,14 +5779,10 @@ function nextProduct() {
 
 
     /*
-    НОВОЕ ПОВЕДЕНИЕ:
-
     Не начинаем новый круг.
 
     Пользователь просмотрел всё,
-    что было доступно.
-
-    Ждём появления новых товаров.
+    что подходит под текущие фильтры.
     */
 
     console.log(
