@@ -805,6 +805,160 @@
             font-weight: 800;
         }
 
+
+        /* =========================
+           SMART UNIVERSAL SEARCH
+        ========================= */
+
+        .search-suggestions {
+            display: none;
+            margin-top: 9px;
+            padding: 8px;
+            border-radius: 18px;
+            background: rgba(18,18,24,.96);
+            border: 1px solid rgba(255,255,255,.08);
+            box-shadow: 0 16px 45px rgba(0,0,0,.28);
+        }
+
+        .search-suggestions.active {
+            display: block;
+        }
+
+        .search-suggestion {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 11px;
+            padding: 11px 12px;
+            border: 0;
+            border-radius: 13px;
+            background: transparent;
+            color: rgba(255,255,255,.88);
+            text-align: left;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .search-suggestion:hover {
+            background: rgba(255,255,255,.07);
+        }
+
+        .search-suggestion-icon {
+            width: 29px;
+            text-align: center;
+            font-size: 17px;
+            flex: 0 0 29px;
+        }
+
+        .search-suggestion-main {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .search-suggestion-title {
+            font-size: 13px;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .search-suggestion-meta {
+            margin-top: 2px;
+            color: rgba(255,255,255,.38);
+            font-size: 10px;
+        }
+
+        .search-suggestion-hint {
+            color: rgba(255,255,255,.35);
+            font-size: 11px;
+        }
+
+        .profile-interest-box {
+            padding: 14px;
+            border-radius: 19px;
+            background:
+                linear-gradient(145deg, rgba(139,92,246,.14), rgba(255,255,255,.045));
+            border: 1px solid rgba(255,255,255,.07);
+        }
+
+        .profile-interest-caption {
+            color: rgba(255,255,255,.42);
+            font-size: 11px;
+            margin-bottom: 10px;
+        }
+
+        .profile-interest-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+        }
+
+        .profile-interest-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 8px 10px;
+            border-radius: 12px;
+            background: rgba(255,255,255,.065);
+            border: 1px solid rgba(255,255,255,.06);
+            font-size: 11px;
+            color: rgba(255,255,255,.82);
+        }
+
+        .profile-interest-score {
+            color: rgba(255,255,255,.34);
+            font-size: 9px;
+        }
+
+        .profile-smart-note {
+            margin-top: 10px;
+            color: rgba(255,255,255,.38);
+            font-size: 10px;
+            line-height: 1.45;
+        }
+
+        .profile-quick-actions {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 9px;
+        }
+
+        .profile-quick-action {
+            padding: 13px;
+            border: 1px solid rgba(255,255,255,.06);
+            border-radius: 16px;
+            background: rgba(255,255,255,.055);
+            color: rgba(255,255,255,.84);
+            text-align: left;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .profile-quick-action strong {
+            display: block;
+            font-size: 12px;
+        }
+
+        .profile-quick-action span {
+            display: block;
+            margin-top: 4px;
+            color: rgba(255,255,255,.38);
+            font-size: 10px;
+        }
+
+        .smart-profile-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            margin-top: 7px;
+            padding: 6px 9px;
+            border-radius: 10px;
+            background: rgba(139,92,246,.12);
+            color: rgba(255,255,255,.56);
+            font-size: 10px;
+        }
+
         /* =========================
            PROFILE
         ========================= */
@@ -1549,6 +1703,8 @@
             </div>
         </div>
 
+        <div id="searchSuggestions" class="search-suggestions"></div>
+
         <div id="searchHome">
 
             <div class="section-title">
@@ -1583,119 +1739,60 @@
 
     <section id="profileScreen" class="screen profile-screen">
 
-        <h1 class="page-title">
-            Мой Style
-        </h1>
+        <h1 class="page-title">Мой профиль</h1>
 
         <div class="profile-head">
-
-            <div id="profileAvatar" class="profile-avatar">
-                S
-            </div>
-
+            <div id="profileAvatar" class="profile-avatar">S</div>
             <div>
-                <div id="profileName" class="profile-name">
-                    Style Explorer
-                </div>
-
-                <div class="profile-subtitle">
-                    Твой стиль. Твои находки.
-                </div>
+                <div id="profileName" class="profile-name">Style Explorer</div>
+                <div class="profile-subtitle">Персональная лента товаров и услуг</div>
+                <div class="smart-profile-badge">🧠 Алгоритм изучает твои интересы</div>
             </div>
-
         </div>
 
         <div class="stats">
-
             <div class="stat">
                 <div id="likedCount" class="stat-number">0</div>
-                <div class="stat-label">❤️ лайков</div>
+                <div class="stat-label">❤️ избранное</div>
             </div>
-
             <div class="stat">
                 <div id="viewedCount" class="stat-number">0</div>
                 <div class="stat-label">👁 просмотрено</div>
             </div>
-
             <div class="stat">
                 <div id="openedCount" class="stat-number">0</div>
-                <div class="stat-label">↗ переходов</div>
+                <div class="stat-label">↗ открыто</div>
             </div>
-
         </div>
 
         <div class="profile-section">
-
-            <div class="profile-section-title">
-                Твои коллекции
+            <div class="profile-section-title">Твои интересы</div>
+            <div class="profile-interest-box">
+                <div class="profile-interest-caption">
+                    Алгоритм формирует их автоматически из поиска, просмотров, открытий и избранного.
+                </div>
+                <div id="profileInterests" class="profile-interest-list"></div>
+                <div id="profileSmartNote" class="profile-smart-note"></div>
             </div>
-
-            <div class="collection-grid">
-
-                <div
-                    class="collection"
-                    onclick="openCollection('favorites')"
-                >
-                    <div class="collection-icon">🔥</div>
-                    <div class="collection-name">
-                        Хочу купить
-                    </div>
-                    <div id="collectionCount" class="collection-count">
-                        0 товаров
-                    </div>
-                </div>
-
-                <div
-                    class="collection"
-                    onclick="quickSearch('обувь')"
-                >
-                    <div class="collection-icon">👟</div>
-                    <div class="collection-name">
-                        Обувь
-                    </div>
-                    <div class="collection-count">
-                        Смотреть →
-                    </div>
-                </div>
-
-                <div
-                    class="collection"
-                    onclick="quickSearch('осень')"
-                >
-                    <div class="collection-icon">🧥</div>
-                    <div class="collection-name">
-                        Осень
-                    </div>
-                    <div class="collection-count">
-                        Смотреть →
-                    </div>
-                </div>
-
-                <div
-                    class="collection"
-                    onclick="quickSearch('до 100')"
-                >
-                    <div class="collection-icon">💸</div>
-                    <div class="collection-name">
-                        До 100
-                    </div>
-                    <div class="collection-count">
-                        Смотреть →
-                    </div>
-                </div>
-
-            </div>
-
         </div>
 
         <div class="profile-section">
-
-            <div class="profile-section-title">
-                Недавно смотрел
+            <div class="profile-section-title">Быстрые действия</div>
+            <div class="profile-quick-actions">
+                <button class="profile-quick-action" onclick="openCollection('favorites')">
+                    <strong>❤️ Избранное</strong>
+                    <span id="collectionCount">0 товаров</span>
+                </button>
+                <button class="profile-quick-action" onclick="switchTab('search')">
+                    <strong>🔎 Новый поиск</strong>
+                    <span>Найти что угодно</span>
+                </button>
             </div>
+        </div>
 
+        <div class="profile-section">
+            <div class="profile-section-title">Недавно смотрел</div>
             <div id="recentGrid" class="recent-grid"></div>
-
         </div>
 
     </section>
@@ -1867,7 +1964,8 @@ let activeFilters = loadJSON(
         minPrice: null,
         maxPrice: null,
         categories: [],
-        sources: []
+        sources: [],
+        sort: "relevance"
     }
 );
 
@@ -1885,7 +1983,8 @@ if (
         minPrice: null,
         maxPrice: null,
         categories: [],
-        sources: []
+        sources: [],
+        sort: "relevance"
     };
 }
 
@@ -1917,6 +2016,10 @@ if (
 ) {
 
     activeFilters.sources = [];
+}
+
+if (!activeFilters.sort) {
+    activeFilters.sort = "relevance";
 }
 
 
@@ -2061,6 +2164,7 @@ document.addEventListener(
         */
 
         updateProfile();
+        updateProfileInterests();
     }
 );
 
@@ -2782,6 +2886,15 @@ function normalizeSource(
         "marketplace";
 }
 
+
+function sourceIcon(source) {
+    const s = normalizeSearchSource(source);
+    if (s.includes("kufar")) return "🟢";
+    if (s.includes("wildberries") || s === "wb") return "🟣";
+    if (s.includes("ozon")) return "🔵";
+    if (s.includes("ali")) return "🟠";
+    return "🛍️";
+}
 
 function sourceLabel(
     source
@@ -3758,6 +3871,9 @@ function populateFilterCategories() {
 
 function syncFilterUI() {
 
+    const sortSelect = document.getElementById("filterSort");
+    if (sortSelect) sortSelect.value = activeFilters.sort || "relevance";
+
     const minInput =
         document.getElementById(
             "filterMinPrice"
@@ -4239,6 +4355,20 @@ function buildPersonalizedFeed() {
     Убираем просмотренные товары.
     ========================================================
     */
+
+    const sortMode = activeFilters.sort || "relevance";
+
+    if (sortMode === "price_asc") {
+        filteredProducts.sort((a, b) => Number(a.price || Infinity) - Number(b.price || Infinity));
+    } else if (sortMode === "price_desc") {
+        filteredProducts.sort((a, b) => Number(b.price || -Infinity) - Number(a.price || -Infinity));
+    } else if (sortMode === "newest") {
+        filteredProducts.sort((a, b) => {
+            const da = new Date(a.created_at || a.updated_at || 0).getTime();
+            const db = new Date(b.created_at || b.updated_at || 0).getTime();
+            return db - da;
+        });
+    }
 
     const viewedSet =
         new Set(
@@ -4909,82 +5039,58 @@ USER PROFILE
 function buildUserProfile() {
 
     const profile = {
-
         categories: {},
-
         brands: {},
-
         sources: {},
-
+        keywords: {},
         prices: [],
-
         totalSignals: 0
     };
 
+    viewedProducts.forEach(id => {
+        const product = findProductById(id);
+        if (!product) return;
+        addProfileSignal(profile, product, 1);
+    });
 
-    viewedProducts.forEach(
-        id => {
+    openedProducts.forEach(id => {
+        const product = findProductById(id);
+        if (!product) return;
+        addProfileSignal(profile, product, 4);
+    });
 
-            const product =
-                findProductById(id);
+    favorites.forEach(product => {
+        const normalized = normalizeProduct(product);
+        addProfileSignal(profile, normalized, 7);
+    });
 
+    const searchHistory = loadJSON("styleflow_search_history", []);
+    if (Array.isArray(searchHistory)) {
+        searchHistory.slice(-40).forEach(entry => {
+            const query = typeof entry === "string" ? entry : entry.query;
+            if (!query) return;
 
-            if (!product) {
-                return;
-            }
-
-
-            addProfileSignal(
-                profile,
-                product,
-                1
-            );
-        }
-    );
-
-
-    openedProducts.forEach(
-        id => {
-
-            const product =
-                findProductById(id);
-
-
-            if (!product) {
-                return;
-            }
-
-
-            addProfileSignal(
-                profile,
-                product,
-                3
-            );
-        }
-    );
-
-
-    favorites.forEach(
-        product => {
-
-            const normalized =
-                normalizeProduct(
-                    product
-                );
-
-
-            addProfileSignal(
-                profile,
-                normalized,
-                6
-            );
-        }
-    );
-
+            tokenizeForRecommendations(query).forEach(token => {
+                profile.keywords[token] =
+                    (profile.keywords[token] || 0) + 3;
+                profile.totalSignals += 3;
+            });
+        });
+    }
 
     return profile;
 }
 
+function tokenizeForRecommendations(value) {
+    return normalizeText(value)
+        .split(/[^a-zа-яё0-9]+/i)
+        .map(word => word.trim())
+        .filter(word => word.length >= 2)
+        .filter(word => ![
+            "для", "это", "как", "или", "и", "на", "по", "до",
+            "из", "в", "с", "купить", "найти", "товар", "товары"
+        ].includes(word));
+}
 
 /* =========================================================
 PROFILE SIGNAL
@@ -5041,6 +5147,19 @@ function addProfileSignal(
     }
 
 
+    const searchableText = [
+        product.title,
+        product.brand,
+        product.category,
+        product.description
+    ].filter(Boolean).join(" ");
+
+    tokenizeForRecommendations(searchableText).forEach(token => {
+        profile.keywords[token] =
+            (profile.keywords[token] || 0) + Math.max(1, Math.round(weight / 2));
+    });
+
+
     const source =
         normalizeText(
             product.source
@@ -5095,6 +5214,19 @@ function calculateRecommendationScore(
 ) {
 
     let score = 0;
+
+
+    const searchable = normalizeText([
+        product.title,
+        product.brand,
+        product.category,
+        product.description
+    ].filter(Boolean).join(" "));
+
+    tokenizeForRecommendations(searchable).forEach(token => {
+        const weight = profile.keywords[token];
+        if (weight) score += weight * 1.8;
+    });
 
 
     const category =
@@ -6623,6 +6755,8 @@ function setupSearch() {
             const value =
                 input.value.trim();
 
+            renderSearchSuggestions(value);
+
 
             const clearButton =
                 document.getElementById(
@@ -6668,8 +6802,10 @@ function setupSearch() {
                 event.preventDefault();
 
 
+                hideSearchSuggestions();
+                const enteredQuery = input.value.trim();
                 performSearch(
-                    input.value.trim()
+                    enteredQuery
                 );
             }
         }
@@ -6734,6 +6870,7 @@ function clearSearch() {
 
 
     input.value = "";
+    hideSearchSuggestions();
 
 
     const clearButton =
@@ -6887,6 +7024,192 @@ function searchTokenMatches(token, searchable) {
     );
 }
 
+
+const UNIVERSAL_SEARCH_SUGGESTIONS = [
+    ["🚗", "машина", "автомобили"],
+    ["🚗", "автомобиль", "автомобили"],
+    ["🚗", "bmw", "автомобили"],
+    ["🚗", "mercedes", "автомобили"],
+    ["🚗", "audi", "автомобили"],
+    ["🏠", "квартира", "недвижимость"],
+    ["🏠", "дом", "недвижимость"],
+    ["🏠", "недвижимость", "недвижимость"],
+    ["💻", "ноутбук", "электроника"],
+    ["💻", "компьютер", "электроника"],
+    ["💻", "пк", "электроника"],
+    ["📱", "телефон", "электроника"],
+    ["📱", "iphone", "электроника"],
+    ["📱", "айфон", "электроника"],
+    ["📱", "samsung", "электроника"],
+    ["🔧", "ремонт", "услуги"],
+    ["🔧", "ремонт телефона", "услуги"],
+    ["🔧", "ремонт ноутбука", "услуги"],
+    ["🔧", "ремонт автомобиля", "услуги"],
+    ["🛠️", "строительство", "услуги"],
+    ["🪑", "мебель", "товары"],
+    ["🎮", "игровой компьютер", "электроника"],
+    ["🎧", "наушники", "электроника"],
+    ["📷", "камера", "электроника"],
+    ["⚙️", "запчасти", "автомобили"]
+];
+
+function rememberSearchQuery(query) {
+    const normalized = normalizeText(query);
+    if (!normalized || normalized.length < 2) return;
+
+    let history = loadJSON("styleflow_search_history", []);
+    if (!Array.isArray(history)) history = [];
+
+    history.push({
+        query: normalized,
+        created_at: Date.now()
+    });
+
+    if (history.length > 100) {
+        history = history.slice(-100);
+    }
+
+    saveJSON("styleflow_search_history", history);
+}
+
+function buildDynamicSearchSuggestions(query) {
+    const normalized = normalizeText(query);
+    if (!normalized) return [];
+
+    const result = [];
+    const used = new Set();
+
+    function add(icon, text, meta, score) {
+        const key = normalizeText(text);
+        if (!key || used.has(key)) return;
+        used.add(key);
+        result.push({ icon, text, meta, score });
+    }
+
+    UNIVERSAL_SEARCH_SUGGESTIONS.forEach(([icon, text, meta]) => {
+        const n = normalizeText(text);
+        let score = 0;
+
+        if (n === normalized) score = 100;
+        else if (n.startsWith(normalized)) score = 85;
+        else if (n.includes(normalized)) score = 70;
+        else if (searchTokenMatches(normalized, n)) score = 55;
+
+        if (score) add(icon, text, meta, score);
+    });
+
+    const queryTokens = normalized.split(/\s+/).filter(Boolean);
+
+    allProducts.forEach(product => {
+        const candidates = [
+            product.title,
+            product.brand,
+            product.category
+        ].filter(Boolean);
+
+        candidates.forEach(candidate => {
+            const clean = String(candidate).trim();
+            const candidateNormalized = normalizeText(clean);
+
+            if (!candidateNormalized || candidateNormalized.length < 2) return;
+
+            let score = 0;
+            if (candidateNormalized.startsWith(normalized)) score = 80;
+            else if (candidateNormalized.includes(normalized)) score = 65;
+            else if (queryTokens.some(token =>
+                searchTokenMatches(token, candidateNormalized)
+            )) score = 50;
+
+            if (score) {
+                add(
+                    sourceIcon(product.source),
+                    clean,
+                    sourceLabel(product.source),
+                    score
+                );
+            }
+        });
+    });
+
+    const history = loadJSON("styleflow_search_history", []);
+    if (Array.isArray(history)) {
+        history.slice().reverse().forEach(entry => {
+            const text = typeof entry === "string" ? entry : entry.query;
+            if (!text) return;
+
+            const n = normalizeText(text);
+            let score = 0;
+
+            if (n.startsWith(normalized)) score = 90;
+            else if (n.includes(normalized)) score = 72;
+            else if (searchTokenMatches(normalized, n)) score = 55;
+
+            if (score) add("🕘", text, "твой прошлый поиск", score);
+        });
+    }
+
+    return result
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 7);
+}
+
+function renderSearchSuggestions(query) {
+    const box = document.getElementById("searchSuggestions");
+    if (!box) return;
+
+    const normalized = normalizeText(query);
+
+    if (!normalized) {
+        box.classList.remove("active");
+        box.innerHTML = "";
+        return;
+    }
+
+    const suggestions = buildDynamicSearchSuggestions(query);
+
+    if (!suggestions.length) {
+        box.classList.remove("active");
+        box.innerHTML = "";
+        return;
+    }
+
+    box.innerHTML = suggestions.map((item, index) => `
+        <button type="button" class="search-suggestion" onclick="selectSearchSuggestion(${index})">
+            <span class="search-suggestion-icon">${escapeHTML(item.icon)}</span>
+            <span class="search-suggestion-main">
+                <span class="search-suggestion-title">${escapeHTML(item.text)}</span>
+                <span class="search-suggestion-meta">${escapeHTML(item.meta)}</span>
+            </span>
+            <span class="search-suggestion-hint">›</span>
+        </button>
+    `).join("");
+
+    box._suggestions = suggestions;
+    box.classList.add("active");
+}
+
+function selectSearchSuggestion(index) {
+    const box = document.getElementById("searchSuggestions");
+    const input = document.getElementById("searchInput");
+    if (!box || !input || !box._suggestions) return;
+
+    const item = box._suggestions[index];
+    if (!item) return;
+
+    input.value = item.text;
+    const clearButton = document.getElementById("searchClear");
+    if (clearButton) clearButton.style.display = "flex";
+
+    box.classList.remove("active");
+    rememberSearchQuery(item.text);
+    performSearch(item.text);
+}
+
+function hideSearchSuggestions() {
+    const box = document.getElementById("searchSuggestions");
+    if (box) box.classList.remove("active");
+}
+
 function performSearch(query) {
     const home = document.getElementById("searchHome");
     const results = document.getElementById("searchResults");
@@ -6905,6 +7228,13 @@ function performSearch(query) {
 
     const normalizedQuery = query.toLowerCase().trim();
     const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+
+    rememberSearchQuery(normalizedQuery);
+    hideSearchSuggestions();
+
+    if (typeof updateProfileInterests === "function") {
+        updateProfileInterests();
+    }
 
     const filtered = allProducts.filter(product => {
         const searchable = [
@@ -6949,6 +7279,51 @@ function performSearch(query) {
 
     if (!filtered.length) {
         resultList.innerHTML = `<div class="search-no-results">Ничего точного не найдено.<br><span>Попробуй написать чуть иначе — поиск умеет исправлять небольшие опечатки.</span></div>`;
+    }
+}
+
+
+function getTopUserInterests(limit = 8) {
+    const profile = buildUserProfile();
+    const combined = [];
+
+    Object.entries(profile.keywords || {}).forEach(([word, score]) => {
+        if (word.length < 2) return;
+        combined.push({ text: word, score });
+    });
+
+    return combined
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+}
+
+function updateProfileInterests() {
+    const box = document.getElementById("profileInterests");
+    const note = document.getElementById("profileSmartNote");
+    if (!box) return;
+
+    const interests = getTopUserInterests(8);
+
+    if (!interests.length) {
+        box.innerHTML = `
+            <div style="color:rgba(255,255,255,.38);font-size:11px;line-height:1.45;">
+                Пока мало данных. Поищи несколько товаров, открой понравившиеся и добавь что-нибудь в избранное.
+            </div>
+        `;
+        if (note) note.textContent = "Чем больше действий, тем точнее персональная лента.";
+        return;
+    }
+
+    box.innerHTML = interests.map(item => `
+        <div class="profile-interest-chip">
+            <span>${escapeHTML(item.text)}</span>
+            <span class="profile-interest-score">интерес ${Math.min(99, Math.round(item.score))}</span>
+        </div>
+    `).join("");
+
+    if (note) {
+        note.textContent =
+            `Сейчас алгоритм учитывает ${interests.length} основных интересов и исключает уже просмотренные товары из автоматической ленты.`;
     }
 }
 
@@ -7014,6 +7389,7 @@ function updateProfile() {
 
 
     renderRecentProducts();
+    updateProfileInterests();
 }
 
 
