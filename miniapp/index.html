@@ -1746,7 +1746,6 @@
             <div>
                 <div id="profileName" class="profile-name">Style Explorer</div>
                 <div class="profile-subtitle">Персональная лента товаров и услуг</div>
-                <div class="smart-profile-badge">🧠 Алгоритм изучает твои интересы</div>
             </div>
         </div>
 
@@ -1766,17 +1765,17 @@
         </div>
 
         <div class="profile-section">
-            <div class="profile-section-title">Твои интересы</div>
+            <div class="profile-section-title">Персональная лента</div>
             <div class="profile-interest-box">
-                <div class="profile-interest-caption">
-                    Алгоритм формирует их автоматически из поиска, просмотров, открытий и избранного.
+                <div style="color:rgba(255,255,255,.72);font-size:13px;font-weight:700;">
+                    🎯 Рекомендации под тебя
                 </div>
-                <div id="profileInterests" class="profile-interest-list"></div>
-                <div id="profileSmartNote" class="profile-smart-note"></div>
+                <div class="profile-smart-note" style="margin-top:7px;">
+                    Лента постепенно подстраивается под то, что ты ищешь, смотришь и открываешь.
+                    Никаких настроек интересов вручную — всё работает автоматически.
+                </div>
             </div>
-        </div>
-
-        <div class="profile-section">
+        </div>        <div class="profile-section">
             <div class="profile-section-title">Быстрые действия</div>
             <div class="profile-quick-actions">
                 <button class="profile-quick-action" onclick="openCollection('favorites')">
@@ -2131,6 +2130,7 @@ document.addEventListener(
 
         setupSearch();
         setupSearchSources();
+        setupSearchSuggestionFocus();
 
         setupSwipe();
 
@@ -3434,6 +3434,9 @@ function applyFilters() {
 
     const sources = [];
 
+    const sortSelect = document.getElementById("filterSort");
+    const sort = sortSelect ? (sortSelect.value || "relevance") : "relevance";
+
 
     sourceButtons.forEach(
         button => {
@@ -3473,7 +3476,9 @@ function applyFilters() {
         sources:
             uniqueStrings(
                 sources
-            )
+            ),
+
+        sort
     };
 
 
@@ -4294,6 +4299,41 @@ function applyProductFilters(
 
 
 /* =========================================================
+FILTER SORTING
+========================================================= */
+
+function applyFeedSort(list, sortMode) {
+
+    if (!Array.isArray(list)) return list;
+
+    if (sortMode === "price_asc") {
+        list.sort((a, b) => {
+            const pa = parsePrice(a && a.price);
+            const pb = parsePrice(b && b.price);
+            const va = pa === null || !Number.isFinite(pa) ? Infinity : pa;
+            const vb = pb === null || !Number.isFinite(pb) ? Infinity : pb;
+            return va - vb;
+        });
+    } else if (sortMode === "price_desc") {
+        list.sort((a, b) => {
+            const pa = parsePrice(a && a.price);
+            const pb = parsePrice(b && b.price);
+            const va = pa === null || !Number.isFinite(pa) ? -Infinity : pa;
+            const vb = pb === null || !Number.isFinite(pb) ? -Infinity : pb;
+            return vb - va;
+        });
+    } else if (sortMode === "newest") {
+        list.sort((a, b) => {
+            const da = new Date((a && (a.created_at || a.updated_at)) || 0).getTime();
+            const db = new Date((b && (b.created_at || b.updated_at)) || 0).getTime();
+            return db - da;
+        });
+    }
+
+    return list;
+}
+
+/* =========================================================
 PERSONALIZED FEED
 ========================================================= */
 
@@ -4357,18 +4397,6 @@ function buildPersonalizedFeed() {
     */
 
     const sortMode = activeFilters.sort || "relevance";
-
-    if (sortMode === "price_asc") {
-        filteredProducts.sort((a, b) => Number(a.price || Infinity) - Number(b.price || Infinity));
-    } else if (sortMode === "price_desc") {
-        filteredProducts.sort((a, b) => Number(b.price || -Infinity) - Number(a.price || -Infinity));
-    } else if (sortMode === "newest") {
-        filteredProducts.sort((a, b) => {
-            const da = new Date(a.created_at || a.updated_at || 0).getTime();
-            const db = new Date(b.created_at || b.updated_at || 0).getTime();
-            return db - da;
-        });
-    }
 
     const viewedSet =
         new Set(
@@ -4476,6 +4504,8 @@ function buildPersonalizedFeed() {
                 shuffled
             );
 
+        applyFeedSort(products, sortMode);
+
 
         console.log(
             "[StyleFlow] Новая лента — полностью случайная"
@@ -4506,6 +4536,9 @@ function buildPersonalizedFeed() {
             scored,
             personalization
         );
+
+    // Явная сортировка фильтра имеет приоритет над персонализацией.
+    applyFeedSort(products, sortMode);
 
 
     console.log(
@@ -6773,19 +6806,8 @@ function setupSearch() {
             }
 
 
-            clearTimeout(
-                searchTimer
-            );
-
-
-            searchTimer =
-                setTimeout(
-                    () =>
-                        performSearch(
-                            value
-                        ),
-                    150
-                );
+            // Пока пользователь печатает, только обновляем подсказки.
+            // Поиск товаров запускается только после Enter или выбора подсказки.
         }
     );
 
@@ -7205,6 +7227,35 @@ function selectSearchSuggestion(index) {
     performSearch(item.text);
 }
 
+
+let searchSuggestionsFocusFix = false;
+
+function setupSearchSuggestionFocus() {
+    const input = document.getElementById("searchInput");
+    const box = document.getElementById("searchSuggestions");
+    if (!input || !box || searchSuggestionsFocusFix) return;
+
+    searchSuggestionsFocusFix = true;
+
+    input.addEventListener("focus", () => {
+        const value = input.value.trim();
+        if (value) renderSearchSuggestions(value);
+    });
+
+    input.addEventListener("blur", () => {
+        setTimeout(() => {
+            if (!box.matches(":hover") &&
+                document.activeElement !== input) {
+                box.classList.remove("active");
+            }
+        }, 180);
+    });
+
+    box.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+    });
+}
+
 function hideSearchSuggestions() {
     const box = document.getElementById("searchSuggestions");
     if (box) box.classList.remove("active");
@@ -7298,33 +7349,8 @@ function getTopUserInterests(limit = 8) {
 }
 
 function updateProfileInterests() {
-    const box = document.getElementById("profileInterests");
-    const note = document.getElementById("profileSmartNote");
-    if (!box) return;
-
-    const interests = getTopUserInterests(8);
-
-    if (!interests.length) {
-        box.innerHTML = `
-            <div style="color:rgba(255,255,255,.38);font-size:11px;line-height:1.45;">
-                Пока мало данных. Поищи несколько товаров, открой понравившиеся и добавь что-нибудь в избранное.
-            </div>
-        `;
-        if (note) note.textContent = "Чем больше действий, тем точнее персональная лента.";
-        return;
-    }
-
-    box.innerHTML = interests.map(item => `
-        <div class="profile-interest-chip">
-            <span>${escapeHTML(item.text)}</span>
-            <span class="profile-interest-score">интерес ${Math.min(99, Math.round(item.score))}</span>
-        </div>
-    `).join("");
-
-    if (note) {
-        note.textContent =
-            `Сейчас алгоритм учитывает ${interests.length} основных интересов и исключает уже просмотренные товары из автоматической ленты.`;
-    }
+    // Interests remain internal to the recommendation algorithm.
+    // They are intentionally not displayed in the profile UI.
 }
 
 function updateProfile() {
