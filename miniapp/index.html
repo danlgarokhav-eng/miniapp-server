@@ -43,7 +43,8 @@
         }
 
         button,
-        input {
+        input,
+        select {
             font: inherit;
         }
 
@@ -1406,6 +1407,53 @@
                 rgba(255,255,255,.72);
         }
 
+        /* =========================
+           FILTER SEARCH
+        ========================= */
+
+        .filter-query {
+            width: 100%;
+            height: 50px;
+
+            padding: 0 15px;
+
+            outline: none;
+
+            border:
+                1px solid
+                rgba(255,255,255,.08);
+
+            border-radius: 14px;
+
+            background:
+                rgba(255,255,255,.07);
+
+            color: white;
+
+            font-size: 14px;
+
+            transition:
+                border-color .15s ease,
+                background .15s ease;
+        }
+
+        .filter-query:focus {
+            border-color:
+                rgba(139,92,246,.55);
+
+            background:
+                rgba(255,255,255,.09);
+        }
+
+        .filter-query::placeholder {
+            color:
+                rgba(255,255,255,.38);
+        }
+
+        /* =========================
+           FILTER PRICE
+        ========================= */
+
         .price-row {
             display: grid;
 
@@ -1437,10 +1485,19 @@
             font-size: 14px;
         }
 
+        .price-input:focus {
+            border-color:
+                rgba(139,92,246,.55);
+        }
+
         .price-input::placeholder {
             color:
                 rgba(255,255,255,.38);
         }
+
+        /* =========================
+           FILTER CHIPS
+        ========================= */
 
         .filter-chips {
             display: flex;
@@ -1489,6 +1546,76 @@
 
             color: white;
         }
+
+        /* =========================
+           FILTER SORT
+        ========================= */
+
+        .filter-sort {
+            position: relative;
+        }
+
+        .sort-select {
+            width: 100%;
+            height: 50px;
+
+            padding:
+                0
+                42px
+                0
+                15px;
+
+            outline: none;
+
+            border:
+                1px solid
+                rgba(255,255,255,.08);
+
+            border-radius: 14px;
+
+            background:
+                rgba(255,255,255,.07);
+
+            color: white;
+
+            font-size: 14px;
+
+            appearance: none;
+            -webkit-appearance: none;
+
+            cursor: pointer;
+        }
+
+        .sort-select:focus {
+            border-color:
+                rgba(139,92,246,.55);
+        }
+
+        .sort-select option {
+            background: #17171d;
+            color: white;
+        }
+
+        .sort-arrow {
+            position: absolute;
+
+            right: 15px;
+            top: 50%;
+
+            transform:
+                translateY(-50%);
+
+            pointer-events: none;
+
+            color:
+                rgba(255,255,255,.55);
+
+            font-size: 13px;
+        }
+
+        /* =========================
+           FILTER ACTIONS
+        ========================= */
 
         .filters-actions {
             display: grid;
@@ -1834,7 +1961,7 @@
                         </span>
 
                         <span id="productCategory">
-                            Одежда
+                            —
                         </span>
 
                     </div>
@@ -1926,17 +2053,16 @@
                 <div class="empty-inner">
 
                     <div class="empty-icon">
-                        👕
+                        🔎
                     </div>
 
                     <h2>
-                        Товаров пока нет
+                        Ничего не найдено
                     </h2>
 
                     <p>
-                        Когда подключим источники
-                        маркетплейсов, здесь появится
-                        твоя лента.
+                        Попробуй изменить запрос,
+                        цену или источник.
                     </p>
 
                 </div>
@@ -2520,6 +2646,25 @@
         </div>
 
 
+        <!-- SEARCH QUERY -->
+
+        <div class="filter-section">
+
+            <div class="filter-section-title">
+                Что ищете?
+            </div>
+
+            <input
+                id="filterQuery"
+                class="filter-query"
+                type="text"
+                autocomplete="off"
+                placeholder="Например: машина, ноутбук, ремонт..."
+            >
+
+        </div>
+
+
         <!-- PRICE -->
 
         <div class="filter-section">
@@ -2553,22 +2698,6 @@
         </div>
 
 
-        <!-- CATEGORIES -->
-
-        <div class="filter-section">
-
-            <div class="filter-section-title">
-                Категория
-            </div>
-
-            <div
-                id="filterCategories"
-                class="filter-chips"
-            ></div>
-
-        </div>
-
-
         <!-- SOURCES -->
 
         <div class="filter-section">
@@ -2581,6 +2710,48 @@
                 id="filterSources"
                 class="filter-chips"
             ></div>
+
+        </div>
+
+
+        <!-- SORT -->
+
+        <div class="filter-section">
+
+            <div class="filter-section-title">
+                Сортировка
+            </div>
+
+            <div class="filter-sort">
+
+                <select
+                    id="filterSort"
+                    class="sort-select"
+                >
+
+                    <option value="relevance">
+                        По релевантности
+                    </option>
+
+                    <option value="newest">
+                        Сначала новые
+                    </option>
+
+                    <option value="price_asc">
+                        Сначала дешевле
+                    </option>
+
+                    <option value="price_desc">
+                        Сначала дороже
+                    </option>
+
+                </select>
+
+                <span class="sort-arrow">
+                    ▾
+                </span>
+
+            </div>
 
         </div>
 
