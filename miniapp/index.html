@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
@@ -24,8 +25,10 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
+
             background: #09090d;
             color: white;
+
             font-family:
                 -apple-system,
                 BlinkMacSystemFont,
@@ -33,6 +36,10 @@
                 Roboto,
                 Arial,
                 sans-serif;
+        }
+
+        body.filters-open {
+            overflow: hidden;
         }
 
         button,
@@ -52,8 +59,10 @@
         .background {
             position: fixed;
             inset: 0;
+
             overflow: hidden;
             pointer-events: none;
+
             background:
                 radial-gradient(
                     circle at 50% 0%,
@@ -65,41 +74,59 @@
 
         .blob {
             position: absolute;
+
             width: 280px;
             height: 280px;
+
             border-radius: 50%;
+
             filter: blur(90px);
             opacity: .16;
-            animation: floatBlob 12s infinite alternate ease-in-out;
+
+            animation:
+                floatBlob
+                12s
+                infinite
+                alternate
+                ease-in-out;
         }
 
         .blob.one {
             top: -100px;
             left: -80px;
+
             background: #8b5cf6;
         }
 
         .blob.two {
             right: -100px;
             top: 30%;
+
             background: #ec4899;
+
             animation-delay: -4s;
         }
 
         .blob.three {
             bottom: -120px;
             left: 20%;
+
             background: #3b82f6;
+
             animation-delay: -8s;
         }
 
         @keyframes floatBlob {
             from {
-                transform: translate(0, 0) scale(1);
+                transform:
+                    translate(0, 0)
+                    scale(1);
             }
 
             to {
-                transform: translate(40px, -30px) scale(1.15);
+                transform:
+                    translate(40px, -30px)
+                    scale(1.15);
             }
         }
 
@@ -109,6 +136,7 @@
 
         #app {
             position: relative;
+
             width: 100%;
             height: 100%;
         }
@@ -116,12 +144,20 @@
         .screen {
             position: absolute;
             inset: 0;
+
             display: block;
+
             visibility: hidden;
             opacity: 0;
-            transform: translateY(14px) scale(.985);
+
+            transform:
+                translateY(14px)
+                scale(.985);
+
             pointer-events: none;
+
             overflow: hidden;
+
             transition:
                 opacity .24s ease,
                 transform .28s cubic-bezier(.22,.61,.36,1),
@@ -131,8 +167,13 @@
         .screen.active {
             visibility: visible;
             opacity: 1;
-            transform: translateY(0) scale(1);
+
+            transform:
+                translateY(0)
+                scale(1);
+
             pointer-events: auto;
+
             transition:
                 opacity .24s ease,
                 transform .28s cubic-bezier(.22,.61,.36,1),
@@ -146,6 +187,7 @@
         .topbar {
             position: absolute;
             z-index: 20;
+
             top: 0;
             left: 0;
             right: 0;
@@ -158,11 +200,12 @@
 
             padding: 0 18px;
 
-            background: linear-gradient(
-                to bottom,
-                rgba(9, 9, 13, .72),
-                transparent
-            );
+            background:
+                linear-gradient(
+                    to bottom,
+                    rgba(9, 9, 13, .72),
+                    transparent
+                );
 
             backdrop-filter: blur(8px);
         }
@@ -170,6 +213,7 @@
         .logo {
             font-size: 20px;
             font-weight: 800;
+
             letter-spacing: -.7px;
         }
 
@@ -177,7 +221,17 @@
             opacity: .45;
         }
 
+        .topbar-actions {
+            display: flex;
+            align-items: center;
+
+            gap: 9px;
+        }
+
+        .top-filter,
         .top-search {
+            position: relative;
+
             width: 42px;
             height: 42px;
 
@@ -188,10 +242,52 @@
             border-radius: 50%;
 
             background: rgba(255,255,255,.1);
+
             backdrop-filter: blur(15px);
 
             cursor: pointer;
+
             font-size: 18px;
+
+            transition:
+                transform .15s ease,
+                background .15s ease;
+        }
+
+        .top-filter:active,
+        .top-search:active {
+            transform: scale(.9);
+        }
+
+        .top-filter.active {
+            background: rgba(139,92,246,.28);
+
+            box-shadow:
+                0 0 0 1px rgba(139,92,246,.35);
+        }
+
+        .filter-badge {
+            position: absolute;
+
+            top: -2px;
+            right: -2px;
+
+            min-width: 17px;
+            height: 17px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            padding: 0 4px;
+
+            border-radius: 999px;
+
+            background: #8b5cf6;
+            color: white;
+
+            font-size: 9px;
+            font-weight: 800;
         }
 
         /* =========================
@@ -236,10 +332,13 @@
                 0 0 0 1px rgba(255,255,255,.06);
 
             user-select: none;
+
             touch-action: none;
+
             -webkit-user-select: none;
 
             transform-origin: center;
+
             transition:
                 transform .25s ease,
                 opacity .25s ease;
@@ -301,6 +400,7 @@
             border-radius: 999px;
 
             background: rgba(0,0,0,.45);
+
             backdrop-filter: blur(12px);
 
             font-size: 11px;
@@ -325,17 +425,20 @@
             line-height: 1.18;
             font-weight: 750;
 
-            text-shadow: 0 2px 12px rgba(0,0,0,.4);
+            text-shadow:
+                0 2px 12px rgba(0,0,0,.4);
         }
 
         .meta {
             display: flex;
             align-items: center;
+
             gap: 8px;
 
             margin-top: 10px;
 
             font-size: 13px;
+
             color: rgba(255,255,255,.82);
         }
 
@@ -357,6 +460,7 @@
             font-weight: 500;
 
             color: rgba(255,255,255,.45);
+
             text-decoration: line-through;
         }
 
@@ -365,6 +469,7 @@
 
             display: inline-flex;
             align-items: center;
+
             gap: 7px;
 
             padding: 11px 16px;
@@ -421,6 +526,7 @@
             border-radius: 50%;
 
             background: rgba(0,0,0,.4);
+
             backdrop-filter: blur(15px);
 
             font-size: 21px;
@@ -436,7 +542,9 @@
 
         .action.liked .action-icon {
             color: #ff426d;
-            background: rgba(255,66,109,.18);
+
+            background:
+                rgba(255,66,109,.18);
         }
 
         .action-label {
@@ -474,12 +582,17 @@
         }
 
         .big-heart.show {
-            animation: heartPop .8s ease forwards;
+            animation:
+                heartPop
+                .8s
+                ease
+                forwards;
         }
 
         @keyframes heartPop {
             0% {
                 opacity: 0;
+
                 transform:
                     translate(-50%, -50%)
                     scale(.3);
@@ -487,6 +600,7 @@
 
             25% {
                 opacity: 1;
+
                 transform:
                     translate(-50%, -50%)
                     scale(1.15);
@@ -494,6 +608,7 @@
 
             60% {
                 opacity: 1;
+
                 transform:
                     translate(-50%, -50%)
                     scale(1);
@@ -501,6 +616,7 @@
 
             100% {
                 opacity: 0;
+
                 transform:
                     translate(-50%, -50%)
                     scale(1.4);
@@ -530,11 +646,13 @@
 
         .empty-icon {
             font-size: 52px;
+
             margin-bottom: 16px;
         }
 
         .empty h2 {
             margin: 0 0 8px;
+
             font-size: 21px;
         }
 
@@ -542,6 +660,7 @@
             margin: 0;
 
             color: rgba(255,255,255,.55);
+
             line-height: 1.5;
         }
 
@@ -550,7 +669,6 @@
         ========================= */
 
         .bottom-nav {
-            transition: transform .25s ease, opacity .25s ease;
             position: absolute;
             z-index: 50;
 
@@ -564,16 +682,22 @@
             height: 64px;
 
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+
+            grid-template-columns:
+                repeat(4, 1fr);
 
             padding: 5px;
 
             border-radius: 21px;
 
-            background: rgba(22,22,29,.88);
-            border: 1px solid rgba(255,255,255,.07);
+            background:
+                rgba(22,22,29,.88);
 
-            box-shadow: 0 15px 50px rgba(0,0,0,.35);
+            border:
+                1px solid rgba(255,255,255,.07);
+
+            box-shadow:
+                0 15px 50px rgba(0,0,0,.35);
 
             backdrop-filter: blur(25px);
         }
@@ -597,7 +721,9 @@
 
         .nav-item.active {
             color: white;
-            background: rgba(255,255,255,.09);
+
+            background:
+                rgba(255,255,255,.09);
         }
 
         .nav-icon {
@@ -615,6 +741,7 @@
 
         .search-screen {
             padding: 76px 16px 88px;
+
             overflow-y: auto;
         }
 
@@ -622,6 +749,7 @@
             margin: 0 0 18px;
 
             font-size: 30px;
+
             letter-spacing: -1px;
         }
 
@@ -641,14 +769,22 @@
             width: 100%;
             height: 100%;
 
-            padding: 0 48px 0 18px;
+            padding:
+                0
+                48px
+                0
+                18px;
 
             outline: none;
 
-            border: 1px solid rgba(255,255,255,.08);
+            border:
+                1px solid
+                rgba(255,255,255,.08);
+
             border-radius: 17px;
 
-            background: rgba(255,255,255,.08);
+            background:
+                rgba(255,255,255,.08);
 
             color: white;
 
@@ -672,7 +808,8 @@
 
             border-radius: 50%;
 
-            background: rgba(255,255,255,.08);
+            background:
+                rgba(255,255,255,.08);
 
             cursor: pointer;
         }
@@ -689,6 +826,7 @@
         .chips {
             display: flex;
             flex-wrap: wrap;
+
             gap: 8px;
         }
 
@@ -697,8 +835,12 @@
 
             border-radius: 13px;
 
-            background: rgba(255,255,255,.07);
-            border: 1px solid rgba(255,255,255,.06);
+            background:
+                rgba(255,255,255,.07);
+
+            border:
+                1px solid
+                rgba(255,255,255,.06);
 
             color: rgba(255,255,255,.86);
 
@@ -713,7 +855,10 @@
 
         .categories {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+
+            grid-template-columns:
+                repeat(2, 1fr);
+
             gap: 10px;
         }
 
@@ -735,13 +880,16 @@
                     rgba(255,255,255,.04)
                 );
 
-            border: 1px solid rgba(255,255,255,.06);
+            border:
+                1px solid
+                rgba(255,255,255,.06);
 
             cursor: pointer;
         }
 
         .category-icon {
             font-size: 27px;
+
             margin-bottom: 5px;
         }
 
@@ -762,11 +910,13 @@
             margin-bottom: 10px;
 
             font-size: 12px;
+
             color: rgba(255,255,255,.45);
         }
 
         .result-list {
             display: grid;
+
             gap: 9px;
         }
 
@@ -780,7 +930,8 @@
 
             border-radius: 17px;
 
-            background: rgba(255,255,255,.06);
+            background:
+                rgba(255,255,255,.06);
 
             cursor: pointer;
         }
@@ -802,6 +953,7 @@
 
         .result-brand {
             font-size: 11px;
+
             color: rgba(255,255,255,.45);
         }
 
@@ -812,7 +964,9 @@
             font-weight: 700;
 
             white-space: nowrap;
+
             overflow: hidden;
+
             text-overflow: ellipsis;
         }
 
@@ -829,6 +983,7 @@
 
         .profile-screen {
             padding: 76px 16px 90px;
+
             overflow-y: auto;
         }
 
@@ -862,7 +1017,8 @@
             font-weight: 800;
 
             box-shadow:
-                0 10px 30px rgba(139,92,246,.25);
+                0 10px 30px
+                rgba(139,92,246,.25);
         }
 
         .profile-name {
@@ -874,12 +1030,15 @@
             margin-top: 4px;
 
             color: rgba(255,255,255,.45);
+
             font-size: 12px;
         }
 
         .stats {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+
+            grid-template-columns:
+                repeat(3, 1fr);
 
             gap: 8px;
 
@@ -893,7 +1052,8 @@
 
             border-radius: 17px;
 
-            background: rgba(255,255,255,.06);
+            background:
+                rgba(255,255,255,.06);
         }
 
         .stat-number {
@@ -905,6 +1065,7 @@
             margin-top: 4px;
 
             font-size: 10px;
+
             color: rgba(255,255,255,.45);
         }
 
@@ -921,7 +1082,9 @@
 
         .collection-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+
+            grid-template-columns:
+                repeat(2, 1fr);
 
             gap: 10px;
         }
@@ -944,7 +1107,9 @@
                     rgba(255,255,255,.04)
                 );
 
-            border: 1px solid rgba(255,255,255,.06);
+            border:
+                1px solid
+                rgba(255,255,255,.06);
 
             cursor: pointer;
         }
@@ -955,6 +1120,7 @@
 
         .collection-name {
             position: absolute;
+
             left: 14px;
             bottom: 25px;
 
@@ -964,16 +1130,21 @@
 
         .collection-count {
             position: absolute;
+
             left: 14px;
             bottom: 10px;
 
             font-size: 10px;
+
             color: rgba(255,255,255,.45);
         }
 
         .recent-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+
+            grid-template-columns:
+                repeat(2, 1fr);
+
             gap: 9px;
         }
 
@@ -994,6 +1165,7 @@
         .recent-card img {
             width: 100%;
             height: 100%;
+
             object-fit: cover;
         }
 
@@ -1003,10 +1175,11 @@
             position: absolute;
             inset: 45% 0 0;
 
-            background: linear-gradient(
-                transparent,
-                rgba(0,0,0,.8)
-            );
+            background:
+                linear-gradient(
+                    transparent,
+                    rgba(0,0,0,.8)
+                );
         }
 
         .recent-price {
@@ -1026,12 +1199,16 @@
 
         .favorites-screen {
             padding: 76px 16px 88px;
+
             overflow-y: auto;
         }
 
         .favorites-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+
+            grid-template-columns:
+                repeat(2, 1fr);
+
             gap: 10px;
         }
 
@@ -1062,10 +1239,11 @@
             position: absolute;
             inset: 50% 0 0;
 
-            background: linear-gradient(
-                transparent,
-                rgba(0,0,0,.85)
-            );
+            background:
+                linear-gradient(
+                    transparent,
+                    rgba(0,0,0,.85)
+                );
         }
 
         .favorite-info {
@@ -1082,7 +1260,9 @@
             font-weight: 750;
 
             white-space: nowrap;
+
             overflow: hidden;
+
             text-overflow: ellipsis;
         }
 
@@ -1091,6 +1271,259 @@
 
             font-size: 13px;
             font-weight: 850;
+        }
+
+        /* =========================
+           FILTERS
+        ========================= */
+
+        .filters-overlay {
+            position: fixed;
+            z-index: 150;
+
+            inset: 0;
+
+            display: flex;
+            align-items: flex-end;
+
+            visibility: hidden;
+            opacity: 0;
+
+            pointer-events: none;
+
+            background:
+                rgba(0,0,0,.55);
+
+            backdrop-filter: blur(6px);
+
+            transition:
+                opacity .25s ease,
+                visibility 0s linear .25s;
+        }
+
+        .filters-overlay.show {
+            visibility: visible;
+            opacity: 1;
+
+            pointer-events: auto;
+
+            transition:
+                opacity .25s ease,
+                visibility 0s linear 0s;
+        }
+
+        .filters-sheet {
+            width: 100%;
+
+            max-height: 82vh;
+
+            overflow-y: auto;
+
+            padding:
+                12px
+                18px
+                calc(20px + env(safe-area-inset-bottom));
+
+            border-radius:
+                28px
+                28px
+                0
+                0;
+
+            background: #17171d;
+
+            box-shadow:
+                0 -20px 70px
+                rgba(0,0,0,.5);
+
+            transform: translateY(100%);
+
+            transition:
+                transform .28s
+                cubic-bezier(.22,.61,.36,1);
+        }
+
+        .filters-overlay.show .filters-sheet {
+            transform: translateY(0);
+        }
+
+        .filters-handle {
+            width: 42px;
+            height: 4px;
+
+            margin: 0 auto 17px;
+
+            border-radius: 999px;
+
+            background:
+                rgba(255,255,255,.2);
+        }
+
+        .filters-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            margin-bottom: 20px;
+        }
+
+        .filters-title {
+            margin: 0;
+
+            font-size: 22px;
+            font-weight: 800;
+        }
+
+        .filters-close {
+            width: 38px;
+            height: 38px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            border-radius: 50%;
+
+            background:
+                rgba(255,255,255,.08);
+
+            cursor: pointer;
+
+            font-size: 22px;
+        }
+
+        .filter-section {
+            margin-bottom: 22px;
+        }
+
+        .filter-section-title {
+            margin-bottom: 10px;
+
+            font-size: 13px;
+            font-weight: 800;
+
+            color:
+                rgba(255,255,255,.72);
+        }
+
+        .price-row {
+            display: grid;
+
+            grid-template-columns:
+                1fr 1fr;
+
+            gap: 10px;
+        }
+
+        .price-input {
+            width: 100%;
+            height: 48px;
+
+            padding: 0 14px;
+
+            outline: none;
+
+            border:
+                1px solid
+                rgba(255,255,255,.08);
+
+            border-radius: 14px;
+
+            background:
+                rgba(255,255,255,.07);
+
+            color: white;
+
+            font-size: 14px;
+        }
+
+        .price-input::placeholder {
+            color:
+                rgba(255,255,255,.38);
+        }
+
+        .filter-chips {
+            display: flex;
+            flex-wrap: wrap;
+
+            gap: 8px;
+        }
+
+        .filter-chip {
+            padding:
+                10px
+                13px;
+
+            border-radius: 13px;
+
+            background:
+                rgba(255,255,255,.07);
+
+            border:
+                1px solid
+                rgba(255,255,255,.07);
+
+            color:
+                rgba(255,255,255,.78);
+
+            font-size: 13px;
+
+            cursor: pointer;
+
+            transition:
+                background .15s ease,
+                border-color .15s ease,
+                transform .15s ease;
+        }
+
+        .filter-chip:active {
+            transform: scale(.96);
+        }
+
+        .filter-chip.active {
+            background:
+                rgba(139,92,246,.24);
+
+            border-color:
+                rgba(139,92,246,.55);
+
+            color: white;
+        }
+
+        .filters-actions {
+            display: grid;
+
+            grid-template-columns:
+                1fr 1.5fr;
+
+            gap: 10px;
+
+            margin-top: 8px;
+        }
+
+        .filter-action {
+            height: 50px;
+
+            border-radius: 15px;
+
+            cursor: pointer;
+
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        .filter-reset {
+            background:
+                rgba(255,255,255,.08);
+
+            color:
+                rgba(255,255,255,.78);
+        }
+
+        .filter-apply {
+            background: white;
+
+            color: #101014;
         }
 
         /* =========================
@@ -1105,7 +1538,9 @@
 
             display: none;
 
-            background: rgba(0,0,0,.55);
+            background:
+                rgba(0,0,0,.55);
+
             backdrop-filter: blur(5px);
         }
 
@@ -1124,11 +1559,17 @@
 
             padding: 18px;
 
-            border-radius: 26px 26px 0 0;
+            border-radius:
+                26px
+                26px
+                0
+                0;
 
             background: #17171d;
 
-            box-shadow: 0 -20px 70px rgba(0,0,0,.45);
+            box-shadow:
+                0 -20px 70px
+                rgba(0,0,0,.45);
         }
 
         .comments-handle {
@@ -1139,7 +1580,8 @@
 
             border-radius: 999px;
 
-            background: rgba(255,255,255,.2);
+            background:
+                rgba(255,255,255,.2);
         }
 
         .comments-title {
@@ -1152,7 +1594,9 @@
         .comment {
             padding: 11px 0;
 
-            border-bottom: 1px solid rgba(255,255,255,.06);
+            border-bottom:
+                1px solid
+                rgba(255,255,255,.06);
         }
 
         .comment-user {
@@ -1164,7 +1608,9 @@
             margin-top: 4px;
 
             font-size: 13px;
-            color: rgba(255,255,255,.65);
+
+            color:
+                rgba(255,255,255,.65);
         }
 
         /* =========================
@@ -1182,19 +1628,27 @@
                 translateX(-50%)
                 translateY(20px);
 
-            padding: 11px 15px;
+            padding:
+                11px
+                15px;
 
             border-radius: 13px;
 
-            background: rgba(20,20,26,.94);
+            background:
+                rgba(20,20,26,.94);
 
-            border: 1px solid rgba(255,255,255,.08);
+            border:
+                1px solid
+                rgba(255,255,255,.08);
 
-            box-shadow: 0 10px 35px rgba(0,0,0,.35);
+            box-shadow:
+                0 10px 35px
+                rgba(0,0,0,.35);
 
             font-size: 12px;
 
             opacity: 0;
+
             pointer-events: none;
 
             transition:
@@ -1217,20 +1671,37 @@
         ========================= */
 
         @media (min-width: 700px) {
+
             .feed {
                 padding-top: 76px;
                 padding-bottom: 90px;
             }
 
             .card {
-                height: min(760px, calc(100vh - 150px));
+                height:
+                    min(
+                        760px,
+                        calc(100vh - 150px)
+                    );
             }
 
             .search-screen,
             .profile-screen,
             .favorites-screen {
                 width: 470px;
+
                 margin: auto;
+            }
+
+            .filters-sheet {
+                width: 470px;
+
+                margin:
+                    0 auto;
+
+                border-radius: 28px;
+
+                margin-bottom: 20px;
             }
         }
 
@@ -1239,9 +1710,12 @@
         ========================= */
 
         @media (max-height: 650px) {
+
             .card {
                 min-height: 0;
-                height: calc(100vh - 145px);
+
+                height:
+                    calc(100vh - 145px);
             }
 
             .product-info {
@@ -1250,6 +1724,7 @@
 
             .actions {
                 bottom: 18px;
+
                 gap: 10px;
             }
 
@@ -1275,59 +1750,109 @@
          FEED
     ========================= -->
 
-    <section id="feedScreen" class="screen active feed-screen">
+    <section
+        id="feedScreen"
+        class="screen active feed-screen"
+    >
 
         <header class="topbar">
+
             <div class="logo">
                 Style<span>Flow</span>
             </div>
 
-            <button
-                class="top-search"
-                onclick="switchTab('search')"
-            >
-                🔎
-            </button>
+            <div class="topbar-actions">
+
+                <button
+                    id="filterButton"
+                    class="top-filter"
+                    onclick="openFilters()"
+                    aria-label="Фильтры"
+                >
+                    ⚙️
+                </button>
+
+                <button
+                    class="top-search"
+                    onclick="switchTab('search')"
+                    aria-label="Поиск"
+                >
+                    🔎
+                </button>
+
+            </div>
+
         </header>
 
         <main class="feed">
 
-            <div id="productCard" class="card">
+            <div
+                id="productCard"
+                class="card"
+            >
 
                 <div class="product-media">
-                    <img id="productImage" src="" alt="Товар">
+
+                    <img
+                        id="productImage"
+                        src=""
+                        alt="Товар"
+                    >
+
                 </div>
 
                 <div class="product-info">
 
-                    <div id="productSource" class="source-badge">
+                    <div
+                        id="productSource"
+                        class="source-badge"
+                    >
                         Marketplace
                     </div>
 
-                    <div id="productBrand" class="brand">
+                    <div
+                        id="productBrand"
+                        class="brand"
+                    >
                         Brand
                     </div>
 
-                    <h1 id="productTitle" class="title">
+                    <h1
+                        id="productTitle"
+                        class="title"
+                    >
                         Загрузка...
                     </h1>
 
                     <div class="meta">
-                        <span id="productRating" class="rating">
+
+                        <span
+                            id="productRating"
+                            class="rating"
+                        >
                             ★ 4.8
                         </span>
 
                         <span id="productCategory">
                             Одежда
                         </span>
+
                     </div>
 
                     <div>
-                        <span id="productPrice" class="price">
+
+                        <span
+                            id="productPrice"
+                            class="price"
+                        >
                             —
                         </span>
 
-                        <span id="productOldPrice" class="old-price"></span>
+                        <span
+                            id="productOldPrice"
+                            class="old-price"
+                        ></span>
+
                     </div>
 
                     <button
@@ -1346,85 +1871,144 @@
                         class="action"
                         onclick="toggleLike()"
                     >
-                        <span class="action-icon">♥</span>
-                        <span class="action-label">Нравится</span>
+                        <span class="action-icon">
+                            ♥
+                        </span>
+
+                        <span class="action-label">
+                            Нравится
+                        </span>
                     </button>
 
                     <button
                         class="action"
                         onclick="openComments()"
                     >
-                        <span class="action-icon">💬</span>
-                        <span class="action-label">Отзывы</span>
+                        <span class="action-icon">
+                            💬
+                        </span>
+
+                        <span class="action-label">
+                            Отзывы
+                        </span>
                     </button>
 
                     <button
                         class="action"
                         onclick="shareCurrentProduct()"
                     >
-                        <span class="action-icon">↗</span>
-                        <span class="action-label">Поделиться</span>
+                        <span class="action-icon">
+                            ↗
+                        </span>
+
+                        <span class="action-label">
+                            Поделиться
+                        </span>
                     </button>
 
                 </div>
 
-                <div id="bigHeart" class="big-heart">
+                <div
+                    id="bigHeart"
+                    class="big-heart"
+                >
                     ❤️
                 </div>
 
             </div>
 
-            <div id="feedEmpty" class="empty" style="display:none;">
+            <div
+                id="feedEmpty"
+                class="empty"
+                style="display:none;"
+            >
+
                 <div class="empty-inner">
-                    <div class="empty-icon">👕</div>
-                    <h2>Товаров пока нет</h2>
+
+                    <div class="empty-icon">
+                        👕
+                    </div>
+
+                    <h2>
+                        Товаров пока нет
+                    </h2>
+
                     <p>
-                        Когда подключим источники маркетплейсов,
-                        здесь появится твоя лента.
+                        Когда подключим источники
+                        маркетплейсов, здесь появится
+                        твоя лента.
                     </p>
+
                 </div>
+
             </div>
 
         </main>
 
     </section>
 
+
     <!-- =========================
          FAVORITES
     ========================= -->
 
-    <section id="favoritesScreen" class="screen favorites-screen">
+    <section
+        id="favoritesScreen"
+        class="screen favorites-screen"
+    >
 
-        <h1 class="page-title">Избранное</h1>
+        <h1 class="page-title">
+            Избранное
+        </h1>
 
-        <div id="favoritesGrid" class="favorites-grid"></div>
+        <div
+            id="favoritesGrid"
+            class="favorites-grid"
+        ></div>
 
         <div
             id="favoritesEmpty"
             class="empty"
-            style="position:relative; min-height:420px;"
+            style="
+                position:relative;
+                min-height:420px;
+            "
         >
-            <div class="empty-inner">
-                <div class="empty-icon">♡</div>
 
-                <h2>Пока пусто</h2>
+            <div class="empty-inner">
+
+                <div class="empty-icon">
+                    ♡
+                </div>
+
+                <h2>
+                    Пока пусто
+                </h2>
 
                 <p>
                     Лайкай вещи в ленте —
                     они появятся здесь.
                 </p>
+
             </div>
+
         </div>
 
     </section>
+
 
     <!-- =========================
          SEARCH
     ========================= -->
 
-    <section id="searchScreen" class="screen search-screen">
+    <section
+        id="searchScreen"
+        class="screen search-screen"
+    >
 
-        <h1 class="page-title">Поиск</h1>
+        <h1 class="page-title">
+            Поиск
+        </h1>
 
         <div class="search-box">
 
@@ -1453,27 +2037,45 @@
 
             <div class="chips">
 
-                <button class="chip" onclick="quickSearch('кроссовки')">
+                <button
+                    class="chip"
+                    onclick="quickSearch('кроссовки')"
+                >
                     👟 кроссовки
                 </button>
 
-                <button class="chip" onclick="quickSearch('худи')">
+                <button
+                    class="chip"
+                    onclick="quickSearch('худи')"
+                >
                     🧥 худи
                 </button>
 
-                <button class="chip" onclick="quickSearch('футболки')">
+                <button
+                    class="chip"
+                    onclick="quickSearch('футболки')"
+                >
                     👕 футболки
                 </button>
 
-                <button class="chip" onclick="quickSearch('джинсы')">
+                <button
+                    class="chip"
+                    onclick="quickSearch('джинсы')"
+                >
                     👖 джинсы
                 </button>
 
-                <button class="chip" onclick="quickSearch('куртки')">
+                <button
+                    class="chip"
+                    onclick="quickSearch('куртки')"
+                >
                     🧥 куртки
                 </button>
 
-                <button class="chip" onclick="quickSearch('nike')">
+                <button
+                    class="chip"
+                    onclick="quickSearch('nike')"
+                >
                     Nike
                 </button>
 
@@ -1489,48 +2091,78 @@
                     class="category"
                     onclick="quickSearch('обувь')"
                 >
-                    <span class="category-icon">👟</span>
-                    <span class="category-name">Обувь</span>
+                    <span class="category-icon">
+                        👟
+                    </span>
+
+                    <span class="category-name">
+                        Обувь
+                    </span>
                 </button>
 
                 <button
                     class="category"
                     onclick="quickSearch('футболки')"
                 >
-                    <span class="category-icon">👕</span>
-                    <span class="category-name">Футболки</span>
+                    <span class="category-icon">
+                        👕
+                    </span>
+
+                    <span class="category-name">
+                        Футболки
+                    </span>
                 </button>
 
                 <button
                     class="category"
                     onclick="quickSearch('куртки')"
                 >
-                    <span class="category-icon">🧥</span>
-                    <span class="category-name">Куртки</span>
+                    <span class="category-icon">
+                        🧥
+                    </span>
+
+                    <span class="category-name">
+                        Куртки
+                    </span>
                 </button>
 
                 <button
                     class="category"
                     onclick="quickSearch('брюки')"
                 >
-                    <span class="category-icon">👖</span>
-                    <span class="category-name">Брюки</span>
+                    <span class="category-icon">
+                        👖
+                    </span>
+
+                    <span class="category-name">
+                        Брюки
+                    </span>
                 </button>
 
                 <button
                     class="category"
                     onclick="quickSearch('аксессуары')"
                 >
-                    <span class="category-icon">🧢</span>
-                    <span class="category-name">Аксессуары</span>
+                    <span class="category-icon">
+                        🧢
+                    </span>
+
+                    <span class="category-name">
+                        Аксессуары
+                    </span>
                 </button>
 
                 <button
                     class="category"
                     onclick="quickSearch('oversize')"
                 >
-                    <span class="category-icon">🔥</span>
-                    <span class="category-name">Oversize</span>
+                    <span class="category-icon">
+                        🔥
+                    </span>
+
+                    <span class="category-name">
+                        Oversize
+                    </span>
                 </button>
 
             </div>
@@ -1541,19 +2173,31 @@
 
             <div class="chips">
 
-                <button class="chip" onclick="quickSearch('wildberries')">
+                <button
+                    class="chip"
+                    onclick="quickSearch('wildberries')"
+                >
                     🟣 Wildberries
                 </button>
 
-                <button class="chip" onclick="quickSearch('ozon')">
+                <button
+                    class="chip"
+                    onclick="quickSearch('ozon')"
+                >
                     🔵 Ozon
                 </button>
 
-                <button class="chip" onclick="quickSearch('aliexpress')">
+                <button
+                    class="chip"
+                    onclick="quickSearch('aliexpress')"
+                >
                     🟠 AliExpress
                 </button>
 
-                <button class="chip" onclick="quickSearch('kufar')">
+                <button
+                    class="chip"
+                    onclick="quickSearch('kufar')"
+                >
                     🟢 Kufar
                 </button>
 
@@ -1561,21 +2205,34 @@
 
         </div>
 
-        <div id="searchResults" class="search-results">
+        <div
+            id="searchResults"
+            class="search-results"
+        >
 
-            <div id="resultCount" class="result-count"></div>
+            <div
+                id="resultCount"
+                class="result-count"
+            ></div>
 
-            <div id="resultList" class="result-list"></div>
+            <div
+                id="resultList"
+                class="result-list"
+            ></div>
 
         </div>
 
     </section>
 
+
     <!-- =========================
          PROFILE
     ========================= -->
 
-    <section id="profileScreen" class="screen profile-screen">
+    <section
+        id="profileScreen"
+        class="screen profile-screen"
+    >
 
         <h1 class="page-title">
             Мой Style
@@ -1583,18 +2240,26 @@
 
         <div class="profile-head">
 
-            <div id="profileAvatar" class="profile-avatar">
+            <div
+                id="profileAvatar"
+                class="profile-avatar"
+            >
                 S
             </div>
 
             <div>
-                <div id="profileName" class="profile-name">
+
+                <div
+                    id="profileName"
+                    class="profile-name"
+                >
                     Style Explorer
                 </div>
 
                 <div class="profile-subtitle">
                     Твой стиль. Твои находки.
                 </div>
+
             </div>
 
         </div>
@@ -1602,18 +2267,48 @@
         <div class="stats">
 
             <div class="stat">
-                <div id="likedCount" class="stat-number">0</div>
-                <div class="stat-label">❤️ лайков</div>
+
+                <div
+                    id="likedCount"
+                    class="stat-number"
+                >
+                    0
+                </div>
+
+                <div class="stat-label">
+                    ❤️ лайков
+                </div>
+
             </div>
 
             <div class="stat">
-                <div id="viewedCount" class="stat-number">0</div>
-                <div class="stat-label">👁 просмотрено</div>
+
+                <div
+                    id="viewedCount"
+                    class="stat-number"
+                >
+                    0
+                </div>
+
+                <div class="stat-label">
+                    👁 просмотрено
+                </div>
+
             </div>
 
             <div class="stat">
-                <div id="openedCount" class="stat-number">0</div>
-                <div class="stat-label">↗ переходов</div>
+
+                <div
+                    id="openedCount"
+                    class="stat-number"
+                >
+                    0
+                </div>
+
+                <div class="stat-label">
+                    ↗ переходов
+                </div>
+
             </div>
 
         </div>
@@ -1630,52 +2325,79 @@
                     class="collection"
                     onclick="openCollection('favorites')"
                 >
-                    <div class="collection-icon">🔥</div>
+
+                    <div class="collection-icon">
+                        🔥
+                    </div>
+
                     <div class="collection-name">
                         Хочу купить
                     </div>
-                    <div id="collectionCount" class="collection-count">
+
+                    <div
+                        id="collectionCount"
+                        class="collection-count"
+                    >
                         0 товаров
                     </div>
+
                 </div>
 
                 <div
                     class="collection"
                     onclick="quickSearch('обувь')"
                 >
-                    <div class="collection-icon">👟</div>
+
+                    <div class="collection-icon">
+                        👟
+                    </div>
+
                     <div class="collection-name">
                         Обувь
                     </div>
+
                     <div class="collection-count">
                         Смотреть →
                     </div>
+
                 </div>
 
                 <div
                     class="collection"
                     onclick="quickSearch('осень')"
                 >
-                    <div class="collection-icon">🧥</div>
+
+                    <div class="collection-icon">
+                        🧥
+                    </div>
+
                     <div class="collection-name">
                         Осень
                     </div>
+
                     <div class="collection-count">
                         Смотреть →
                     </div>
+
                 </div>
 
                 <div
                     class="collection"
                     onclick="quickSearch('до 100')"
                 >
-                    <div class="collection-icon">💸</div>
+
+                    <div class="collection-icon">
+                        💸
+                    </div>
+
                     <div class="collection-name">
                         До 100
                     </div>
+
                     <div class="collection-count">
                         Смотреть →
                     </div>
+
                 </div>
 
             </div>
@@ -1688,11 +2410,15 @@
                 Недавно смотрел
             </div>
 
-            <div id="recentGrid" class="recent-grid"></div>
+            <div
+                id="recentGrid"
+                class="recent-grid"
+            ></div>
 
         </div>
 
     </section>
+
 
     <!-- =========================
          BOTTOM NAV
@@ -1705,8 +2431,13 @@
             class="nav-item active"
             onclick="switchTab('feed')"
         >
-            <span class="nav-icon">⌂</span>
-            <span class="nav-label">Лента</span>
+            <span class="nav-icon">
+                ⌂
+            </span>
+
+            <span class="nav-label">
+                Лента
+            </span>
         </button>
 
         <button
@@ -1714,8 +2445,13 @@
             class="nav-item"
             onclick="switchTab('favorites')"
         >
-            <span class="nav-icon">♡</span>
-            <span class="nav-label">Избранное</span>
+            <span class="nav-icon">
+                ♡
+            </span>
+
+            <span class="nav-label">
+                Избранное
+            </span>
         </button>
 
         <button
@@ -1723,8 +2459,13 @@
             class="nav-item"
             onclick="switchTab('search')"
         >
-            <span class="nav-icon">⌕</span>
-            <span class="nav-label">Поиск</span>
+            <span class="nav-icon">
+                ⌕
+            </span>
+
+            <span class="nav-label">
+                Поиск
+            </span>
         </button>
 
         <button
@@ -1732,15 +2473,148 @@
             class="nav-item"
             onclick="switchTab('profile')"
         >
-            <span class="nav-icon">○</span>
-            <span class="nav-label">Мой Style</span>
+            <span class="nav-icon">
+                ○
+            </span>
+
+            <span class="nav-label">
+                Мой Style
+            </span>
         </button>
 
     </nav>
 
 </div>
 
-<!-- COMMENTS -->
+
+<!-- =========================
+     FILTERS
+========================= -->
+
+<div
+    id="filtersOverlay"
+    class="filters-overlay"
+    onclick="closeFilters(event)"
+>
+
+    <div
+        class="filters-sheet"
+        onclick="event.stopPropagation()"
+    >
+
+        <div class="filters-handle"></div>
+
+        <div class="filters-header">
+
+            <h2 class="filters-title">
+                Фильтры
+            </h2>
+
+            <button
+                class="filters-close"
+                onclick="closeFilters()"
+            >
+                ×
+            </button>
+
+        </div>
+
+
+        <!-- PRICE -->
+
+        <div class="filter-section">
+
+            <div class="filter-section-title">
+                Цена
+            </div>
+
+            <div class="price-row">
+
+                <input
+                    id="filterMinPrice"
+                    class="price-input"
+                    type="number"
+                    inputmode="decimal"
+                    min="0"
+                    placeholder="От"
+                >
+
+                <input
+                    id="filterMaxPrice"
+                    class="price-input"
+                    type="number"
+                    inputmode="decimal"
+                    min="0"
+                    placeholder="До"
+                >
+
+            </div>
+
+        </div>
+
+
+        <!-- CATEGORIES -->
+
+        <div class="filter-section">
+
+            <div class="filter-section-title">
+                Категория
+            </div>
+
+            <div
+                id="filterCategories"
+                class="filter-chips"
+            ></div>
+
+        </div>
+
+
+        <!-- SOURCES -->
+
+        <div class="filter-section">
+
+            <div class="filter-section-title">
+                Источник
+            </div>
+
+            <div
+                id="filterSources"
+                class="filter-chips"
+            ></div>
+
+        </div>
+
+
+        <!-- ACTIONS -->
+
+        <div class="filters-actions">
+
+            <button
+                type="button"
+                class="filter-action filter-reset"
+                onclick="resetFilters()"
+            >
+                Сбросить
+            </button>
+
+            <button
+                type="button"
+                class="filter-action filter-apply"
+                onclick="applyFilters()"
+            >
+                Применить
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =========================
+     COMMENTS
+========================= -->
 
 <div
     id="commentsOverlay"
@@ -1765,7 +2639,9 @@
 
 </div>
 
+
 <div id="toast"></div>
+
 
 <script src="/script.js"></script>
 
