@@ -4332,7 +4332,9 @@ function findNextUnviewedIndex(
 SHOW PRODUCT
 ========================================================= */
 
-function showProduct() {
+function showProduct(
+    forceRender = false
+) {
 
     if (
         !products.length
@@ -4397,7 +4399,11 @@ function showProduct() {
     ensureNavigationHistory();
 
 
+    // Обычное движение вперёд пропускает просмотренные товары.
+    // Но при возврате назад forceRender=true: нужно показать ИМЕННО
+    // сохранённую карточку, даже если она уже была просмотрена.
     if (
+        !forceRender &&
         isProductViewed(
             currentProduct
         )
@@ -6311,9 +6317,12 @@ function setupSwipe() {
         return;
     }
 
-    // Вертикальный жест оставляем браузеру/Telegram,
-    // горизонтальный жест используется только для карточек.
-    card.style.touchAction = "pan-y";
+    // Карточка полностью забирает жест себе.
+    // Это важно для Telegram Mini App: горизонтальный свайп по карточке
+    // не должен передаваться WebView/Telegram и случайно закрывать Mini App.
+    card.style.touchAction = "none";
+    card.style.userSelect = "none";
+    card.style.webkitUserSelect = "none";
 
     let pointerStartY = 0;
     let pointerStartX = 0;
@@ -6365,6 +6374,10 @@ function setupSwipe() {
 
         pointerMoved = true;
 
+        // После начала жеста карточка полностью контролирует движение.
+        // Никакого native swipe/close/scroll внутри карточки.
+        event.preventDefault();
+
         // Вертикальное движение НИКОГДА не переключает товар.
         if (Math.abs(deltaY) >= Math.abs(deltaX)) {
             pointerHorizontal = false;
@@ -6373,7 +6386,6 @@ function setupSwipe() {
         }
 
         pointerHorizontal = true;
-        event.preventDefault();
 
         card.style.transform =
             `translateX(${deltaX}px) rotate(${deltaX * 0.035}deg)`;
@@ -6711,7 +6723,7 @@ function previousProduct() {
 
     if (index >= 0) {
         currentIndex = index;
-        animateCardChange("previous");
+        animateCardChange("previous", true);
         return;
     }
 
@@ -6719,7 +6731,7 @@ function previousProduct() {
     // возвращаем конкретный товар в начало текущей ленты.
     products.unshift(previous);
     currentIndex = 0;
-    animateCardChange("previous");
+    animateCardChange("previous", true);
 }
 
 
@@ -6728,7 +6740,8 @@ CARD ANIMATION
 ========================================================= */
 
 function animateCardChange(
-    direction
+    direction,
+    forceRender = false
 ) {
 
     const card =
@@ -6755,7 +6768,7 @@ function animateCardChange(
     setTimeout(
         () => {
 
-            showProduct();
+            showProduct(forceRender);
 
 
             requestAnimationFrame(
