@@ -1507,6 +1507,44 @@
                 display: none;
             }
         }
+
+/* FIXED INTERACTION LAYER */
+.filters-overlay{position:fixed;inset:0;z-index:150;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.58);backdrop-filter:blur(8px);opacity:0;pointer-events:none;transition:opacity .22s ease}.filters-overlay.show{opacity:1;pointer-events:auto}.filters-panel{width:min(560px,100%);max-height:88vh;overflow-y:auto;padding:14px 18px 22px;border-radius:28px 28px 0 0;background:rgba(18,19,26,.97);border:1px solid rgba(255,255,255,.09);box-shadow:0 -20px 70px rgba(0,0,0,.5);transform:translateY(24px);transition:transform .22s ease}.filters-overlay.show .filters-panel{transform:translateY(0)}.filters-handle{width:42px;height:4px;margin:0 auto 16px;border-radius:99px;background:rgba(255,255,255,.2)}.filters-title{font-size:20px;font-weight:800;margin-bottom:18px}.filter-label{display:block;font-size:12px;font-weight:700;color:rgba(255,255,255,.58);margin:12px 0 7px}.filter-input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.055);color:#fff;border-radius:14px;padding:12px 13px;outline:none;font:inherit}.filter-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.filter-source-chips{display:flex;flex-wrap:wrap;gap:8px}.filter-source-chips .filter-chip{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.055);color:#fff;border-radius:999px;padding:9px 12px}.filter-source-chips .filter-chip.active{background:rgba(155,124,255,.2);border-color:rgba(155,124,255,.55)}.filter-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px}.filter-actions button{border:0;border-radius:14px;padding:13px;font:inherit;font-weight:800}.filter-secondary{background:rgba(255,255,255,.07);color:#fff}.filter-primary{background:#fff;color:#09090d}.action-icon{font-family:Arial,sans-serif;font-weight:700;-webkit-font-smoothing:antialiased}.action{border:0;outline:none;-webkit-tap-highlight-color:transparent}.actions{z-index:40}
+
+
+.search-platforms {
+    margin-top: 14px;
+    margin-bottom: 18px;
+}
+
+.search-platforms-title {
+    margin-bottom: 9px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255,255,255,.58);
+}
+
+.search-source-chips {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 3px;
+    scrollbar-width: none;
+}
+
+.search-source-chips::-webkit-scrollbar {
+    display: none;
+}
+
+.search-source-chip {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    transition: transform .18s ease, background .18s ease, border-color .18s ease;
+}
+
+.search-source-chip.active {
+    transform: translateY(-1px);
+}
 </style>
 </head>
 
@@ -1695,6 +1733,38 @@
 
         </div>
 
+        <div class="search-platforms">
+
+            <div class="search-platforms-title">
+                Искать на площадках
+            </div>
+
+            <div id="searchSources" class="chips search-source-chips">
+
+                <button type="button" class="chip search-source-chip active" data-source="__all__">
+                    Все площадки
+                </button>
+
+                <button type="button" class="chip search-source-chip" data-source="kufar">
+                    🟢 Kufar
+                </button>
+
+                <button type="button" class="chip search-source-chip" data-source="wildberries">
+                    🟣 Wildberries
+                </button>
+
+                <button type="button" class="chip search-source-chip" data-source="ozon">
+                    🔵 Ozon
+                </button>
+
+                <button type="button" class="chip search-source-chip" data-source="aliexpress">
+                    🟠 AliExpress
+                </button>
+
+            </div>
+
+        </div>
+
         <div id="searchHome">
 
             <div class="section-title">
@@ -1725,38 +1795,6 @@
 
                 <button class="chip" onclick="quickSearch('ремонт')">
                     🔧 ремонт
-                </button>
-
-            </div>
-
-            <div class="search-promo">
-                <div class="search-promo-icon">⌕</div>
-                <div>
-                    <strong>Ищи как привык</strong>
-                    <p>Товар, машину, услугу, место или что угодно ещё.</p>
-                </div>
-            </div>
-
-            <div class="section-title">
-                Источники
-            </div>
-
-            <div class="chips">
-
-                <button class="chip" onclick="quickSearch('wildberries')">
-                    🟣 Wildberries
-                </button>
-
-                <button class="chip" onclick="quickSearch('ozon')">
-                    🔵 Ozon
-                </button>
-
-                <button class="chip" onclick="quickSearch('aliexpress')">
-                    🟠 AliExpress
-                </button>
-
-                <button class="chip" onclick="quickSearch('kufar')">
-                    🟢 Kufar
                 </button>
 
             </div>
@@ -1914,6 +1952,25 @@
 
 </div>
 
+<!-- FILTERS -->
+<div id="filtersOverlay" class="filters-overlay" onclick="closeFilters(event)">
+  <div class="filters-panel" onclick="event.stopPropagation()">
+    <div class="filters-handle"></div>
+    <div class="filters-title">Фильтры</div>
+    <label class="filter-label">Что ищете?</label>
+    <div class="filter-field-wrap"><input id="filterQuery" class="filter-input" type="text" placeholder="Например: BMW, ноутбук, ремонт..."></div>
+    <div class="filter-row">
+      <div><label class="filter-label">Цена от</label><input id="filterMinPrice" class="filter-input" type="number" inputmode="decimal" placeholder="0"></div>
+      <div><label class="filter-label">Цена до</label><input id="filterMaxPrice" class="filter-input" type="number" inputmode="decimal" placeholder="∞"></div>
+    </div>
+    <label class="filter-label">Источники</label>
+    <div id="filterSources" class="chips filter-source-chips"></div>
+    <label class="filter-label">Сортировка</label>
+    <select id="filterSort" class="filter-input"><option value="relevance">По релевантности</option><option value="newest">Сначала новые</option><option value="price_asc">Цена: по возрастанию</option><option value="price_desc">Цена: по убыванию</option></select>
+    <div class="filter-actions"><button type="button" class="filter-secondary" onclick="resetFilters()">Сбросить</button><button type="button" class="filter-primary" onclick="applyFilters()">Применить</button></div>
+  </div>
+</div>
+
 <!-- COMMENTS -->
 
 <div
@@ -1942,6 +1999,8 @@
 <div id="toast"></div>
 
 <script>
+
+
 /* =========================================================
 STYLEFLOW
 Personalized marketplace feed
@@ -2176,6 +2235,12 @@ if (
     Telegram.WebApp.expand();
 
     try {
+        if (typeof Telegram.WebApp.disableVerticalSwipes === "function") {
+            Telegram.WebApp.disableVerticalSwipes();
+        }
+    } catch (e) {}
+
+    try {
 
         Telegram.WebApp.setHeaderColor(
             "#09090d"
@@ -2234,6 +2299,7 @@ document.addEventListener(
     async () => {
 
         setupSearch();
+        setupSearchSources();
         setupSearchSuggestions();
 
         setupSwipe();
@@ -2627,6 +2693,11 @@ async function loadFeed() {
             rawProducts.map(
                 normalizeProduct
             );
+
+        localStorage.setItem(
+            "styleflow_all_products_cache",
+            JSON.stringify(allProducts)
+        );
 
 
         console.log(
@@ -7423,6 +7494,85 @@ function closeComments(
 SEARCH
 ========================================================= */
 
+let activeSearchSources = [];
+
+
+function setupSearchSources() {
+
+    const container =
+        document.getElementById("searchSources");
+
+    if (!container) {
+        return;
+    }
+
+    const buttons =
+        Array.from(container.querySelectorAll("[data-source]"));
+
+    buttons.forEach(button => {
+
+        button.addEventListener("click", () => {
+
+            const source =
+                normalizeSource(button.dataset.source);
+
+            if (source === "__all__") {
+                activeSearchSources = [];
+            } else {
+                const index =
+                    activeSearchSources.indexOf(source);
+
+                if (index >= 0) {
+                    activeSearchSources.splice(index, 1);
+                } else {
+                    activeSearchSources.push(source);
+                }
+            }
+
+            syncSearchSourceUI();
+
+            const input =
+                document.getElementById("searchInput");
+
+            performSearch(
+                input ? input.value.trim() : ""
+            );
+        });
+    });
+
+    syncSearchSourceUI();
+}
+
+
+function syncSearchSourceUI() {
+
+    const container =
+        document.getElementById("searchSources");
+
+    if (!container) {
+        return;
+    }
+
+    const buttons =
+        Array.from(container.querySelectorAll("[data-source]"));
+
+    buttons.forEach(button => {
+
+        const raw = button.dataset.source;
+
+        const isAll = raw === "__all__";
+
+        const active = isAll
+            ? activeSearchSources.length === 0
+            : activeSearchSources.includes(
+                normalizeSource(raw)
+            );
+
+        button.classList.toggle("active", active);
+    });
+}
+
+
 function setupSearch() {
 
     const input =
@@ -7802,13 +7952,20 @@ function performSearch(
 
     const filtered =
         allProducts
-            .filter(
-                product =>
-                    productMatchesQuery(
-                        product,
-                        query
-                    )
-            )
+            .filter(product => {
+
+                if (!productMatchesQuery(product, query)) {
+                    return false;
+                }
+
+                if (activeSearchSources.length) {
+                    return activeSearchSources.includes(
+                        normalizeSource(product.source)
+                    );
+                }
+
+                return true;
+            })
             .sort(
                 (a, b) =>
                     getProductSearchScore(b, query) -
@@ -8029,19 +8186,17 @@ function renderRecentProducts() {
             );
 
 
+    const cachedAll = loadJSON("styleflow_all_products_cache", []);
+    const historyCatalog = [
+        ...allProducts,
+        ...(Array.isArray(cachedAll) ? cachedAll.map(normalizeProduct) : [])
+    ];
+
     const recent =
         recentIds
-            .map(
-                id =>
-                    allProducts.find(
-                        product =>
-                            String(
-                                product.id
-                            ) ===
-                            String(id)
-                    )
-            )
-            .filter(Boolean);
+            .map(id => historyCatalog.find(product => String(product.id) === String(id)))
+            .filter(Boolean)
+            .filter((product, index, arr) => arr.findIndex(x => String(x.id) === String(product.id)) === index);
 
 
     recent.forEach(
@@ -8249,330 +8404,322 @@ SWIPE
 
 function setupSwipe() {
 
-    const card = document.getElementById("productCard");
+    const card =
+        document.getElementById(
+            "productCard"
+        );
+
 
     if (!card) {
         return;
     }
 
-    // Вертикальный жест оставляем браузеру/Telegram,
-    // горизонтальный жест используется только для карточек.
-    card.style.touchAction = "pan-y";
+    // Все свайпы внутри карточки принадлежат ленте.
+    card.style.touchAction = "none";
+    card.style.webkitUserSelect = "none";
+    card.style.userSelect = "none";
 
-    let pointerStartY = 0;
-    let pointerStartX = 0;
-    let pointerActive = false;
-    let pointerMoved = false;
-    let pointerHorizontal = false;
-    let pointerId = null;
 
-    card.addEventListener("pointerdown", event => {
+    card.addEventListener(
+        "touchstart",
+        event => {
 
-        if (!currentProduct) return;
-
-        if (event.pointerType === "mouse" && event.button !== 0) {
-            return;
-        }
-
-        // Кнопки, ссылки и элементы управления не должны превращаться в свайп.
-        if (event.target.closest("button, a, input, textarea, select")) {
-            return;
-        }
-
-        pointerStartY = event.clientY;
-        pointerStartX = event.clientX;
-        pointerActive = true;
-        pointerMoved = false;
-        pointerHorizontal = false;
-        pointerId = event.pointerId;
-        isDragging = true;
-
-        card.classList.add("dragging");
-
-        try {
-            card.setPointerCapture(pointerId);
-        } catch (e) {}
-    });
-
-    card.addEventListener("pointermove", event => {
-
-        if (!pointerActive || event.pointerId !== pointerId) {
-            return;
-        }
-
-        const deltaY = event.clientY - pointerStartY;
-        const deltaX = event.clientX - pointerStartX;
-
-        if (Math.abs(deltaY) < 4 && Math.abs(deltaX) < 4) {
-            return;
-        }
-
-        pointerMoved = true;
-
-        // Вертикальное движение НИКОГДА не переключает товар.
-        if (Math.abs(deltaY) >= Math.abs(deltaX)) {
-            pointerHorizontal = false;
-            card.style.transform = "";
-            return;
-        }
-
-        pointerHorizontal = true;
-        event.preventDefault();
-
-        card.style.transform =
-            `translateX(${deltaX}px) rotate(${deltaX * 0.035}deg)`;
-    });
-
-    function finishPointer(event) {
-
-        if (!pointerActive) return;
-
-        if (pointerId !== null && event.pointerId !== pointerId) {
-            return;
-        }
-
-        const deltaY = event.clientY - pointerStartY;
-        const deltaX = event.clientX - pointerStartX;
-
-        const wasHorizontalSwipe =
-            pointerHorizontal &&
-            Math.abs(deltaX) > 80 &&
-            Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
-
-        pointerActive = false;
-        pointerId = null;
-        isDragging = false;
-
-        card.classList.remove("dragging");
-
-        try {
-            card.releasePointerCapture(event.pointerId);
-        } catch (e) {}
-
-        card.style.transform = "";
-
-        if (wasHorizontalSwipe) {
-            if (deltaX < 0) {
-                nextProduct();
-            } else {
-                previousProduct();
-            }
-
-            lastTapTime = 0;
-            return;
-        }
-
-        // Вертикальный жест полностью игнорируется.
-        // Это позволяет Telegram/браузеру нормально закрываться/сворачиваться.
-        if (Math.abs(deltaY) > Math.abs(deltaX)) {
-            lastTapTime = 0;
-            return;
-        }
-
-        if (!pointerMoved) {
-            const now = Date.now();
-
-            if (now - lastTapTime < 350) {
-                toggleLike();
-                lastTapTime = 0;
+            if (!currentProduct) {
                 return;
             }
 
-            lastTapTime = now;
+
+            touchStartY =
+                event.touches[0]
+                    .clientY;
+
+
+            touchStartX =
+                event.touches[0]
+                    .clientX;
+
+
+            isDragging =
+                true;
+
+
+            card.classList.add(
+                "dragging"
+            );
+        },
+        {
+            passive: true
         }
-    }
+    );
 
-    card.addEventListener("pointerup", finishPointer);
 
-    card.addEventListener("pointercancel", () => {
-        pointerActive = false;
-        pointerId = null;
-        isDragging = false;
-        card.classList.remove("dragging");
-        card.style.transform = "";
-    });
+    card.addEventListener(
+        "touchmove",
+        event => {
 
-    card.addEventListener("pointerleave", event => {
-        if (event.pointerType === "mouse" && pointerActive) {
-            finishPointer(event);
+            if (!isDragging) {
+                return;
+            }
+
+
+            const y =
+                event.touches[0]
+                    .clientY;
+
+
+            const x =
+                event.touches[0]
+                    .clientX;
+
+
+            const deltaY =
+                y - touchStartY;
+
+
+            const deltaX =
+                x - touchStartX;
+
+
+            if (
+                Math.abs(deltaY) >
+                Math.abs(deltaX)
+            ) {
+
+                event.preventDefault();
+
+
+                card.style.transform =
+                    `translateY(${deltaY}px)
+                     rotate(${deltaY * -.025}deg)`;
+            }
+        },
+        {
+            passive: false
         }
-    });
+    );
 
-    /*
-    Колесо мыши больше НЕ переключает карточки.
-    Иначе обычная прокрутка страницы/Telegram Desktop
-    случайно скипает товар.
 
-    Горизонтальная прокрутка тачпада всё ещё может переключать,
-    если deltaX явно сильнее deltaY.
-    */
-    let wheelLocked = false;
+    card.addEventListener(
+        "touchend",
+        event => {
 
-    card.addEventListener("wheel", event => {
+            if (!isDragging) {
+                return;
+            }
 
-        if (wheelLocked) return;
 
-        if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) {
-            return;
+            isDragging =
+                false;
+
+
+            card.classList.remove(
+                "dragging"
+            );
+
+
+            const touch =
+                event.changedTouches[0];
+
+
+            const deltaY =
+                touch.clientY -
+                touchStartY;
+
+
+            card.style.transform =
+                "";
+
+
+            if (
+                Math.abs(deltaY) >
+                80
+            ) {
+
+                if (
+                    deltaY < 0
+                ) {
+
+                    nextProduct();
+
+                } else {
+
+                    previousProduct();
+                }
+
+
+                return;
+            }
+
+
+            const now =
+                Date.now();
+
+
+            if (
+                now - lastTapTime <
+                350
+            ) {
+
+                toggleLike();
+            }
+
+
+            lastTapTime =
+                now;
+        },
+        {
+            passive: true
         }
+    );
 
-        if (Math.abs(event.deltaX) < 45) {
-            return;
+
+    let wheelLocked =
+        false;
+
+
+    card.addEventListener(
+        "wheel",
+        event => {
+
+            if (wheelLocked) {
+                return;
+            }
+
+
+            wheelLocked =
+                true;
+
+
+            if (
+                event.deltaY > 0
+            ) {
+
+                nextProduct();
+
+            } else {
+
+                previousProduct();
+            }
+
+
+            setTimeout(
+                () => {
+
+                    wheelLocked =
+                        false;
+
+                },
+                300
+            );
+        },
+        {
+            passive: true
         }
+    );
 
-        wheelLocked = true;
 
-        if (event.deltaX > 0) {
-            nextProduct();
-        } else {
-            previousProduct();
+    document.addEventListener(
+        "keydown",
+        event => {
+
+            if (
+                currentTab !==
+                "feed"
+            ) {
+
+                return;
+            }
+
+
+            if (
+                event.key ===
+                    "ArrowDown" ||
+                event.key ===
+                    "ArrowRight"
+            ) {
+
+                nextProduct();
+            }
+
+
+            if (
+                event.key ===
+                    "ArrowUp" ||
+                event.key ===
+                    "ArrowLeft"
+            ) {
+
+                previousProduct();
+            }
         }
-
-        setTimeout(() => {
-            wheelLocked = false;
-        }, 300);
-    }, { passive: true });
-
-    document.addEventListener("keydown", event => {
-
-        if (currentTab !== "feed") return;
-
-        if (event.key === "ArrowRight") {
-            event.preventDefault();
-            nextProduct();
-        }
-
-        if (event.key === "ArrowLeft") {
-            event.preventDefault();
-            previousProduct();
-        }
-
-        // Стрелки вверх/вниз больше не переключают карточку:
-        // пользователь может использовать их для обычной прокрутки.
-    });
-
-    setupInfoCollapse(card);
-}
-
-
-function setupInfoCollapse(card) {
-
-    if (!card || card.querySelector(".styleflow-info-toggle")) {
-        return;
-    }
-
-    const info = card.querySelector(".product-info");
-
-    if (!info) return;
-
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "styleflow-info-toggle";
-    toggle.textContent = "⌄";
-    toggle.setAttribute("aria-label", "Свернуть информацию о товаре");
-
-    Object.assign(toggle.style, {
-        position: "absolute",
-        right: "14px",
-        bottom: "14px",
-        width: "38px",
-        height: "38px",
-        border: "0",
-        borderRadius: "50%",
-        background: "rgba(0,0,0,.48)",
-        color: "#fff",
-        fontSize: "20px",
-        lineHeight: "38px",
-        padding: "0",
-        zIndex: "20",
-        cursor: "pointer",
-        backdropFilter: "blur(10px)",
-        WebkitBackdropFilter: "blur(10px)"
-    });
-
-    toggle.addEventListener("click", event => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        infoPanelCollapsed = !infoPanelCollapsed;
-        info.classList.toggle("collapsed", infoPanelCollapsed);
-        card.classList.toggle("info-collapsed", infoPanelCollapsed);
-
-        if (infoPanelCollapsed) {
-            info.style.maxHeight = "78px";
-            info.style.overflow = "hidden";
-            toggle.textContent = "⌃";
-            toggle.setAttribute("aria-label", "Развернуть информацию о товаре");
-        } else {
-            info.style.maxHeight = "";
-            info.style.overflow = "";
-            toggle.textContent = "⌄";
-            toggle.setAttribute("aria-label", "Свернуть информацию о товаре");
-        }
-    });
-
-    card.appendChild(toggle);
+    );
 }
 
 
 /* =========================================================
-NAVIGATION HISTORY
+NEXT / PREVIOUS
 ========================================================= */
 
 function resetNavigationHistory() {
+
     navigationHistory = [];
     navigationPosition = -1;
 }
 
 
-function ensureNavigationHistory() {
-    if (!currentProduct) return;
+function rememberProductInNavigation(product) {
 
-    const id = String(currentProduct.id);
-
-    if (!navigationHistory.length) {
-        navigationHistory = [id];
-        navigationPosition = 0;
+    if (!product) {
         return;
-    }
-
-    if (navigationPosition < 0) {
-        navigationPosition = navigationHistory.length - 1;
-    }
-}
-
-
-function rememberNextNavigation(product) {
-    if (!product) return;
-
-    ensureNavigationHistory();
-
-    // Если пользователь вернулся назад, новая ветка начинается здесь.
-    if (navigationPosition < navigationHistory.length - 1) {
-        navigationHistory = navigationHistory.slice(0, navigationPosition + 1);
     }
 
     const id = String(product.id);
 
-    if (navigationHistory[navigationHistory.length - 1] !== id) {
+    if (
+        navigationPosition >= 0 &&
+        navigationPosition < navigationHistory.length - 1
+    ) {
+        navigationHistory = navigationHistory.slice(
+            0,
+            navigationPosition + 1
+        );
+    }
+
+    if (
+        navigationHistory.length === 0 ||
+        String(navigationHistory[navigationHistory.length - 1]) !== id
+    ) {
         navigationHistory.push(id);
     }
 
     navigationPosition = navigationHistory.length - 1;
 
-    if (navigationHistory.length > 100) {
+    if (navigationHistory.length > 500) {
         navigationHistory.shift();
         navigationPosition--;
     }
 }
 
 
+function rememberCurrentProduct() {
+
+    rememberProductInNavigation(currentProduct);
+}
+
+
 function findProductById(id) {
+
     const target = String(id);
 
-    return allProducts.find(product => String(product.id) === target) ||
-        products.find(product => String(product.id) === target) ||
-        null;
+    return (
+        products.find(
+            product => String(product.id) === target
+        ) ||
+        allProducts.find(
+            product => String(product.id) === target
+        ) ||
+        null
+    );
 }
 
 
@@ -8993,6 +9140,8 @@ function getRussianPlural(
 
     return many;
 }
+
+
 </script>
 
 </body>
