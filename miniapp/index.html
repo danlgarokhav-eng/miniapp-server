@@ -45,6 +45,10 @@
             color: inherit;
         }
 
+        /* =========================
+           BACKGROUND
+        ========================= */
+
         .background {
             position: fixed;
             inset: 0;
@@ -99,6 +103,10 @@
             }
         }
 
+        /* =========================
+           APP
+        ========================= */
+
         #app {
             position: relative;
             width: 100%;
@@ -108,13 +116,32 @@
         .screen {
             position: absolute;
             inset: 0;
-            display: none;
+            display: block;
+            visibility: hidden;
+            opacity: 0;
+            transform: translateY(14px) scale(.985);
+            pointer-events: none;
             overflow: hidden;
+            transition:
+                opacity .24s ease,
+                transform .28s cubic-bezier(.22,.61,.36,1),
+                visibility 0s linear .28s;
         }
 
         .screen.active {
-            display: block;
+            visibility: visible;
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+            transition:
+                opacity .24s ease,
+                transform .28s cubic-bezier(.22,.61,.36,1),
+                visibility 0s linear 0s;
         }
+
+        /* =========================
+           TOP BAR
+        ========================= */
 
         .topbar {
             position: absolute;
@@ -122,16 +149,21 @@
             top: 0;
             left: 0;
             right: 0;
+
             height: 70px;
+
             display: flex;
             align-items: center;
             justify-content: space-between;
+
             padding: 0 18px;
+
             background: linear-gradient(
                 to bottom,
                 rgba(9, 9, 13, .72),
                 transparent
             );
+
             backdrop-filter: blur(8px);
         }
 
@@ -145,60 +177,26 @@
             opacity: .45;
         }
 
-        .top-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .top-search,
-        .top-filter {
-            position: relative;
+        .top-search {
             width: 42px;
             height: 42px;
+
             display: flex;
             align-items: center;
             justify-content: center;
+
             border-radius: 50%;
+
             background: rgba(255,255,255,.1);
             backdrop-filter: blur(15px);
+
             cursor: pointer;
             font-size: 18px;
-            transition:
-                transform .15s ease,
-                background .15s ease;
         }
 
-        .top-search:active,
-        .top-filter:active {
-            transform: scale(.9);
-        }
-
-        .top-filter.active {
-            background: rgba(139,92,246,.28);
-        }
-
-        .filter-badge {
-            position: absolute;
-            top: -2px;
-            right: -2px;
-            min-width: 17px;
-            height: 17px;
-            padding: 0 4px;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            border-radius: 999px;
-            background: #8b5cf6;
-            color: white;
-            font-size: 9px;
-            font-weight: 800;
-            border: 2px solid #09090d;
-        }
-
-        .filter-badge.show {
-            display: flex;
-        }
+        /* =========================
+           FEED
+        ========================= */
 
         .feed-screen {
             width: 100%;
@@ -208,24 +206,39 @@
         .feed {
             width: 100%;
             height: 100%;
+
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 74px 12px 82px;
+
+            padding:
+                74px
+                12px
+                82px;
         }
 
         .card {
             position: relative;
+
             width: min(470px, 100%);
             height: min(760px, calc(100vh - 155px));
+
             min-height: 520px;
+
             overflow: hidden;
+
             border-radius: 28px;
+
             background: #15151b;
+
             box-shadow:
                 0 30px 80px rgba(0,0,0,.5),
                 0 0 0 1px rgba(255,255,255,.06);
+
             user-select: none;
+            touch-action: none;
+            -webkit-user-select: none;
+
             transform-origin: center;
             transition:
                 transform .25s ease,
@@ -239,13 +252,16 @@
         .product-media {
             position: absolute;
             inset: 0;
+
             background: #18181f;
         }
 
         .product-media::after {
             content: "";
+
             position: absolute;
             inset: 0;
+
             background:
                 linear-gradient(
                     to bottom,
@@ -258,14 +274,18 @@
         .product-media img {
             width: 100%;
             height: 100%;
+
             display: block;
+
             object-fit: cover;
+
             pointer-events: none;
         }
 
         .product-info {
             position: absolute;
             z-index: 3;
+
             left: 20px;
             right: 82px;
             bottom: 22px;
@@ -273,28 +293,38 @@
 
         .source-badge {
             display: inline-flex;
+
             padding: 6px 10px;
+
             margin-bottom: 10px;
+
             border-radius: 999px;
+
             background: rgba(0,0,0,.45);
             backdrop-filter: blur(12px);
+
             font-size: 11px;
             font-weight: 700;
+
             color: rgba(255,255,255,.9);
         }
 
         .brand {
             margin-bottom: 5px;
+
             font-size: 13px;
             font-weight: 700;
+
             color: rgba(255,255,255,.65);
         }
 
         .title {
             margin: 0;
+
             font-size: 20px;
             line-height: 1.18;
             font-weight: 750;
+
             text-shadow: 0 2px 12px rgba(0,0,0,.4);
         }
 
@@ -302,7 +332,9 @@
             display: flex;
             align-items: center;
             gap: 8px;
+
             margin-top: 10px;
+
             font-size: 13px;
             color: rgba(255,255,255,.82);
         }
@@ -313,40 +345,56 @@
 
         .price {
             margin-top: 9px;
+
             font-size: 25px;
             font-weight: 850;
         }
 
         .old-price {
             margin-left: 7px;
+
             font-size: 13px;
             font-weight: 500;
+
             color: rgba(255,255,255,.45);
             text-decoration: line-through;
         }
 
         .open-product {
             margin-top: 14px;
+
             display: inline-flex;
             align-items: center;
             gap: 7px;
+
             padding: 11px 16px;
+
             border-radius: 14px;
+
             background: rgba(255,255,255,.95);
             color: #101014;
+
             font-size: 13px;
             font-weight: 800;
+
             cursor: pointer;
         }
+
+        /* =========================
+           ACTIONS
+        ========================= */
 
         .actions {
             position: absolute;
             z-index: 10;
+
             right: 12px;
             bottom: 24px;
+
             display: flex;
             flex-direction: column;
             align-items: center;
+
             gap: 16px;
         }
 
@@ -354,21 +402,29 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+
             gap: 4px;
+
             background: none;
+
             cursor: pointer;
         }
 
         .action-icon {
             width: 48px;
             height: 48px;
+
             display: flex;
             align-items: center;
             justify-content: center;
+
             border-radius: 50%;
+
             background: rgba(0,0,0,.4);
             backdrop-filter: blur(15px);
+
             font-size: 21px;
+
             transition:
                 transform .15s ease,
                 background .15s ease;
@@ -386,22 +442,34 @@
         .action-label {
             font-size: 10px;
             font-weight: 600;
+
             color: rgba(255,255,255,.82);
         }
+
+        /* =========================
+           BIG HEART
+        ========================= */
 
         .big-heart {
             position: absolute;
             z-index: 30;
+
             left: 50%;
             top: 50%;
+
             transform:
                 translate(-50%, -50%)
                 scale(.3);
+
             opacity: 0;
+
             font-size: 100px;
+
             pointer-events: none;
+
             text-shadow:
                 0 15px 40px rgba(0,0,0,.4);
+
             transition: none;
         }
 
@@ -439,13 +507,20 @@
             }
         }
 
+        /* =========================
+           EMPTY
+        ========================= */
+
         .empty {
             position: absolute;
             inset: 0;
+
             display: flex;
             align-items: center;
             justify-content: center;
+
             text-align: center;
+
             padding: 30px;
         }
 
@@ -465,25 +540,41 @@
 
         .empty p {
             margin: 0;
+
             color: rgba(255,255,255,.55);
             line-height: 1.5;
         }
 
+        /* =========================
+           BOTTOM NAV
+        ========================= */
+
         .bottom-nav {
+            transition: transform .25s ease, opacity .25s ease;
             position: absolute;
             z-index: 50;
+
             left: 50%;
             bottom: 9px;
+
             transform: translateX(-50%);
+
             width: min(470px, calc(100% - 20px));
+
             height: 64px;
+
             display: grid;
             grid-template-columns: repeat(4, 1fr);
+
             padding: 5px;
+
             border-radius: 21px;
+
             background: rgba(22,22,29,.88);
             border: 1px solid rgba(255,255,255,.07);
+
             box-shadow: 0 15px 50px rgba(0,0,0,.35);
+
             backdrop-filter: blur(25px);
         }
 
@@ -492,10 +583,15 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
+
             gap: 3px;
+
             border-radius: 16px;
+
             background: transparent;
+
             color: rgba(255,255,255,.45);
+
             cursor: pointer;
         }
 
@@ -513,6 +609,10 @@
             font-weight: 600;
         }
 
+        /* =========================
+           SEARCH
+        ========================= */
+
         .search-screen {
             padding: 76px 16px 88px;
             overflow-y: auto;
@@ -520,28 +620,38 @@
 
         .page-title {
             margin: 0 0 18px;
+
             font-size: 30px;
             letter-spacing: -1px;
         }
 
         .search-box {
             position: relative;
+
             display: flex;
             align-items: center;
+
             width: 100%;
             height: 54px;
+
             margin-bottom: 22px;
         }
 
         .search-box input {
             width: 100%;
             height: 100%;
+
             padding: 0 48px 0 18px;
+
             outline: none;
+
             border: 1px solid rgba(255,255,255,.08);
             border-radius: 17px;
+
             background: rgba(255,255,255,.08);
+
             color: white;
+
             font-size: 16px;
         }
 
@@ -552,20 +662,27 @@
         .search-clear {
             position: absolute;
             right: 9px;
+
             width: 38px;
             height: 38px;
+
             display: none;
             align-items: center;
             justify-content: center;
+
             border-radius: 50%;
+
             background: rgba(255,255,255,.08);
+
             cursor: pointer;
         }
 
         .section-title {
             margin: 20px 0 11px;
+
             font-size: 14px;
             font-weight: 750;
+
             color: rgba(255,255,255,.72);
         }
 
@@ -577,11 +694,16 @@
 
         .chip {
             padding: 10px 13px;
+
             border-radius: 13px;
+
             background: rgba(255,255,255,.07);
             border: 1px solid rgba(255,255,255,.06);
+
             color: rgba(255,255,255,.86);
+
             font-size: 13px;
+
             cursor: pointer;
         }
 
@@ -597,18 +719,24 @@
 
         .category {
             min-height: 88px;
+
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
+
             padding: 14px;
+
             border-radius: 18px;
+
             background:
                 linear-gradient(
                     145deg,
                     rgba(255,255,255,.11),
                     rgba(255,255,255,.04)
                 );
+
             border: 1px solid rgba(255,255,255,.06);
+
             cursor: pointer;
         }
 
@@ -632,6 +760,7 @@
 
         .result-count {
             margin-bottom: 10px;
+
             font-size: 12px;
             color: rgba(255,255,255,.45);
         }
@@ -644,18 +773,26 @@
         .result-card {
             display: flex;
             align-items: center;
+
             gap: 12px;
+
             padding: 9px;
+
             border-radius: 17px;
+
             background: rgba(255,255,255,.06);
+
             cursor: pointer;
         }
 
         .result-image {
             width: 65px;
             height: 65px;
+
             flex: 0 0 65px;
+
             border-radius: 12px;
+
             object-fit: cover;
         }
 
@@ -670,8 +807,10 @@
 
         .result-title {
             margin-top: 3px;
+
             font-size: 13px;
             font-weight: 700;
+
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -679,9 +818,14 @@
 
         .result-price {
             margin-top: 5px;
+
             font-size: 13px;
             font-weight: 800;
         }
+
+        /* =========================
+           PROFILE
+        ========================= */
 
         .profile-screen {
             padding: 76px 16px 90px;
@@ -691,25 +835,32 @@
         .profile-head {
             display: flex;
             align-items: center;
+
             gap: 15px;
+
             margin-bottom: 22px;
         }
 
         .profile-avatar {
             width: 67px;
             height: 67px;
+
             display: flex;
             align-items: center;
             justify-content: center;
+
             border-radius: 50%;
+
             background:
                 linear-gradient(
                     135deg,
                     #8b5cf6,
                     #ec4899
                 );
+
             font-size: 27px;
             font-weight: 800;
+
             box-shadow:
                 0 10px 30px rgba(139,92,246,.25);
         }
@@ -721,6 +872,7 @@
 
         .profile-subtitle {
             margin-top: 4px;
+
             color: rgba(255,255,255,.45);
             font-size: 12px;
         }
@@ -728,14 +880,19 @@
         .stats {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
+
             gap: 8px;
+
             margin-bottom: 22px;
         }
 
         .stat {
             padding: 14px 8px;
+
             text-align: center;
+
             border-radius: 17px;
+
             background: rgba(255,255,255,.06);
         }
 
@@ -746,6 +903,7 @@
 
         .stat-label {
             margin-top: 4px;
+
             font-size: 10px;
             color: rgba(255,255,255,.45);
         }
@@ -756,6 +914,7 @@
 
         .profile-section-title {
             margin-bottom: 10px;
+
             font-size: 14px;
             font-weight: 800;
         }
@@ -763,22 +922,30 @@
         .collection-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
+
             gap: 10px;
         }
 
         .collection {
             position: relative;
+
             min-height: 115px;
+
             padding: 14px;
+
             overflow: hidden;
+
             border-radius: 19px;
+
             background:
                 linear-gradient(
                     145deg,
                     rgba(255,255,255,.11),
                     rgba(255,255,255,.04)
                 );
+
             border: 1px solid rgba(255,255,255,.06);
+
             cursor: pointer;
         }
 
@@ -790,6 +957,7 @@
             position: absolute;
             left: 14px;
             bottom: 25px;
+
             font-size: 13px;
             font-weight: 800;
         }
@@ -798,6 +966,7 @@
             position: absolute;
             left: 14px;
             bottom: 10px;
+
             font-size: 10px;
             color: rgba(255,255,255,.45);
         }
@@ -810,10 +979,15 @@
 
         .recent-card {
             position: relative;
+
             height: 190px;
+
             overflow: hidden;
+
             border-radius: 17px;
+
             background: #15151b;
+
             cursor: pointer;
         }
 
@@ -825,8 +999,10 @@
 
         .recent-card::after {
             content: "";
+
             position: absolute;
             inset: 45% 0 0;
+
             background: linear-gradient(
                 transparent,
                 rgba(0,0,0,.8)
@@ -836,11 +1012,17 @@
         .recent-price {
             position: absolute;
             z-index: 2;
+
             left: 10px;
             bottom: 9px;
+
             font-size: 13px;
             font-weight: 800;
         }
+
+        /* =========================
+           FAVORITES
+        ========================= */
 
         .favorites-screen {
             padding: 76px 16px 88px;
@@ -855,23 +1037,31 @@
 
         .favorite-card {
             position: relative;
+
             height: 250px;
+
             overflow: hidden;
+
             border-radius: 19px;
+
             background: #15151b;
+
             cursor: pointer;
         }
 
         .favorite-card img {
             width: 100%;
             height: 100%;
+
             object-fit: cover;
         }
 
         .favorite-card::after {
             content: "";
+
             position: absolute;
             inset: 50% 0 0;
+
             background: linear-gradient(
                 transparent,
                 rgba(0,0,0,.85)
@@ -881,6 +1071,7 @@
         .favorite-info {
             position: absolute;
             z-index: 2;
+
             left: 11px;
             right: 11px;
             bottom: 10px;
@@ -889,6 +1080,7 @@
         .favorite-title {
             font-size: 12px;
             font-weight: 750;
+
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -896,193 +1088,23 @@
 
         .favorite-price {
             margin-top: 4px;
+
             font-size: 13px;
             font-weight: 850;
         }
 
-        .filters-overlay {
-            position: fixed;
-            z-index: 120;
-            inset: 0;
-            display: none;
-            background: rgba(0,0,0,.58);
-            backdrop-filter: blur(6px);
-        }
-
-        .filters-overlay.show {
-            display: block;
-        }
-
-        .filters-sheet {
-            position: absolute;
-            left: 50%;
-            right: 0;
-            bottom: 0;
-            width: min(520px, 100%);
-            max-height: 82vh;
-            transform: translateX(-50%);
-            overflow-y: auto;
-            padding: 10px 18px 22px;
-            border-radius: 28px 28px 0 0;
-            background:
-                linear-gradient(
-                    180deg,
-                    #1b1b23 0%,
-                    #14141a 100%
-                );
-            border-top: 1px solid rgba(255,255,255,.08);
-            box-shadow:
-                0 -20px 80px rgba(0,0,0,.55);
-        }
-
-        .filters-handle {
-            width: 44px;
-            height: 4px;
-            margin: 0 auto 14px;
-            border-radius: 999px;
-            background: rgba(255,255,255,.2);
-        }
-
-        .filters-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 20px;
-        }
-
-        .filters-title {
-            font-size: 22px;
-            font-weight: 850;
-            letter-spacing: -.4px;
-        }
-
-        .filters-close {
-            width: 38px;
-            height: 38px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 50%;
-            background: rgba(255,255,255,.08);
-            color: rgba(255,255,255,.8);
-            font-size: 24px;
-            line-height: 1;
-            cursor: pointer;
-        }
-
-        .filter-section {
-            margin-bottom: 22px;
-        }
-
-        .filter-section-title {
-            margin-bottom: 10px;
-            font-size: 13px;
-            font-weight: 800;
-            color: rgba(255,255,255,.65);
-        }
-
-        .price-inputs {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 9px;
-        }
-
-        .price-input {
-            width: 100%;
-            height: 48px;
-            padding: 0 14px;
-            outline: none;
-            border: 1px solid rgba(255,255,255,.08);
-            border-radius: 14px;
-            background: rgba(255,255,255,.07);
-            color: white;
-            font-size: 14px;
-        }
-
-        .price-input::placeholder {
-            color: rgba(255,255,255,.35);
-        }
-
-        .price-input:focus {
-            border-color: rgba(139,92,246,.55);
-            background: rgba(139,92,246,.08);
-        }
-
-        .filter-chips {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .filter-chip {
-            min-height: 40px;
-            padding: 8px 12px;
-            border-radius: 13px;
-            background: rgba(255,255,255,.07);
-            border: 1px solid rgba(255,255,255,.07);
-            color: rgba(255,255,255,.78);
-            font-size: 12px;
-            font-weight: 650;
-            cursor: pointer;
-            transition:
-                background .15s ease,
-                border-color .15s ease,
-                transform .15s ease;
-        }
-
-        .filter-chip:active {
-            transform: scale(.96);
-        }
-
-        .filter-chip.active {
-            background: rgba(139,92,246,.25);
-            border-color: rgba(139,92,246,.65);
-            color: white;
-        }
-
-        .filter-actions {
-            position: sticky;
-            bottom: 0;
-            display: grid;
-            grid-template-columns: 1fr 1.4fr;
-            gap: 9px;
-            padding-top: 12px;
-            background: linear-gradient(
-                to bottom,
-                rgba(20,20,26,0),
-                #14141a 22%
-            );
-        }
-
-        .filter-reset,
-        .filter-apply {
-            height: 50px;
-            border-radius: 15px;
-            font-size: 13px;
-            font-weight: 800;
-            cursor: pointer;
-        }
-
-        .filter-reset {
-            background: rgba(255,255,255,.07);
-            color: rgba(255,255,255,.78);
-        }
-
-        .filter-apply {
-            background: white;
-            color: #111116;
-        }
-
-        .filter-reset:active,
-        .filter-apply:active {
-            transform: scale(.98);
-        }
+        /* =========================
+           COMMENTS
+        ========================= */
 
         .comments-overlay {
             position: fixed;
             z-index: 100;
+
             inset: 0;
+
             display: none;
+
             background: rgba(0,0,0,.55);
             backdrop-filter: blur(5px);
         }
@@ -1093,32 +1115,43 @@
 
         .comments {
             position: absolute;
+
             left: 0;
             right: 0;
             bottom: 0;
+
             max-height: 70vh;
+
             padding: 18px;
+
             border-radius: 26px 26px 0 0;
+
             background: #17171d;
+
             box-shadow: 0 -20px 70px rgba(0,0,0,.45);
         }
 
         .comments-handle {
             width: 42px;
             height: 4px;
+
             margin: 0 auto 17px;
+
             border-radius: 999px;
+
             background: rgba(255,255,255,.2);
         }
 
         .comments-title {
             font-size: 17px;
             font-weight: 800;
+
             margin-bottom: 15px;
         }
 
         .comment {
             padding: 11px 0;
+
             border-bottom: 1px solid rgba(255,255,255,.06);
         }
 
@@ -1129,38 +1162,59 @@
 
         .comment-text {
             margin-top: 4px;
+
             font-size: 13px;
             color: rgba(255,255,255,.65);
         }
 
+        /* =========================
+           TOAST
+        ========================= */
+
         #toast {
             position: fixed;
             z-index: 200;
+
             left: 50%;
             bottom: 88px;
+
             transform:
                 translateX(-50%)
                 translateY(20px);
+
             padding: 11px 15px;
+
             border-radius: 13px;
+
             background: rgba(20,20,26,.94);
+
             border: 1px solid rgba(255,255,255,.08);
+
             box-shadow: 0 10px 35px rgba(0,0,0,.35);
+
             font-size: 12px;
+
             opacity: 0;
             pointer-events: none;
+
             transition:
                 opacity .2s ease,
                 transform .2s ease;
+
             white-space: nowrap;
         }
 
         #toast.show {
             opacity: 1;
+
             transform:
                 translateX(-50%)
                 translateY(0);
         }
+
+        /* =========================
+           DESKTOP
+        ========================= */
 
         @media (min-width: 700px) {
             .feed {
@@ -1178,12 +1232,11 @@
                 width: 470px;
                 margin: auto;
             }
-
-            .filters-sheet {
-                bottom: 10px;
-                border-radius: 28px;
-            }
         }
+
+        /* =========================
+           SMALL SCREEN
+        ========================= */
 
         @media (max-height: 650px) {
             .card {
@@ -1218,34 +1271,23 @@
 
 <div id="app">
 
+    <!-- =========================
+         FEED
+    ========================= -->
+
     <section id="feedScreen" class="screen active feed-screen">
 
         <header class="topbar">
-
             <div class="logo">
                 Style<span>Flow</span>
             </div>
 
-            <div class="top-actions">
-
-                <button
-                    class="top-search"
-                    onclick="switchTab('search')"
-                >
-                    🔎
-                </button>
-
-                <button
-                    id="filterButton"
-                    class="top-filter"
-                    onclick="openFilters()"
-                >
-                    ⚙️
-                    <span id="filterBadge" class="filter-badge"></span>
-                </button>
-
-            </div>
-
+            <button
+                class="top-search"
+                onclick="switchTab('search')"
+            >
+                🔎
+            </button>
         </header>
 
         <main class="feed">
@@ -1337,7 +1379,8 @@
                     <div class="empty-icon">👕</div>
                     <h2>Товаров пока нет</h2>
                     <p>
-                        Попробуй изменить фильтры или вернуться позже.
+                        Когда подключим источники маркетплейсов,
+                        здесь появится твоя лента.
                     </p>
                 </div>
             </div>
@@ -1345,6 +1388,10 @@
         </main>
 
     </section>
+
+    <!-- =========================
+         FAVORITES
+    ========================= -->
 
     <section id="favoritesScreen" class="screen favorites-screen">
 
@@ -1370,6 +1417,10 @@
         </div>
 
     </section>
+
+    <!-- =========================
+         SEARCH
+    ========================= -->
 
     <section id="searchScreen" class="screen search-screen">
 
@@ -1520,6 +1571,10 @@
 
     </section>
 
+    <!-- =========================
+         PROFILE
+    ========================= -->
+
     <section id="profileScreen" class="screen profile-screen">
 
         <h1 class="page-title">
@@ -1639,6 +1694,10 @@
 
     </section>
 
+    <!-- =========================
+         BOTTOM NAV
+    ========================= -->
+
     <nav class="bottom-nav">
 
         <button
@@ -1681,113 +1740,7 @@
 
 </div>
 
-<div
-    id="filtersOverlay"
-    class="filters-overlay"
-    onclick="closeFilters(event)"
->
-
-    <div
-        class="filters-sheet"
-        onclick="event.stopPropagation()"
-    >
-
-        <div class="filters-handle"></div>
-
-        <div class="filters-header">
-
-            <div class="filters-title">
-                Фильтры
-            </div>
-
-            <button
-                class="filters-close"
-                onclick="closeFilters()"
-            >
-                ×
-            </button>
-
-        </div>
-
-        <div class="filter-section">
-
-            <div class="filter-section-title">
-                Цена
-            </div>
-
-            <div class="price-inputs">
-
-                <input
-                    id="filterMinPrice"
-                    class="price-input"
-                    type="number"
-                    inputmode="decimal"
-                    min="0"
-                    step="0.01"
-                    placeholder="От"
-                >
-
-                <input
-                    id="filterMaxPrice"
-                    class="price-input"
-                    type="number"
-                    inputmode="decimal"
-                    min="0"
-                    step="0.01"
-                    placeholder="До"
-                >
-
-            </div>
-
-        </div>
-
-        <div class="filter-section">
-
-            <div class="filter-section-title">
-                Категория
-            </div>
-
-            <div
-                id="filterCategories"
-                class="filter-chips"
-            ></div>
-
-        </div>
-
-        <div class="filter-section">
-
-            <div class="filter-section-title">
-                Площадки
-            </div>
-
-            <div
-                id="filterSources"
-                class="filter-chips"
-            ></div>
-
-        </div>
-
-        <div class="filter-actions">
-
-            <button
-                class="filter-reset"
-                onclick="resetFilters()"
-            >
-                Сбросить
-            </button>
-
-            <button
-                class="filter-apply"
-                onclick="applyFilters()"
-            >
-                Применить
-            </button>
-
-        </div>
-
-    </div>
-
-</div>
+<!-- COMMENTS -->
 
 <div
     id="commentsOverlay"
