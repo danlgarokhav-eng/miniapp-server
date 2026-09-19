@@ -1,3 +1,1755 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    >
+
+    <title>StyleFlow</title>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #09090d;
+            color: white;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Roboto,
+                Arial,
+                sans-serif;
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        button {
+            border: 0;
+            color: inherit;
+        }
+
+        /* =========================
+           BACKGROUND
+        ========================= */
+
+        .background {
+            position: fixed;
+            inset: 0;
+            overflow: hidden;
+            pointer-events: none;
+            background:
+                radial-gradient(
+                    circle at 50% 0%,
+                    rgba(120, 80, 255, .12),
+                    transparent 40%
+                ),
+                #09090d;
+        }
+
+        .blob {
+            position: absolute;
+            width: 280px;
+            height: 280px;
+            border-radius: 50%;
+            filter: blur(90px);
+            opacity: .16;
+            animation: floatBlob 12s infinite alternate ease-in-out;
+        }
+
+        .blob.one {
+            top: -100px;
+            left: -80px;
+            background: #8b5cf6;
+        }
+
+        .blob.two {
+            right: -100px;
+            top: 30%;
+            background: #ec4899;
+            animation-delay: -4s;
+        }
+
+        .blob.three {
+            bottom: -120px;
+            left: 20%;
+            background: #3b82f6;
+            animation-delay: -8s;
+        }
+
+        @keyframes floatBlob {
+            from {
+                transform: translate(0, 0) scale(1);
+            }
+
+            to {
+                transform: translate(40px, -30px) scale(1.15);
+            }
+        }
+
+        /* =========================
+           APP
+        ========================= */
+
+        #app {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .screen {
+            position: absolute;
+            inset: 0;
+            display: none;
+            overflow: hidden;
+        }
+
+        .screen.active {
+            display: block;
+        }
+
+        /* =========================
+           TOP BAR
+        ========================= */
+
+        .topbar {
+            position: absolute;
+            z-index: 20;
+            top: 0;
+            left: 0;
+            right: 0;
+
+            height: 70px;
+
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            padding: 0 18px;
+
+            background: linear-gradient(
+                to bottom,
+                rgba(9, 9, 13, .72),
+                transparent
+            );
+
+            backdrop-filter: blur(8px);
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -.7px;
+        }
+
+        .logo span {
+            opacity: .45;
+        }
+
+        .top-search {
+            width: 42px;
+            height: 42px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            border-radius: 50%;
+
+            background: rgba(255,255,255,.1);
+            backdrop-filter: blur(15px);
+
+            cursor: pointer;
+            font-size: 18px;
+        }
+
+        /* =========================
+           FEED
+        ========================= */
+
+        .feed-screen {
+            width: 100%;
+            height: 100%;
+        }
+
+        .feed {
+            width: 100%;
+            height: 100%;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            padding:
+                74px
+                12px
+                82px;
+        }
+
+        .card {
+            position: relative;
+
+            width: min(470px, 100%);
+            height: min(760px, calc(100vh - 155px));
+
+            min-height: 520px;
+
+            overflow: hidden;
+
+            border-radius: 28px;
+
+            background: #15151b;
+
+            box-shadow:
+                0 30px 80px rgba(0,0,0,.5),
+                0 0 0 1px rgba(255,255,255,.06);
+
+            user-select: none;
+
+            transform-origin: center;
+            transition:
+                transform .25s ease,
+                opacity .25s ease;
+        }
+
+        .card.dragging {
+            transition: none;
+        }
+
+        .product-media {
+            position: absolute;
+            inset: 0;
+
+            background: #18181f;
+        }
+
+        .product-media::after {
+            content: "";
+
+            position: absolute;
+            inset: 0;
+
+            background:
+                linear-gradient(
+                    to bottom,
+                    rgba(0,0,0,.08),
+                    transparent 35%,
+                    rgba(0,0,0,.82) 100%
+                );
+        }
+
+        .product-media img {
+            width: 100%;
+            height: 100%;
+
+            display: block;
+
+            object-fit: cover;
+
+            pointer-events: none;
+        }
+
+        .product-info {
+            position: absolute;
+            z-index: 3;
+
+            left: 20px;
+            right: 82px;
+            bottom: 22px;
+        }
+
+        .source-badge {
+            display: inline-flex;
+
+            padding: 6px 10px;
+
+            margin-bottom: 10px;
+
+            border-radius: 999px;
+
+            background: rgba(0,0,0,.45);
+            backdrop-filter: blur(12px);
+
+            font-size: 11px;
+            font-weight: 700;
+
+            color: rgba(255,255,255,.9);
+        }
+
+        .brand {
+            margin-bottom: 5px;
+
+            font-size: 13px;
+            font-weight: 700;
+
+            color: rgba(255,255,255,.65);
+        }
+
+        .title {
+            margin: 0;
+
+            font-size: 20px;
+            line-height: 1.18;
+            font-weight: 750;
+
+            text-shadow: 0 2px 12px rgba(0,0,0,.4);
+        }
+
+        .meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+
+            margin-top: 10px;
+
+            font-size: 13px;
+            color: rgba(255,255,255,.82);
+        }
+
+        .rating {
+            color: #ffd75a;
+        }
+
+        .price {
+            margin-top: 9px;
+
+            font-size: 25px;
+            font-weight: 850;
+        }
+
+        .old-price {
+            margin-left: 7px;
+
+            font-size: 13px;
+            font-weight: 500;
+
+            color: rgba(255,255,255,.45);
+            text-decoration: line-through;
+        }
+
+        .open-product {
+            margin-top: 14px;
+
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+
+            padding: 11px 16px;
+
+            border-radius: 14px;
+
+            background: rgba(255,255,255,.95);
+            color: #101014;
+
+            font-size: 13px;
+            font-weight: 800;
+
+            cursor: pointer;
+        }
+
+        /* =========================
+           ACTIONS
+        ========================= */
+
+        .actions {
+            position: absolute;
+            z-index: 10;
+
+            right: 12px;
+            bottom: 24px;
+
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+
+            gap: 16px;
+        }
+
+        .action {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+
+            gap: 4px;
+
+            background: none;
+
+            cursor: pointer;
+        }
+
+        .action-icon {
+            width: 48px;
+            height: 48px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            border-radius: 50%;
+
+            background: rgba(0,0,0,.4);
+            backdrop-filter: blur(15px);
+
+            font-size: 21px;
+
+            transition:
+                transform .15s ease,
+                background .15s ease;
+        }
+
+        .action:active .action-icon {
+            transform: scale(.86);
+        }
+
+        .action.liked .action-icon {
+            color: #ff426d;
+            background: rgba(255,66,109,.18);
+        }
+
+        .action-label {
+            font-size: 10px;
+            font-weight: 600;
+
+            color: rgba(255,255,255,.82);
+        }
+
+        /* =========================
+           BIG HEART
+        ========================= */
+
+        .big-heart {
+            position: absolute;
+            z-index: 30;
+
+            left: 50%;
+            top: 50%;
+
+            transform:
+                translate(-50%, -50%)
+                scale(.3);
+
+            opacity: 0;
+
+            font-size: 100px;
+
+            pointer-events: none;
+
+            text-shadow:
+                0 15px 40px rgba(0,0,0,.4);
+
+            transition: none;
+        }
+
+        .big-heart.show {
+            animation: heartPop .8s ease forwards;
+        }
+
+        @keyframes heartPop {
+            0% {
+                opacity: 0;
+                transform:
+                    translate(-50%, -50%)
+                    scale(.3);
+            }
+
+            25% {
+                opacity: 1;
+                transform:
+                    translate(-50%, -50%)
+                    scale(1.15);
+            }
+
+            60% {
+                opacity: 1;
+                transform:
+                    translate(-50%, -50%)
+                    scale(1);
+            }
+
+            100% {
+                opacity: 0;
+                transform:
+                    translate(-50%, -50%)
+                    scale(1.4);
+            }
+        }
+
+        /* =========================
+           EMPTY
+        ========================= */
+
+        .empty {
+            position: absolute;
+            inset: 0;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            text-align: center;
+
+            padding: 30px;
+        }
+
+        .empty-inner {
+            max-width: 300px;
+        }
+
+        .empty-icon {
+            font-size: 52px;
+            margin-bottom: 16px;
+        }
+
+        .empty h2 {
+            margin: 0 0 8px;
+            font-size: 21px;
+        }
+
+        .empty p {
+            margin: 0;
+
+            color: rgba(255,255,255,.55);
+            line-height: 1.5;
+        }
+
+        /* =========================
+           BOTTOM NAV
+        ========================= */
+
+        .bottom-nav {
+            position: absolute;
+            z-index: 50;
+
+            left: 50%;
+            bottom: 9px;
+
+            transform: translateX(-50%);
+
+            width: min(470px, calc(100% - 20px));
+
+            height: 64px;
+
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+
+            padding: 5px;
+
+            border-radius: 21px;
+
+            background: rgba(22,22,29,.88);
+            border: 1px solid rgba(255,255,255,.07);
+
+            box-shadow: 0 15px 50px rgba(0,0,0,.35);
+
+            backdrop-filter: blur(25px);
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+
+            gap: 3px;
+
+            border-radius: 16px;
+
+            background: transparent;
+
+            color: rgba(255,255,255,.45);
+
+            cursor: pointer;
+        }
+
+        .nav-item.active {
+            color: white;
+            background: rgba(255,255,255,.09);
+        }
+
+        .nav-icon {
+            font-size: 19px;
+        }
+
+        .nav-label {
+            font-size: 9px;
+            font-weight: 600;
+        }
+
+        /* =========================
+           SEARCH
+        ========================= */
+
+        .search-screen {
+            padding: 76px 16px 88px;
+            overflow-y: auto;
+        }
+
+        .page-title {
+            margin: 0 0 18px;
+
+            font-size: 30px;
+            letter-spacing: -1px;
+        }
+
+        .search-box {
+            position: relative;
+
+            display: flex;
+            align-items: center;
+
+            width: 100%;
+            height: 54px;
+
+            margin-bottom: 22px;
+        }
+
+        .search-box input {
+            width: 100%;
+            height: 100%;
+
+            padding: 0 48px 0 18px;
+
+            outline: none;
+
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 17px;
+
+            background: rgba(255,255,255,.08);
+
+            color: white;
+
+            font-size: 16px;
+        }
+
+        .search-box input::placeholder {
+            color: rgba(255,255,255,.4);
+        }
+
+        .search-clear {
+            position: absolute;
+            right: 9px;
+
+            width: 38px;
+            height: 38px;
+
+            display: none;
+            align-items: center;
+            justify-content: center;
+
+            border-radius: 50%;
+
+            background: rgba(255,255,255,.08);
+
+            cursor: pointer;
+        }
+
+        .section-title {
+            margin: 20px 0 11px;
+
+            font-size: 14px;
+            font-weight: 750;
+
+            color: rgba(255,255,255,.72);
+        }
+
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .chip {
+            padding: 10px 13px;
+
+            border-radius: 13px;
+
+            background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.06);
+
+            color: rgba(255,255,255,.86);
+
+            font-size: 13px;
+
+            cursor: pointer;
+        }
+
+        .chip:active {
+            transform: scale(.96);
+        }
+
+        .categories {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .category {
+            min-height: 88px;
+
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+
+            padding: 14px;
+
+            border-radius: 18px;
+
+            background:
+                linear-gradient(
+                    145deg,
+                    rgba(255,255,255,.11),
+                    rgba(255,255,255,.04)
+                );
+
+            border: 1px solid rgba(255,255,255,.06);
+
+            cursor: pointer;
+        }
+
+        .category-icon {
+            font-size: 27px;
+            margin-bottom: 5px;
+        }
+
+        .category-name {
+            font-size: 13px;
+            font-weight: 750;
+        }
+
+        .search-results {
+            display: none;
+        }
+
+        .search-results.active {
+            display: block;
+        }
+
+        .result-count {
+            margin-bottom: 10px;
+
+            font-size: 12px;
+            color: rgba(255,255,255,.45);
+        }
+
+        .result-list {
+            display: grid;
+            gap: 9px;
+        }
+
+        .result-card {
+            display: flex;
+            align-items: center;
+
+            gap: 12px;
+
+            padding: 9px;
+
+            border-radius: 17px;
+
+            background: rgba(255,255,255,.06);
+
+            cursor: pointer;
+        }
+
+        .result-image {
+            width: 65px;
+            height: 65px;
+
+            flex: 0 0 65px;
+
+            border-radius: 12px;
+
+            object-fit: cover;
+        }
+
+        .result-info {
+            min-width: 0;
+        }
+
+        .result-brand {
+            font-size: 11px;
+            color: rgba(255,255,255,.45);
+        }
+
+        .result-title {
+            margin-top: 3px;
+
+            font-size: 13px;
+            font-weight: 700;
+
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .result-price {
+            margin-top: 5px;
+
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        /* =========================
+           PROFILE
+        ========================= */
+
+        .profile-screen {
+            padding: 76px 16px 90px;
+            overflow-y: auto;
+        }
+
+        .profile-head {
+            display: flex;
+            align-items: center;
+
+            gap: 15px;
+
+            margin-bottom: 22px;
+        }
+
+        .profile-avatar {
+            width: 67px;
+            height: 67px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            border-radius: 50%;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #8b5cf6,
+                    #ec4899
+                );
+
+            font-size: 27px;
+            font-weight: 800;
+
+            box-shadow:
+                0 10px 30px rgba(139,92,246,.25);
+        }
+
+        .profile-name {
+            font-size: 21px;
+            font-weight: 800;
+        }
+
+        .profile-subtitle {
+            margin-top: 4px;
+
+            color: rgba(255,255,255,.45);
+            font-size: 12px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+
+            gap: 8px;
+
+            margin-bottom: 22px;
+        }
+
+        .stat {
+            padding: 14px 8px;
+
+            text-align: center;
+
+            border-radius: 17px;
+
+            background: rgba(255,255,255,.06);
+        }
+
+        .stat-number {
+            font-size: 18px;
+            font-weight: 850;
+        }
+
+        .stat-label {
+            margin-top: 4px;
+
+            font-size: 10px;
+            color: rgba(255,255,255,.45);
+        }
+
+        .profile-section {
+            margin-top: 20px;
+        }
+
+        .profile-section-title {
+            margin-bottom: 10px;
+
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        .collection-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+
+            gap: 10px;
+        }
+
+        .collection {
+            position: relative;
+
+            min-height: 115px;
+
+            padding: 14px;
+
+            overflow: hidden;
+
+            border-radius: 19px;
+
+            background:
+                linear-gradient(
+                    145deg,
+                    rgba(255,255,255,.11),
+                    rgba(255,255,255,.04)
+                );
+
+            border: 1px solid rgba(255,255,255,.06);
+
+            cursor: pointer;
+        }
+
+        .collection-icon {
+            font-size: 30px;
+        }
+
+        .collection-name {
+            position: absolute;
+            left: 14px;
+            bottom: 25px;
+
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .collection-count {
+            position: absolute;
+            left: 14px;
+            bottom: 10px;
+
+            font-size: 10px;
+            color: rgba(255,255,255,.45);
+        }
+
+        .recent-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 9px;
+        }
+
+        .recent-card {
+            position: relative;
+
+            height: 190px;
+
+            overflow: hidden;
+
+            border-radius: 17px;
+
+            background: #15151b;
+
+            cursor: pointer;
+        }
+
+        .recent-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .recent-card::after {
+            content: "";
+
+            position: absolute;
+            inset: 45% 0 0;
+
+            background: linear-gradient(
+                transparent,
+                rgba(0,0,0,.8)
+            );
+        }
+
+        .recent-price {
+            position: absolute;
+            z-index: 2;
+
+            left: 10px;
+            bottom: 9px;
+
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        /* =========================
+           FAVORITES
+        ========================= */
+
+        .favorites-screen {
+            padding: 76px 16px 88px;
+            overflow-y: auto;
+        }
+
+        .favorites-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .favorite-card {
+            position: relative;
+
+            height: 250px;
+
+            overflow: hidden;
+
+            border-radius: 19px;
+
+            background: #15151b;
+
+            cursor: pointer;
+        }
+
+        .favorite-card img {
+            width: 100%;
+            height: 100%;
+
+            object-fit: cover;
+        }
+
+        .favorite-card::after {
+            content: "";
+
+            position: absolute;
+            inset: 50% 0 0;
+
+            background: linear-gradient(
+                transparent,
+                rgba(0,0,0,.85)
+            );
+        }
+
+        .favorite-info {
+            position: absolute;
+            z-index: 2;
+
+            left: 11px;
+            right: 11px;
+            bottom: 10px;
+        }
+
+        .favorite-title {
+            font-size: 12px;
+            font-weight: 750;
+
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .favorite-price {
+            margin-top: 4px;
+
+            font-size: 13px;
+            font-weight: 850;
+        }
+
+        /* =========================
+           COMMENTS
+        ========================= */
+
+        .comments-overlay {
+            position: fixed;
+            z-index: 100;
+
+            inset: 0;
+
+            display: none;
+
+            background: rgba(0,0,0,.55);
+            backdrop-filter: blur(5px);
+        }
+
+        .comments-overlay.show {
+            display: block;
+        }
+
+        .comments {
+            position: absolute;
+
+            left: 0;
+            right: 0;
+            bottom: 0;
+
+            max-height: 70vh;
+
+            padding: 18px;
+
+            border-radius: 26px 26px 0 0;
+
+            background: #17171d;
+
+            box-shadow: 0 -20px 70px rgba(0,0,0,.45);
+        }
+
+        .comments-handle {
+            width: 42px;
+            height: 4px;
+
+            margin: 0 auto 17px;
+
+            border-radius: 999px;
+
+            background: rgba(255,255,255,.2);
+        }
+
+        .comments-title {
+            font-size: 17px;
+            font-weight: 800;
+
+            margin-bottom: 15px;
+        }
+
+        .comment {
+            padding: 11px 0;
+
+            border-bottom: 1px solid rgba(255,255,255,.06);
+        }
+
+        .comment-user {
+            font-size: 12px;
+            font-weight: 800;
+        }
+
+        .comment-text {
+            margin-top: 4px;
+
+            font-size: 13px;
+            color: rgba(255,255,255,.65);
+        }
+
+        /* =========================
+           TOAST
+        ========================= */
+
+        #toast {
+            position: fixed;
+            z-index: 200;
+
+            left: 50%;
+            bottom: 88px;
+
+            transform:
+                translateX(-50%)
+                translateY(20px);
+
+            padding: 11px 15px;
+
+            border-radius: 13px;
+
+            background: rgba(20,20,26,.94);
+
+            border: 1px solid rgba(255,255,255,.08);
+
+            box-shadow: 0 10px 35px rgba(0,0,0,.35);
+
+            font-size: 12px;
+
+            opacity: 0;
+            pointer-events: none;
+
+            transition:
+                opacity .2s ease,
+                transform .2s ease;
+
+            white-space: nowrap;
+        }
+
+        #toast.show {
+            opacity: 1;
+
+            transform:
+                translateX(-50%)
+                translateY(0);
+        }
+
+        /* =========================
+           DESKTOP
+        ========================= */
+
+        @media (min-width: 700px) {
+            .feed {
+                padding-top: 76px;
+                padding-bottom: 90px;
+            }
+
+            .card {
+                height: min(760px, calc(100vh - 150px));
+            }
+
+            .search-screen,
+            .profile-screen,
+            .favorites-screen {
+                width: 470px;
+                margin: auto;
+            }
+        }
+
+        /* =========================
+           SMALL SCREEN
+        ========================= */
+
+        @media (max-height: 650px) {
+            .card {
+                min-height: 0;
+                height: calc(100vh - 145px);
+            }
+
+            .product-info {
+                bottom: 17px;
+            }
+
+            .actions {
+                bottom: 18px;
+                gap: 10px;
+            }
+
+            .action-icon {
+                width: 43px;
+                height: 43px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="background">
+    <div class="blob one"></div>
+    <div class="blob two"></div>
+    <div class="blob three"></div>
+</div>
+
+<div id="app">
+
+    <!-- =========================
+         FEED
+    ========================= -->
+
+    <section id="feedScreen" class="screen active feed-screen">
+
+        <header class="topbar">
+            <div class="logo">
+                Style<span>Flow</span>
+            </div>
+
+            <button
+                class="top-search"
+                onclick="switchTab('search')"
+            >
+                🔎
+            </button>
+        </header>
+
+        <main class="feed">
+
+            <div id="productCard" class="card">
+
+                <div class="product-media">
+                    <img id="productImage" src="" alt="Товар">
+                </div>
+
+                <div class="product-info">
+
+                    <div id="productSource" class="source-badge">
+                        Marketplace
+                    </div>
+
+                    <div id="productBrand" class="brand">
+                        Brand
+                    </div>
+
+                    <h1 id="productTitle" class="title">
+                        Загрузка...
+                    </h1>
+
+                    <div class="meta">
+                        <span id="productRating" class="rating">
+                            ★ 4.8
+                        </span>
+
+                        <span id="productCategory">
+                            Одежда
+                        </span>
+                    </div>
+
+                    <div>
+                        <span id="productPrice" class="price">
+                            —
+                        </span>
+
+                        <span id="productOldPrice" class="old-price"></span>
+                    </div>
+
+                    <button
+                        class="open-product"
+                        onclick="openCurrentProduct()"
+                    >
+                        Открыть товар ↗
+                    </button>
+
+                </div>
+
+                <div class="actions">
+
+                    <button
+                        id="likeButton"
+                        class="action"
+                        onclick="toggleLike()"
+                    >
+                        <span class="action-icon">♥</span>
+                        <span class="action-label">Нравится</span>
+                    </button>
+
+                    <button
+                        class="action"
+                        onclick="openComments()"
+                    >
+                        <span class="action-icon">💬</span>
+                        <span class="action-label">Отзывы</span>
+                    </button>
+
+                    <button
+                        class="action"
+                        onclick="shareCurrentProduct()"
+                    >
+                        <span class="action-icon">↗</span>
+                        <span class="action-label">Поделиться</span>
+                    </button>
+
+                </div>
+
+                <div id="bigHeart" class="big-heart">
+                    ❤️
+                </div>
+
+            </div>
+
+            <div id="feedEmpty" class="empty" style="display:none;">
+                <div class="empty-inner">
+                    <div class="empty-icon">👕</div>
+                    <h2>Товаров пока нет</h2>
+                    <p>
+                        Когда подключим источники маркетплейсов,
+                        здесь появится твоя лента.
+                    </p>
+                </div>
+            </div>
+
+        </main>
+
+    </section>
+
+    <!-- =========================
+         FAVORITES
+    ========================= -->
+
+    <section id="favoritesScreen" class="screen favorites-screen">
+
+        <h1 class="page-title">Избранное</h1>
+
+        <div id="favoritesGrid" class="favorites-grid"></div>
+
+        <div
+            id="favoritesEmpty"
+            class="empty"
+            style="position:relative; min-height:420px;"
+        >
+            <div class="empty-inner">
+                <div class="empty-icon">♡</div>
+
+                <h2>Пока пусто</h2>
+
+                <p>
+                    Лайкай вещи в ленте —
+                    они появятся здесь.
+                </p>
+            </div>
+        </div>
+
+    </section>
+
+    <!-- =========================
+         SEARCH
+    ========================= -->
+
+    <section id="searchScreen" class="screen search-screen">
+
+        <h1 class="page-title">Поиск</h1>
+
+        <div class="search-box">
+
+            <input
+                id="searchInput"
+                type="text"
+                autocomplete="off"
+                placeholder="Что ищем? Например, чёрное худи"
+            >
+
+            <button
+                id="searchClear"
+                class="search-clear"
+                onclick="clearSearch()"
+            >
+                ×
+            </button>
+
+        </div>
+
+        <div id="searchHome">
+
+            <div class="section-title">
+                Популярное
+            </div>
+
+            <div class="chips">
+
+                <button class="chip" onclick="quickSearch('кроссовки')">
+                    👟 кроссовки
+                </button>
+
+                <button class="chip" onclick="quickSearch('худи')">
+                    🧥 худи
+                </button>
+
+                <button class="chip" onclick="quickSearch('футболки')">
+                    👕 футболки
+                </button>
+
+                <button class="chip" onclick="quickSearch('джинсы')">
+                    👖 джинсы
+                </button>
+
+                <button class="chip" onclick="quickSearch('куртки')">
+                    🧥 куртки
+                </button>
+
+                <button class="chip" onclick="quickSearch('nike')">
+                    Nike
+                </button>
+
+            </div>
+
+            <div class="section-title">
+                Категории
+            </div>
+
+            <div class="categories">
+
+                <button
+                    class="category"
+                    onclick="quickSearch('обувь')"
+                >
+                    <span class="category-icon">👟</span>
+                    <span class="category-name">Обувь</span>
+                </button>
+
+                <button
+                    class="category"
+                    onclick="quickSearch('футболки')"
+                >
+                    <span class="category-icon">👕</span>
+                    <span class="category-name">Футболки</span>
+                </button>
+
+                <button
+                    class="category"
+                    onclick="quickSearch('куртки')"
+                >
+                    <span class="category-icon">🧥</span>
+                    <span class="category-name">Куртки</span>
+                </button>
+
+                <button
+                    class="category"
+                    onclick="quickSearch('брюки')"
+                >
+                    <span class="category-icon">👖</span>
+                    <span class="category-name">Брюки</span>
+                </button>
+
+                <button
+                    class="category"
+                    onclick="quickSearch('аксессуары')"
+                >
+                    <span class="category-icon">🧢</span>
+                    <span class="category-name">Аксессуары</span>
+                </button>
+
+                <button
+                    class="category"
+                    onclick="quickSearch('oversize')"
+                >
+                    <span class="category-icon">🔥</span>
+                    <span class="category-name">Oversize</span>
+                </button>
+
+            </div>
+
+            <div class="section-title">
+                Источники
+            </div>
+
+            <div class="chips">
+
+                <button class="chip" onclick="quickSearch('wildberries')">
+                    🟣 Wildberries
+                </button>
+
+                <button class="chip" onclick="quickSearch('ozon')">
+                    🔵 Ozon
+                </button>
+
+                <button class="chip" onclick="quickSearch('aliexpress')">
+                    🟠 AliExpress
+                </button>
+
+                <button class="chip" onclick="quickSearch('kufar')">
+                    🟢 Kufar
+                </button>
+
+            </div>
+
+        </div>
+
+        <div id="searchResults" class="search-results">
+
+            <div id="resultCount" class="result-count"></div>
+
+            <div id="resultList" class="result-list"></div>
+
+        </div>
+
+    </section>
+
+    <!-- =========================
+         PROFILE
+    ========================= -->
+
+    <section id="profileScreen" class="screen profile-screen">
+
+        <h1 class="page-title">
+            Мой Style
+        </h1>
+
+        <div class="profile-head">
+
+            <div id="profileAvatar" class="profile-avatar">
+                S
+            </div>
+
+            <div>
+                <div id="profileName" class="profile-name">
+                    Style Explorer
+                </div>
+
+                <div class="profile-subtitle">
+                    Твой стиль. Твои находки.
+                </div>
+            </div>
+
+        </div>
+
+        <div class="stats">
+
+            <div class="stat">
+                <div id="likedCount" class="stat-number">0</div>
+                <div class="stat-label">❤️ лайков</div>
+            </div>
+
+            <div class="stat">
+                <div id="viewedCount" class="stat-number">0</div>
+                <div class="stat-label">👁 просмотрено</div>
+            </div>
+
+            <div class="stat">
+                <div id="openedCount" class="stat-number">0</div>
+                <div class="stat-label">↗ переходов</div>
+            </div>
+
+        </div>
+
+        <div class="profile-section">
+
+            <div class="profile-section-title">
+                Твои коллекции
+            </div>
+
+            <div class="collection-grid">
+
+                <div
+                    class="collection"
+                    onclick="openCollection('favorites')"
+                >
+                    <div class="collection-icon">🔥</div>
+                    <div class="collection-name">
+                        Хочу купить
+                    </div>
+                    <div id="collectionCount" class="collection-count">
+                        0 товаров
+                    </div>
+                </div>
+
+                <div
+                    class="collection"
+                    onclick="quickSearch('обувь')"
+                >
+                    <div class="collection-icon">👟</div>
+                    <div class="collection-name">
+                        Обувь
+                    </div>
+                    <div class="collection-count">
+                        Смотреть →
+                    </div>
+                </div>
+
+                <div
+                    class="collection"
+                    onclick="quickSearch('осень')"
+                >
+                    <div class="collection-icon">🧥</div>
+                    <div class="collection-name">
+                        Осень
+                    </div>
+                    <div class="collection-count">
+                        Смотреть →
+                    </div>
+                </div>
+
+                <div
+                    class="collection"
+                    onclick="quickSearch('до 100')"
+                >
+                    <div class="collection-icon">💸</div>
+                    <div class="collection-name">
+                        До 100
+                    </div>
+                    <div class="collection-count">
+                        Смотреть →
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="profile-section">
+
+            <div class="profile-section-title">
+                Недавно смотрел
+            </div>
+
+            <div id="recentGrid" class="recent-grid"></div>
+
+        </div>
+
+    </section>
+
+    <!-- =========================
+         BOTTOM NAV
+    ========================= -->
+
+    <nav class="bottom-nav">
+
+        <button
+            id="navFeed"
+            class="nav-item active"
+            onclick="switchTab('feed')"
+        >
+            <span class="nav-icon">⌂</span>
+            <span class="nav-label">Лента</span>
+        </button>
+
+        <button
+            id="navFavorites"
+            class="nav-item"
+            onclick="switchTab('favorites')"
+        >
+            <span class="nav-icon">♡</span>
+            <span class="nav-label">Избранное</span>
+        </button>
+
+        <button
+            id="navSearch"
+            class="nav-item"
+            onclick="switchTab('search')"
+        >
+            <span class="nav-icon">⌕</span>
+            <span class="nav-label">Поиск</span>
+        </button>
+
+        <button
+            id="navProfile"
+            class="nav-item"
+            onclick="switchTab('profile')"
+        >
+            <span class="nav-icon">○</span>
+            <span class="nav-label">Мой Style</span>
+        </button>
+
+    </nav>
+
+</div>
+
+<!-- COMMENTS -->
+
+<div
+    id="commentsOverlay"
+    class="comments-overlay"
+    onclick="closeComments(event)"
+>
+
+    <div
+        class="comments"
+        onclick="event.stopPropagation()"
+    >
+
+        <div class="comments-handle"></div>
+
+        <div class="comments-title">
+            Отзывы
+        </div>
+
+        <div id="commentsList"></div>
+
+    </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
 /* =========================================================
 STYLEFLOW
 Personalized marketplace feed
@@ -94,6 +1846,12 @@ let isDragging = false;
 let lastTapTime = 0;
 
 let searchTimer = null;
+
+// История навигации внутри текущей сессии.
+// Нужна, чтобы случайно пропущенную карточку можно было вернуть назад.
+let navigationHistory = [];
+let navigationPosition = -1;
+let infoPanelCollapsed = false;
 
 
 /* =========================================================
@@ -284,6 +2042,7 @@ document.addEventListener(
     async () => {
 
         setupSearch();
+        setupSearchSuggestions();
 
         setupSwipe();
 
@@ -2166,133 +3925,248 @@ FILTER SEARCH HELPERS
 "bmw x5"
 */
 
-function normalizeSearchText(
-    value
-) {
+function normalizeSearchText(value) {
 
-    return String(
-        value || ""
-    )
+    return String(value || "")
         .toLowerCase()
-        .replace(
-            /ё/g,
-            "е"
-        )
-        .replace(
-            /[^\p{L}\p{N}]+/gu,
-            " "
-        )
-        .replace(
-            /\s+/g,
-            " "
-        )
+        .replace(/ё/g, "е")
+        .replace(/[–—−]/g, "-")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .replace(/\s+/g, " ")
         .trim();
 }
 
 
 /*
-Получаем все текстовые данные товара,
-по которым можно искать.
-
-Таким образом запрос:
-
-"BMW"
-
-может найти товар по:
-
-- названию
-- бренду
-- категории
-- описанию
-- площадке
+Приводим слова к более устойчивой форме.
+Это не полноценный морфологический словарь, но он
+закрывает самые частые русские окончания и множественное
+число, поэтому "ноутбук", "ноутбуки", "ноутбука" и
+"ноутбуком" считаются одним поисковым намерением.
 */
+function normalizeSearchToken(token) {
 
-function getProductSearchText(
-    product
-) {
+    let word = normalizeSearchText(token)
+        .split(" ")
+        .filter(Boolean)[0] || "";
+
+    if (!word) {
+        return "";
+    }
+
+    const aliases = {
+        "ноут": "ноутбук",
+        "ноутбуки": "ноутбук",
+        "ноутбука": "ноутбук",
+        "ноутбуком": "ноутбук",
+        "ноутбуке": "ноутбук",
+        "laptop": "ноутбук",
+        "laptops": "ноутбук",
+        "айфон": "iphone",
+        "айфона": "iphone",
+        "айфоны": "iphone",
+        "айфоном": "iphone",
+        "iphones": "iphone",
+        "смартфон": "телефон",
+        "смартфоны": "телефон",
+        "смартфона": "телефон",
+        "авто": "машина",
+        "автомобиль": "машина",
+        "автомобили": "машина",
+        "машины": "машина"
+    };
+
+    if (aliases[word]) {
+        return aliases[word];
+    }
+
+    // Английское множественное число.
+    if (/^[a-z0-9]+$/i.test(word) && word.length > 4) {
+        if (word.endsWith("ies")) {
+            word = word.slice(0, -3) + "y";
+        } else if (word.endsWith("es")) {
+            word = word.slice(0, -2);
+        } else if (word.endsWith("s")) {
+            word = word.slice(0, -1);
+        }
+    }
+
+    // Частые русские окончания. Не режем короткие слова.
+    if (word.length >= 5) {
+        const endings = [
+            "ами", "ями", "ого", "ему", "ому", "ыми", "ими",
+            "ее", "ие", "ые", "ое", "ей", "ов", "ев", "ам",
+            "ям", "ах", "ях", "ом", "ем", "ым", "им", "ой",
+            "ый", "ий", "ая", "яя", "ое", "ее", "ую", "юю",
+            "ою", "ею", "ию", "ью", "ы", "и", "а", "я", "у", "ю", "е", "о"
+        ];
+
+        for (const ending of endings) {
+            if (word.endsWith(ending) && word.length - ending.length >= 4) {
+                word = word.slice(0, -ending.length);
+                break;
+            }
+        }
+    }
+
+    return word;
+}
+
+
+function levenshteinDistance(a, b) {
+
+    a = String(a || "");
+    b = String(b || "");
+
+    if (a === b) return 0;
+    if (!a) return b.length;
+    if (!b) return a.length;
+
+    if (Math.abs(a.length - b.length) > 2) {
+        return 3;
+    }
+
+    let prev = new Array(b.length + 1);
+    let curr = new Array(b.length + 1);
+
+    for (let j = 0; j <= b.length; j++) prev[j] = j;
+
+    for (let i = 1; i <= a.length; i++) {
+        curr[0] = i;
+
+        for (let j = 1; j <= b.length; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            curr[j] = Math.min(
+                curr[j - 1] + 1,
+                prev[j] + 1,
+                prev[j - 1] + cost
+            );
+        }
+
+        [prev, curr] = [curr, prev];
+    }
+
+    return prev[b.length];
+}
+
+
+function getProductSearchText(product) {
 
     if (!product) {
         return "";
     }
 
-
-    return normalizeSearchText(
-        [
-
-            product.title,
-
-            product.brand,
-
-            product.category,
-
-            product.description,
-
-            product.source,
-
-            sourceLabel(
-                product.source
-            )
-
-        ]
-            .filter(Boolean)
-            .join(" ")
-    );
+    return normalizeSearchText([
+        product.title,
+        product.brand,
+        product.category,
+        product.description,
+        product.source,
+        sourceLabel(product.source)
+    ].filter(Boolean).join(" "));
 }
 
 
-/*
-Проверяем свободный запрос.
+function getSearchWords(product) {
 
-Все слова запроса должны встретиться
-в данных товара.
+    return getProductSearchText(product)
+        .split(" ")
+        .filter(Boolean);
+}
 
-Например:
 
-"BMW X5"
+function tokenMatchesSearch(token, words) {
 
-подойдёт товар:
+    const normalizedToken = normalizeSearchToken(token);
 
-"BMW X5 2018"
+    if (!normalizedToken) {
+        return true;
+    }
 
-но не подойдёт:
+    // Синонимы/разговорные формы.
+    const candidates = [normalizedToken];
 
-"BMW X3"
-*/
+    if (normalizedToken === "ноутбук") {
+        candidates.push("ноут", "laptop");
+    }
 
-function productMatchesQuery(
-    product,
-    query
-) {
+    if (normalizedToken === "телефон") {
+        candidates.push("смартфон", "iphone");
+    }
 
-    const normalizedQuery =
-        normalizeSearchText(
-            query
-        );
+    for (const candidate of candidates) {
+        const candidateStem = normalizeSearchToken(candidate);
 
+        for (const rawWord of words) {
+            const word = normalizeSearchToken(rawWord);
+
+            if (!word) continue;
+
+            if (word === candidateStem) return true;
+
+            // Разрешаем естественные формы/дополнительные символы.
+            if (word.startsWith(candidateStem) || candidateStem.startsWith(word)) {
+                if (Math.min(word.length, candidateStem.length) >= 4) {
+                    return true;
+                }
+            }
+
+            // Одна опечатка для длинных слов.
+            if (candidateStem.length >= 5 && word.length >= 5) {
+                if (levenshteinDistance(candidateStem, word) <= 1) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+
+function getProductSearchScore(product, query) {
+
+    const normalizedQuery = normalizeSearchText(query);
+    if (!normalizedQuery) return 0;
+
+    const queryTokens = normalizedQuery.split(" ").filter(Boolean);
+    const words = getSearchWords(product);
+    const searchable = getProductSearchText(product);
+
+    let score = 0;
+
+    if (searchable === normalizedQuery) score += 100;
+    if (searchable.includes(normalizedQuery)) score += 35;
+
+    for (const token of queryTokens) {
+        const normalizedToken = normalizeSearchToken(token);
+        if (!normalizedToken) continue;
+
+        if (normalizeSearchToken(product.title).includes(normalizedToken)) {
+            score += 20;
+        } else if (normalizeSearchToken(product.brand).includes(normalizedToken)) {
+            score += 16;
+        } else if (tokenMatchesSearch(normalizedToken, words)) {
+            score += 10;
+        }
+    }
+
+    return score;
+}
+
+
+function productMatchesQuery(product, query) {
+
+    const normalizedQuery = normalizeSearchText(query);
 
     if (!normalizedQuery) {
         return true;
     }
 
+    const tokens = normalizedQuery.split(" ").filter(Boolean);
+    const words = getSearchWords(product);
 
-    const searchable =
-        getProductSearchText(
-            product
-        );
-
-
-    const tokens =
-        normalizedQuery
-            .split(" ")
-            .filter(Boolean);
-
-
-    return tokens.every(
-        token =>
-            searchable.includes(
-                token
-            )
-    );
+    return tokens.every(token => tokenMatchesSearch(token, words));
 }
 
 
@@ -4272,6 +6146,9 @@ function showProduct() {
         ];
 
 
+    ensureNavigationHistory();
+
+
     if (
         isProductViewed(
             currentProduct
@@ -4928,54 +6805,54 @@ function openCurrentProduct() {
         return;
     }
 
+    const url = String(
+        currentProduct.url ||
+        currentProduct.link ||
+        ""
+    ).trim();
 
-    if (
-        !currentProduct.url ||
-        currentProduct.url === "#"
-    ) {
-
-        showToast(
-            "Ссылка на товар пока не подключена"
-        );
-
+    if (!url || url === "#") {
+        showToast("Ссылка на товар пока не подключена");
         return;
     }
 
+    registerOpen(currentProduct);
 
-    registerOpen(
-        currentProduct
-    );
-
-
+    /*
+    На ПК Telegram Desktop/обычный браузер может не отработать
+    через WebApp.openLink так, как на телефоне. Поэтому сначала
+    пробуем обычное окно, а если браузер его заблокировал —
+    переходим по ссылке в текущем окне.
+    */
     try {
+        const telegram = window.Telegram && window.Telegram.WebApp;
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
 
-        if (
-            window.Telegram &&
-            Telegram.WebApp &&
-            Telegram.WebApp.openLink
-        ) {
+        if (telegram && typeof telegram.openLink === "function" && isMobile) {
+            telegram.openLink(url);
+            return;
+        }
 
-            Telegram.WebApp.openLink(
-                currentProduct.url
-            );
+        const opened = window.open(url, "_blank", "noopener,noreferrer");
 
-        } else {
-
-            window.open(
-                currentProduct.url,
-                "_blank"
-            );
+        if (!opened) {
+            window.location.href = url;
         }
 
     } catch (error) {
+        console.warn("[StyleFlow] Не удалось открыть товар через новое окно:", error);
 
-        window.open(
-            currentProduct.url,
-            "_blank"
-        );
+        try {
+            if (window.Telegram && Telegram.WebApp && Telegram.WebApp.openLink) {
+                Telegram.WebApp.openLink(url);
+            } else {
+                window.location.href = url;
+            }
+        } catch (fallbackError) {
+            window.location.href = url;
+        }
     }
 }
-
 
 function openProductFromObject(
     product
@@ -5428,6 +7305,143 @@ function setupSearch() {
 }
 
 
+function setupSearchSuggestions() {
+
+    const inputs = [
+        document.getElementById("searchInput"),
+        document.getElementById("filterQuery")
+    ].filter(Boolean);
+
+    inputs.forEach(input => {
+
+        let box = input.parentElement
+            ? input.parentElement.querySelector(".styleflow-suggestions")
+            : null;
+
+        if (!box) {
+            box = document.createElement("div");
+            box.className = "styleflow-suggestions";
+
+            Object.assign(box.style, {
+                position: "absolute",
+                left: "0",
+                right: "0",
+                top: "calc(100% + 6px)",
+                zIndex: "1000",
+                display: "none",
+                padding: "6px",
+                borderRadius: "14px",
+                background: "rgba(18,18,24,.96)",
+                border: "1px solid rgba(255,255,255,.08)",
+                boxShadow: "0 14px 40px rgba(0,0,0,.35)",
+                backdropFilter: "blur(16px)",
+                WebkitBackdropFilter: "blur(16px)"
+            });
+
+            const parent = input.parentElement;
+            if (parent) {
+                if (getComputedStyle(parent).position === "static") {
+                    parent.style.position = "relative";
+                }
+                parent.appendChild(box);
+            }
+        }
+
+        const render = () => {
+            const value = input.value.trim();
+
+            if (!value || !allProducts.length) {
+                box.style.display = "none";
+                box.innerHTML = "";
+                return;
+            }
+
+            const normalized = normalizeSearchText(value);
+            const candidates = allProducts
+                .map(product => ({
+                    product,
+                    score: getProductSearchScore(product, value)
+                }))
+                .filter(item => item.score > 0)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 6);
+
+            const seen = new Set();
+            const suggestions = [];
+
+            // Сначала показываем сам пользовательский запрос,
+            // затем названия/бренды реальных найденных товаров.
+            if (normalized) {
+                seen.add(normalized);
+                suggestions.push(value);
+            }
+
+            candidates.forEach(({product}) => {
+                const text = String(product.title || product.brand || "").trim();
+                if (!text) return;
+
+                const key = normalizeSearchText(text);
+                if (seen.has(key)) return;
+
+                seen.add(key);
+                suggestions.push(text);
+            });
+
+            box.innerHTML = "";
+
+            suggestions.slice(0, 6).forEach(text => {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = text;
+
+                Object.assign(button.style, {
+                    display: "block",
+                    width: "100%",
+                    padding: "10px 12px",
+                    border: "0",
+                    borderRadius: "10px",
+                    background: "transparent",
+                    color: "#fff",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontSize: "14px"
+                });
+
+                button.addEventListener("mouseenter", () => {
+                    button.style.background = "rgba(255,255,255,.08)";
+                });
+
+                button.addEventListener("mouseleave", () => {
+                    button.style.background = "transparent";
+                });
+
+                button.addEventListener("click", () => {
+                    input.value = text;
+                    box.style.display = "none";
+                    input.dispatchEvent(new Event("input", {bubbles: true}));
+
+                    if (input.id === "searchInput") {
+                        performSearch(text);
+                    }
+                });
+
+                box.appendChild(button);
+            });
+
+            box.style.display = suggestions.length ? "block" : "none";
+        };
+
+        input.addEventListener("input", render);
+        input.addEventListener("focus", render);
+        input.addEventListener("blur", () => {
+            setTimeout(() => {
+                box.style.display = "none";
+            }, 180);
+        });
+    });
+}
+
+
 function quickSearch(
     query
 ) {
@@ -5595,13 +7609,19 @@ function performSearch(
 
 
     const filtered =
-        allProducts.filter(
-            product =>
-                productMatchesQuery(
-                    product,
-                    query
-                )
-        );
+        allProducts
+            .filter(
+                product =>
+                    productMatchesQuery(
+                        product,
+                        query
+                    )
+            )
+            .sort(
+                (a, b) =>
+                    getProductSearchScore(b, query) -
+                    getProductSearchScore(a, query)
+            );
 
 
     resultCount.textContent =
@@ -6037,575 +8057,421 @@ SWIPE
 
 function setupSwipe() {
 
-    const card =
-        document.getElementById(
-            "productCard"
-        );
-
+    const card = document.getElementById("productCard");
 
     if (!card) {
         return;
     }
 
-
-    /*
-    Используем Pointer Events вместо
-    только touch-событий.
-
-    Работает:
-    - пальцем
-    - мышью
-    - тачпадом
-    */
+    // Вертикальный жест оставляем браузеру/Telegram,
+    // горизонтальный жест используется только для карточек.
+    card.style.touchAction = "pan-y";
 
     let pointerStartY = 0;
-
     let pointerStartX = 0;
-
     let pointerActive = false;
-
     let pointerMoved = false;
-
+    let pointerHorizontal = false;
     let pointerId = null;
 
+    card.addEventListener("pointerdown", event => {
 
-    card.addEventListener(
-        "pointerdown",
-        event => {
+        if (!currentProduct) return;
 
-            if (!currentProduct) {
-                return;
-            }
-
-
-            if (
-                event.pointerType === "mouse" &&
-                event.button !== 0
-            ) {
-
-                return;
-            }
-
-
-            pointerStartY =
-                event.clientY;
-
-
-            pointerStartX =
-                event.clientX;
-
-
-            pointerActive =
-                true;
-
-
-            pointerMoved =
-                false;
-
-
-            pointerId =
-                event.pointerId;
-
-
-            isDragging =
-                true;
-
-
-            card.classList.add(
-                "dragging"
-            );
-
-
-            try {
-
-                card.setPointerCapture(
-                    pointerId
-                );
-
-            } catch (e) {}
-        }
-    );
-
-
-    card.addEventListener(
-        "pointermove",
-        event => {
-
-            if (
-                !pointerActive ||
-                event.pointerId !== pointerId
-            ) {
-
-                return;
-            }
-
-
-            const deltaY =
-                event.clientY -
-                pointerStartY;
-
-
-            const deltaX =
-                event.clientX -
-                pointerStartX;
-
-
-            if (
-                Math.abs(deltaY) < 3 &&
-                Math.abs(deltaX) < 3
-            ) {
-
-                return;
-            }
-
-
-            if (
-                Math.abs(deltaY) <=
-                Math.abs(deltaX)
-            ) {
-
-                return;
-            }
-
-
-            pointerMoved =
-                true;
-
-
-            event.preventDefault();
-
-
-            card.style.transform =
-                `translateY(${deltaY}px) rotate(${deltaY * -.025}deg)`;
-        }
-    );
-
-
-    function finishPointer(
-        event
-    ) {
-
-        if (!pointerActive) {
+        if (event.pointerType === "mouse" && event.button !== 0) {
             return;
         }
 
-
-        if (
-            pointerId !== null &&
-            event.pointerId !== pointerId
-        ) {
-
+        // Кнопки, ссылки и элементы управления не должны превращаться в свайп.
+        if (event.target.closest("button, a, input, textarea, select")) {
             return;
         }
 
+        pointerStartY = event.clientY;
+        pointerStartX = event.clientX;
+        pointerActive = true;
+        pointerMoved = false;
+        pointerHorizontal = false;
+        pointerId = event.pointerId;
+        isDragging = true;
 
-        const deltaY =
-            event.clientY -
-            pointerStartY;
-
-
-        const deltaX =
-            event.clientX -
-            pointerStartX;
-
-
-        const wasSwipe =
-            pointerMoved &&
-            Math.abs(deltaY) > 70 &&
-            Math.abs(deltaY) >
-                Math.abs(deltaX) * 1.15;
-
-
-        pointerActive =
-            false;
-
-
-        pointerId =
-            null;
-
-
-        isDragging =
-            false;
-
-
-        card.classList.remove(
-            "dragging"
-        );
-
+        card.classList.add("dragging");
 
         try {
-
-            card.releasePointerCapture(
-                event.pointerId
-            );
-
+            card.setPointerCapture(pointerId);
         } catch (e) {}
+    });
 
+    card.addEventListener("pointermove", event => {
+
+        if (!pointerActive || event.pointerId !== pointerId) {
+            return;
+        }
+
+        const deltaY = event.clientY - pointerStartY;
+        const deltaX = event.clientX - pointerStartX;
+
+        if (Math.abs(deltaY) < 4 && Math.abs(deltaX) < 4) {
+            return;
+        }
+
+        pointerMoved = true;
+
+        // Вертикальное движение НИКОГДА не переключает товар.
+        if (Math.abs(deltaY) >= Math.abs(deltaX)) {
+            pointerHorizontal = false;
+            card.style.transform = "";
+            return;
+        }
+
+        pointerHorizontal = true;
+        event.preventDefault();
 
         card.style.transform =
-            "";
+            `translateX(${deltaX}px) rotate(${deltaX * 0.035}deg)`;
+    });
 
+    function finishPointer(event) {
 
-        if (wasSwipe) {
+        if (!pointerActive) return;
 
-            if (
-                deltaY < 0
-            ) {
+        if (pointerId !== null && event.pointerId !== pointerId) {
+            return;
+        }
 
+        const deltaY = event.clientY - pointerStartY;
+        const deltaX = event.clientX - pointerStartX;
+
+        const wasHorizontalSwipe =
+            pointerHorizontal &&
+            Math.abs(deltaX) > 80 &&
+            Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
+
+        pointerActive = false;
+        pointerId = null;
+        isDragging = false;
+
+        card.classList.remove("dragging");
+
+        try {
+            card.releasePointerCapture(event.pointerId);
+        } catch (e) {}
+
+        card.style.transform = "";
+
+        if (wasHorizontalSwipe) {
+            if (deltaX < 0) {
                 nextProduct();
-
             } else {
-
                 previousProduct();
             }
 
-
-            lastTapTime =
-                0;
-
-
+            lastTapTime = 0;
             return;
         }
 
-
-        /*
-        Двойной тап оставляем как лайк.
-        */
+        // Вертикальный жест полностью игнорируется.
+        // Это позволяет Telegram/браузеру нормально закрываться/сворачиваться.
+        if (Math.abs(deltaY) > Math.abs(deltaX)) {
+            lastTapTime = 0;
+            return;
+        }
 
         if (!pointerMoved) {
+            const now = Date.now();
 
-            const now =
-                Date.now();
-
-
-            if (
-                now - lastTapTime <
-                350
-            ) {
-
+            if (now - lastTapTime < 350) {
                 toggleLike();
-
-
-                lastTapTime =
-                    0;
-
-
+                lastTapTime = 0;
                 return;
             }
 
-
-            lastTapTime =
-                now;
+            lastTapTime = now;
         }
     }
 
+    card.addEventListener("pointerup", finishPointer);
 
-    card.addEventListener(
-        "pointerup",
-        finishPointer
-    );
+    card.addEventListener("pointercancel", () => {
+        pointerActive = false;
+        pointerId = null;
+        isDragging = false;
+        card.classList.remove("dragging");
+        card.style.transform = "";
+    });
 
-
-    card.addEventListener(
-        "pointercancel",
-        event => {
-
-            pointerActive =
-                false;
-
-
-            pointerId =
-                null;
-
-
-            isDragging =
-                false;
-
-
-            card.classList.remove(
-                "dragging"
-            );
-
-
-            card.style.transform =
-                "";
+    card.addEventListener("pointerleave", event => {
+        if (event.pointerType === "mouse" && pointerActive) {
+            finishPointer(event);
         }
-    );
+    });
 
+    /*
+    Колесо мыши больше НЕ переключает карточки.
+    Иначе обычная прокрутка страницы/Telegram Desktop
+    случайно скипает товар.
 
-    card.addEventListener(
-        "pointerleave",
-        event => {
+    Горизонтальная прокрутка тачпада всё ещё может переключать,
+    если deltaX явно сильнее deltaY.
+    */
+    let wheelLocked = false;
 
-            if (
-                event.pointerType === "mouse" &&
-                pointerActive
-            ) {
+    card.addEventListener("wheel", event => {
 
-                finishPointer(
-                    event
-                );
-            }
+        if (wheelLocked) return;
+
+        if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) {
+            return;
         }
-    );
 
-
-    let wheelLocked =
-        false;
-
-
-    card.addEventListener(
-        "wheel",
-        event => {
-
-            if (wheelLocked) {
-                return;
-            }
-
-
-            if (
-                Math.abs(event.deltaY) <
-                Math.abs(event.deltaX)
-            ) {
-
-                return;
-            }
-
-
-            wheelLocked =
-                true;
-
-
-            if (
-                event.deltaY > 0
-            ) {
-
-                nextProduct();
-
-            } else {
-
-                previousProduct();
-            }
-
-
-            setTimeout(
-                () => {
-
-                    wheelLocked =
-                        false;
-
-                },
-                300
-            );
-        },
-        {
-            passive: true
+        if (Math.abs(event.deltaX) < 45) {
+            return;
         }
-    );
 
+        wheelLocked = true;
 
-    document.addEventListener(
-        "keydown",
-        event => {
-
-            if (
-                currentTab !==
-                "feed"
-            ) {
-
-                return;
-            }
-
-
-            if (
-                event.key ===
-                    "ArrowDown" ||
-                event.key ===
-                    "ArrowRight"
-            ) {
-
-                nextProduct();
-            }
-
-
-            if (
-                event.key ===
-                    "ArrowUp" ||
-                event.key ===
-                    "ArrowLeft"
-            ) {
-
-                previousProduct();
-            }
+        if (event.deltaX > 0) {
+            nextProduct();
+        } else {
+            previousProduct();
         }
-    );
+
+        setTimeout(() => {
+            wheelLocked = false;
+        }, 300);
+    }, { passive: true });
+
+    document.addEventListener("keydown", event => {
+
+        if (currentTab !== "feed") return;
+
+        if (event.key === "ArrowRight") {
+            event.preventDefault();
+            nextProduct();
+        }
+
+        if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            previousProduct();
+        }
+
+        // Стрелки вверх/вниз больше не переключают карточку:
+        // пользователь может использовать их для обычной прокрутки.
+    });
+
+    setupInfoCollapse(card);
+}
+
+
+function setupInfoCollapse(card) {
+
+    if (!card || card.querySelector(".styleflow-info-toggle")) {
+        return;
+    }
+
+    const info = card.querySelector(".product-info");
+
+    if (!info) return;
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "styleflow-info-toggle";
+    toggle.textContent = "⌄";
+    toggle.setAttribute("aria-label", "Свернуть информацию о товаре");
+
+    Object.assign(toggle.style, {
+        position: "absolute",
+        right: "14px",
+        bottom: "14px",
+        width: "38px",
+        height: "38px",
+        border: "0",
+        borderRadius: "50%",
+        background: "rgba(0,0,0,.48)",
+        color: "#fff",
+        fontSize: "20px",
+        lineHeight: "38px",
+        padding: "0",
+        zIndex: "20",
+        cursor: "pointer",
+        backdropFilter: "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)"
+    });
+
+    toggle.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        infoPanelCollapsed = !infoPanelCollapsed;
+        info.classList.toggle("collapsed", infoPanelCollapsed);
+        card.classList.toggle("info-collapsed", infoPanelCollapsed);
+
+        if (infoPanelCollapsed) {
+            info.style.maxHeight = "78px";
+            info.style.overflow = "hidden";
+            toggle.textContent = "⌃";
+            toggle.setAttribute("aria-label", "Развернуть информацию о товаре");
+        } else {
+            info.style.maxHeight = "";
+            info.style.overflow = "";
+            toggle.textContent = "⌄";
+            toggle.setAttribute("aria-label", "Свернуть информацию о товаре");
+        }
+    });
+
+    card.appendChild(toggle);
 }
 
 
 /* =========================================================
-NEXT / PREVIOUS
+NAVIGATION HISTORY
 ========================================================= */
+
+function resetNavigationHistory() {
+    navigationHistory = [];
+    navigationPosition = -1;
+}
+
+
+function ensureNavigationHistory() {
+    if (!currentProduct) return;
+
+    const id = String(currentProduct.id);
+
+    if (!navigationHistory.length) {
+        navigationHistory = [id];
+        navigationPosition = 0;
+        return;
+    }
+
+    if (navigationPosition < 0) {
+        navigationPosition = navigationHistory.length - 1;
+    }
+}
+
+
+function rememberNextNavigation(product) {
+    if (!product) return;
+
+    ensureNavigationHistory();
+
+    // Если пользователь вернулся назад, новая ветка начинается здесь.
+    if (navigationPosition < navigationHistory.length - 1) {
+        navigationHistory = navigationHistory.slice(0, navigationPosition + 1);
+    }
+
+    const id = String(product.id);
+
+    if (navigationHistory[navigationHistory.length - 1] !== id) {
+        navigationHistory.push(id);
+    }
+
+    navigationPosition = navigationHistory.length - 1;
+
+    if (navigationHistory.length > 100) {
+        navigationHistory.shift();
+        navigationPosition--;
+    }
+}
+
+
+function findProductById(id) {
+    const target = String(id);
+
+    return allProducts.find(product => String(product.id) === target) ||
+        products.find(product => String(product.id) === target) ||
+        null;
+}
+
 
 function nextProduct() {
 
-    if (
-        !products.length
-    ) {
-
+    if (!products.length) {
         buildPersonalizedFeed();
+        currentIndex = 0;
 
-
-        currentIndex =
-            0;
-
-
-        if (
-            !products.length
-        ) {
-
+        if (!products.length) {
             showEmptyFeed();
-
             return;
         }
 
-
+        resetNavigationHistory();
         showProduct();
-
         return;
     }
 
+    const nextIndex = findNextUnviewedIndex(currentIndex, 1);
 
-    const nextIndex =
-        findNextUnviewedIndex(
-            currentIndex,
-            1
-        );
+    if (nextIndex >= 0) {
+        if (currentProduct) {
+            rememberNextNavigation(currentProduct);
+        }
 
-
-    if (
-        nextIndex >= 0
-    ) {
-
-        currentIndex =
-            nextIndex;
-
-
-        animateCardChange(
-            "next"
-        );
-
-
+        currentIndex = nextIndex;
+        animateCardChange("next");
         return;
     }
 
+    const filteredProducts = applyProductFilters(allProducts);
+    const unviewed = filteredProducts.filter(product => !isProductViewed(product));
 
-    /*
-    Проверяем новые товары
-    с учётом текущих фильтров.
-    */
-
-    const filteredProducts =
-        applyProductFilters(
-            allProducts
-        );
-
-
-    const unviewed =
-        filteredProducts.filter(
-            product =>
-                !isProductViewed(
-                    product
-                )
-        );
-
-
-    if (
-        unviewed.length > 0
-    ) {
+    if (unviewed.length > 0) {
+        if (currentProduct) {
+            rememberNextNavigation(currentProduct);
+        }
 
         buildPersonalizedFeed();
+        currentIndex = 0;
 
-
-        currentIndex =
-            0;
-
-
-        if (
-            products.length > 0
-        ) {
-
-            animateCardChange(
-                "next"
-            );
-
+        if (products.length > 0) {
+            animateCardChange("next");
         } else {
-
             showEmptyFeed();
         }
 
-
         return;
     }
 
-
-    /*
-    Не начинаем новый круг.
-
-    Пользователь просмотрел всё,
-    что подходит под текущие фильтры.
-    */
-
-    console.log(
-        "[StyleFlow] Все доступные товары просмотрены."
-    );
-
-
     showEmptyFeed();
-
-
-    showToast(
-        "Ты просмотрел все доступные товары"
-    );
+    showToast("Ты просмотрел все доступные товары");
 }
 
 
 function previousProduct() {
 
-    if (
-        !products.length
-    ) {
+    ensureNavigationHistory();
 
+    if (navigationPosition <= 0) {
+        showToast("Это первая карточка в этой сессии");
         return;
     }
 
+    const previousId = navigationHistory[navigationPosition - 1];
+    const previous = findProductById(previousId);
 
-    const previousIndex =
-        findNextUnviewedIndex(
-            currentIndex,
-            -1
-        );
-
-
-    if (
-        previousIndex < 0
-    ) {
-
-        showToast(
-            "Больше непросмотренных товаров нет"
-        );
-
-
+    if (!previous) {
+        navigationPosition--;
+        previousProduct();
         return;
     }
 
+    navigationPosition--;
 
-    currentIndex =
-        previousIndex;
-
-
-    animateCardChange(
-        "previous"
+    const index = products.findIndex(
+        product => String(product.id) === String(previous.id)
     );
+
+    if (index >= 0) {
+        currentIndex = index;
+        animateCardChange("previous");
+        return;
+    }
+
+    // Если текущая персонализация уже перестроила массив,
+    // возвращаем конкретный товар в начало текущей ленты.
+    products.unshift(previous);
+    currentIndex = 0;
+    animateCardChange("previous");
 }
 
 
@@ -6634,8 +8500,8 @@ function animateCardChange(
 
     card.style.transform =
         direction === "next"
-            ? "translateY(-20px)"
-            : "translateY(20px)";
+            ? "translateX(-28px)"
+            : "translateX(28px)";
 
 
     setTimeout(
@@ -6935,3 +8801,7 @@ function getRussianPlural(
 
     return many;
 }
+</script>
+
+</body>
+</html>
