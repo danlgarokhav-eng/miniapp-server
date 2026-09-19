@@ -1,5 +1,3 @@
-<script>
-
 /* =========================================================
 STYLEFLOW
 Personalized marketplace feed
@@ -6937,5 +6935,3 @@ function getRussianPlural(
 
     return many;
 }
-
-</script>
