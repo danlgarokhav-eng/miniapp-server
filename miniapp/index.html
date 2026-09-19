@@ -1241,6 +1241,38 @@
             }
         }
     
+/* FILTERS */
+.topbar-actions{display:flex;align-items:center;gap:8px;}
+.top-filter{width:38px;height:38px;border-radius:12px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.08);color:#fff;cursor:pointer;}
+.filters-overlay{position:fixed;inset:0;z-index:100;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.52);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .2s ease,visibility .2s ease;}
+.filters-overlay.show{opacity:1;visibility:visible;pointer-events:auto;}
+.filters-sheet{width:min(470px,100%);max-height:82vh;overflow:auto;padding:20px 16px 24px;border-radius:24px 24px 0 0;background:rgba(22,22,29,.97);border:1px solid rgba(255,255,255,.08);box-shadow:0 -20px 60px rgba(0,0,0,.35);backdrop-filter:blur(25px);transform:translateY(20px);transition:transform .22s ease;}
+.filters-overlay.show .filters-sheet{transform:translateY(0);}
+.filters-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;}
+.filters-title{font-size:22px;font-weight:800;}
+.filters-subtitle{margin-top:4px;color:rgba(255,255,255,.45);font-size:12px;}
+.filters-close{width:36px;height:36px;border-radius:12px;background:rgba(255,255,255,.07);color:#fff;font-size:22px;cursor:pointer;}
+.filter-section{margin-top:18px;}
+.filter-section-title{margin-bottom:9px;font-size:13px;font-weight:700;color:rgba(255,255,255,.72);}
+.filter-price-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+.filter-input,.filter-select{width:100%;height:46px;border-radius:13px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.06);color:#fff;outline:none;padding:0 13px;}
+.filter-select option{background:#17171d;color:#fff;}
+.filter-chips{display:flex;flex-wrap:wrap;gap:8px;}
+.filter-chip{padding:10px 13px;border-radius:13px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.06);color:rgba(255,255,255,.82);cursor:pointer;}
+.filter-chip.active{background:rgba(155,124,255,.24);border-color:rgba(155,124,255,.72);color:#fff;box-shadow:0 0 0 1px rgba(155,124,255,.10);}
+.filter-actions{display:grid;grid-template-columns:1fr 1.5fr;gap:9px;margin-top:24px;}
+.filter-reset,.filter-apply{height:48px;border-radius:14px;font-weight:750;cursor:pointer;}
+.filter-reset{background:rgba(255,255,255,.07);color:#fff;}
+.filter-apply{background:#fff;color:#101014;}
+
+.search-result-card{display:flex;gap:12px;padding:10px;margin-bottom:9px;border-radius:16px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.06);cursor:pointer;}
+.search-result-card img{width:72px;height:72px;border-radius:12px;object-fit:cover;background:rgba(255,255,255,.05);}
+.search-result-info{min-width:0;display:flex;flex-direction:column;justify-content:center;gap:4px;}
+.search-result-source{font-size:10px;color:rgba(255,255,255,.45);}
+.search-result-title{font-size:13px;font-weight:700;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.search-result-price{font-size:14px;font-weight:800;}
+.search-no-results{padding:30px 10px;text-align:center;color:rgba(255,255,255,.65);line-height:1.6;}
+.search-no-results span{font-size:12px;color:rgba(255,255,255,.4);}
 /* STYLEFLOW FINAL SEARCH / ACTION FIXES */
 .search-platforms{margin:14px 0 18px;}
 .search-platforms-title{margin-bottom:9px;font-size:13px;font-weight:650;color:rgba(255,255,255,.58);}
@@ -1284,12 +1316,23 @@
                 Style<span>Flow</span>
             </div>
 
-            <button
-                class="top-search"
-                onclick="switchTab('search')"
-            >
-                🔎
-            </button>
+            <div class="topbar-actions">
+                <button
+                    class="top-search"
+                    onclick="switchTab('search')"
+                    aria-label="Поиск"
+                >
+                    🔎
+                </button>
+                <button
+                    id="filterButton"
+                    class="top-filter"
+                    onclick="openFilters()"
+                    aria-label="Фильтры"
+                >
+                    ⚙️
+                </button>
+            </div>
         </header>
 
         <main class="feed">
@@ -1390,6 +1433,54 @@
         </main>
 
     </section>
+
+    <!-- =========================
+         FILTERS OVERLAY
+    ========================= -->
+
+    <div
+        id="filtersOverlay"
+        class="filters-overlay"
+        onclick="closeFilters(event)"
+    >
+        <div class="filters-sheet" onclick="event.stopPropagation()">
+            <div class="filters-head">
+                <div>
+                    <div class="filters-title">Фильтры</div>
+                    <div class="filters-subtitle">Настрой, какие товары показывать</div>
+                </div>
+                <button class="filters-close" onclick="closeFilters()">×</button>
+            </div>
+
+            <div class="filter-section">
+                <div class="filter-section-title">Цена</div>
+                <div class="filter-price-row">
+                    <input id="filterMinPrice" class="filter-input" type="number" min="0" placeholder="От">
+                    <input id="filterMaxPrice" class="filter-input" type="number" min="0" placeholder="До">
+                </div>
+            </div>
+
+            <div class="filter-section">
+                <div class="filter-section-title">Площадки</div>
+                <div id="filterSources" class="filter-chips"></div>
+            </div>
+
+            <div class="filter-section">
+                <div class="filter-section-title">Сортировка</div>
+                <select id="filterSort" class="filter-select">
+                    <option value="relevance">По релевантности</option>
+                    <option value="newest">Сначала новые</option>
+                    <option value="price_asc">Цена: по возрастанию</option>
+                    <option value="price_desc">Цена: по убыванию</option>
+                </select>
+            </div>
+
+            <div class="filter-actions">
+                <button class="filter-reset" onclick="resetFilters()">Сбросить</button>
+                <button class="filter-apply" onclick="applyFilters()">Применить</button>
+            </div>
+        </div>
+    </div>
 
     <!-- =========================
          FAVORITES
@@ -3329,14 +3420,12 @@ function applyFilters() {
 function resetFilters() {
 
     activeFilters = {
-
+        query: "",
         minPrice: null,
-
         maxPrice: null,
-
         categories: [],
-
-        sources: []
+        sources: [],
+        sort: "relevance"
     };
 
 
@@ -6745,246 +6834,123 @@ function syncSearchSourceUI() {
     });
 }
 
-function performSearch(
-    query
-) {
-
-    const home =
-        document.getElementById(
-            "searchHome"
-        );
-
-
-    const results =
-        document.getElementById(
-            "searchResults"
-        );
-
-
-    const resultList =
-        document.getElementById(
-            "resultList"
-        );
-
-
-    const resultCount =
-        document.getElementById(
-            "resultCount"
-        );
-
-
-    if (
-        !home ||
-        !results ||
-        !resultList ||
-        !resultCount
-    ) {
-
-        return;
-    }
-
-
-    if (!query) {
-
-        home.style.display =
-            "block";
-
-
-        results.classList.remove(
-            "active"
-        );
-
-
-        return;
-    }
-
-
-    home.style.display =
-        "none";
-
-
-    results.classList.add(
-        "active"
-    );
-
-
-    const normalizedQuery =
-        query
-            .toLowerCase()
-            .trim();
-
-
-    const tokens =
-        normalizedQuery
-            .split(/\s+/)
-            .filter(Boolean);
-
-
-    const filtered =
-        allProducts.filter(
-            product => {
-
-                const searchable = [
-
-                    product.title,
-
-                    product.brand,
-
-                    product.category,
-
-                    product.source,
-
-                    sourceLabel(
-                        product.source
-                    )
-
-                ]
-                    .join(" ")
-                    .toLowerCase();
-
-
-                const queryMatches = tokens.every(
-                    token =>
-                        searchable.includes(
-                            token
-                        )
-                );
-
-                if (!queryMatches) {
-                    return false;
-                }
-
-                if (activeSearchSources.length) {
-                    return activeSearchSources.includes(
-                        normalizeSearchSource(product.source)
-                    );
-                }
-
-                return true;
-            }
-        );
-
-
-    resultCount.textContent =
-        filtered.length === 1
-            ? "Найден 1 товар"
-            : `Найдено товаров: ${filtered.length}`;
-
-
-    resultList.innerHTML = "";
-
-
-    if (
-        !filtered.length
-    ) {
-
-        resultList.innerHTML = `
-
-            <div
-                class="empty"
-                style="
-                    position:relative;
-                    min-height:300px;
-                "
-            >
-
-                <div class="empty-inner">
-
-                    <div class="empty-icon">
-                        🔎
-                    </div>
-
-                    <h2>
-                        Ничего не нашли
-                    </h2>
-
-                    <p>
-                        Попробуй другое название,
-                        бренд или категорию.
-                    </p>
-
-                </div>
-
-            </div>
-
-        `;
-
-
-        return;
-    }
-
-
-    filtered.forEach(
-        product => {
-
-            const card =
-                document.createElement(
-                    "div"
-                );
-
-
-            card.className =
-                "result-card";
-
-
-            card.innerHTML = `
-
-                <img
-                    class="result-image"
-                    src="${escapeAttribute(product.image)}"
-                    alt="${escapeAttribute(product.title)}"
-                >
-
-                <div class="result-info">
-
-                    <div class="result-brand">
-                        ${escapeHTML(
-                            product.brand ||
-                            sourceLabel(
-                                product.source
-                            )
-                        )}
-                    </div>
-
-                    <div class="result-title">
-                        ${escapeHTML(
-                            product.title
-                        )}
-                    </div>
-
-                    <div class="result-price">
-                        ${escapeHTML(
-                            formatPrice(
-                                product
-                            )
-                        )}
-                    </div>
-
-                </div>
-
-            `;
-
-
-            card.onclick =
-                () => {
-
-                    openProductFromObject(
-                        product
-                    );
-                };
-
-
-            resultList.appendChild(
-                card
-            );
+function levenshteinDistance(a, b) {
+    a = String(a || "");
+    b = String(b || "");
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+    const row = Array.from({length: b.length + 1}, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        let prev = row[0];
+        row[0] = i;
+        for (let j = 1; j <= b.length; j++) {
+            const temp = row[j];
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + cost);
+            prev = temp;
         }
+    }
+    return row[b.length];
+}
+
+function searchWordMatches(queryWord, textWord) {
+    if (!queryWord || !textWord) return false;
+    if (textWord.includes(queryWord) || queryWord.includes(textWord)) return true;
+    const len = Math.max(queryWord.length, textWord.length);
+    if (len <= 3) return false;
+    const distance = levenshteinDistance(queryWord, textWord);
+    const allowed = len <= 5 ? 1 : len <= 8 ? 2 : 3;
+    return distance <= allowed;
+}
+
+function searchTokenMatches(token, searchable) {
+    const words = searchable.split(/[^a-zа-яё0-9]+/i).filter(Boolean);
+    if (words.some(word => searchWordMatches(token, word))) return true;
+
+    const aliases = {
+        "айфон": ["iphone", "iphone"],
+        "iphone": ["айфон"],
+        "самсунг": ["samsung"],
+        "samsung": ["самсунг"],
+        "ксяоми": ["xiaomi"],
+        "сяоми": ["xiaomi"],
+        "ноут": ["ноутбук"],
+        "смартфон": ["телефон"],
+        "телефон": ["смартфон"],
+        "авто": ["автомобиль", "машина"],
+        "машина": ["авто", "автомобиль"],
+        "тачка": ["авто", "машина"]
+    };
+    return (aliases[token] || []).some(alias =>
+        searchable.includes(alias) || words.some(word => searchWordMatches(alias, word))
     );
 }
 
+function performSearch(query) {
+    const home = document.getElementById("searchHome");
+    const results = document.getElementById("searchResults");
+    const resultList = document.getElementById("resultList");
+    const resultCount = document.getElementById("resultCount");
+    if (!home || !results || !resultList || !resultCount) return;
 
-/* =========================================================
-PROFILE
-========================================================= */
+    if (!query) {
+        home.style.display = "block";
+        results.classList.remove("active");
+        return;
+    }
+
+    home.style.display = "none";
+    results.classList.add("active");
+
+    const normalizedQuery = query.toLowerCase().trim();
+    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+
+    const filtered = allProducts.filter(product => {
+        const searchable = [
+            product.title, product.brand, product.category,
+            product.description, product.source, sourceLabel(product.source)
+        ].join(" ").toLowerCase();
+
+        const queryMatches = tokens.every(token => searchTokenMatches(token, searchable));
+        if (!queryMatches) return false;
+
+        if (activeSearchSources.length) {
+            return activeSearchSources.includes(normalizeSearchSource(product.source));
+        }
+        return true;
+    });
+
+    filtered.sort((a, b) => {
+        const score = product => tokens.reduce((sum, token) => {
+            const text = [product.title, product.brand, product.category, product.description].join(" ").toLowerCase();
+            if (text.includes(token)) return sum + 3;
+            if (searchTokenMatches(token, text)) return sum + 1;
+            return sum;
+        }, 0);
+        return score(b) - score(a);
+    });
+
+    resultCount.textContent = filtered.length === 1 ? "Найден 1 товар" : `Найдено товаров: ${filtered.length}`;
+    resultList.innerHTML = "";
+    filtered.forEach(product => {
+        const card = document.createElement("div");
+        card.className = "search-result-card";
+        card.innerHTML = `
+            <img src="${escapeAttribute(product.image)}" alt="${escapeAttribute(product.title)}">
+            <div class="search-result-info">
+                <div class="search-result-source">${escapeHTML(sourceLabel(product.source))}</div>
+                <div class="search-result-title">${escapeHTML(product.title)}</div>
+                <div class="search-result-price">${escapeHTML(formatPrice(product))}</div>
+            </div>`;
+        card.onclick = () => openProductFromObject(product);
+        resultList.appendChild(card);
+    });
+
+    if (!filtered.length) {
+        resultList.innerHTML = `<div class="search-no-results">Ничего точного не найдено.<br><span>Попробуй написать чуть иначе — поиск умеет исправлять небольшие опечатки.</span></div>`;
+    }
+}
 
 function updateProfile() {
 
