@@ -1,577 +1,1813 @@
-/* =========================================================
-STYLEFLOW
-Personalized marketplace feed
-
-ЭТАП 4:
-
-1. Новая лента сначала максимально случайная.
-2. Не показываем уже просмотренные товары.
-3. История просмотров хранится на сервере.
-4. История привязана к Telegram user.id.
-5. Постепенно собираем интересы пользователя.
-6. Персонализация усиливается по мере накопления сигналов.
-7. Даже персонализированная лента сохраняет случайные товары.
-8. Не допускаем длинных серий одной категории/площадки.
-9. Учитываем:
-    * категории
-    * бренды
-    * маркетплейсы
-    * цены
-    * лайки
-    * открытия товаров
-    * просмотры
-
-10. Добавлены фильтры:
-    * минимальная цена
-    * максимальная цена
-    * категория
-    * маркетплейс
-
-Фильтры применяются ДО персонализации.
-
-Локальный localStorage используется как кэш,
-а сервер является источником пользовательской истории.
-
-========================================================= */
-
-
-/* =========================================================
-GLOBAL
-========================================================= */
-
 let allProducts = [];
 let products = [];
 let currentIndex = 0;
 let currentProduct = null;
 
-let favorites = loadJSON(
-    "styleflow_favorites",
-    []
-);
-
-let viewedProducts = loadJSON(
-    "styleflow_viewed",
-    []
-);
-
-let openedProducts = loadJSON(
-    "styleflow_opened",
-    []
-);
+let favorites = loadJSON("styleflow_favorites", []);
+let viewedProducts = loadJSON("styleflow_viewed", []);
+let openedProducts = loadJSON("styleflow_opened", []);
 
 let currentTab = "feed";
-
 let touchStartY = 0;
 let touchStartX = 0;
 let isDragging = false;
 let lastTapTime = 0;
 let searchTimer = null;
 
-
-/* =========================================================
-SERVER USER HISTORY
-========================================================= */
-
 let telegramUserId = null;
-
 let userHistoryLoaded = false;
 
+let activeFilters = loadJSON("styleflow_filters", {
+    minPrice: null,
+    maxPrice: null,
+    categories: [],
+    sources: []
+});
 
-/* =========================================================
-FILTERS
-========================================================= */
+const PERSONALIZATION_START = 5;
+const PERSONALIZATION_FULL = 50;
 
-let activeFilters = loadJSON(
-    "styleflow_filters",
+const MIN_RANDOM_RATIO = 0.20;
+const MAX_RANDOM_RATIO = 0.75;
+
+const MAX_SAME_CATEGORY_STREAK = 2;
+const MAX_SAME_SOURCE_STREAK = 3;
+
+const SOURCE_LABELS = {
+    wildberries: "🟣 Wildberries",
+    ozon: "🔵 Ozon",
+    aliexpress: "🟠 AliExpress",
+    kufar: "🟢 Kufar",
+    marketplace: "🛍 Marketplace"
+};
+
+const SOURCE_LIST = [
     {
-        minPrice: null,
-        maxPrice: null,
-        categories: [],
-        sources: []
+        value: "kufar",
+        label: "🟢 Kufar"
+    },
+    {
+        value: "wildberries",
+        label: "🟣 Wildberries"
+    },
+    {
+        value: "ozon",
+        label: "🔵 Ozon"
+    },
+    {
+        value: "aliexpress",
+        label: "🟠 AliExpress"
     }
-);
+];
 
+const CATEGORY_ALIASES = {
+    "одежда": "Одежда",
+    "обувь": "Обувь",
+    "футболка": "Футболки",
+    "футболки": "Футболки",
+    "майка": "Футболки",
+    "худи": "Худи",
+    "толстовка": "Худи",
+    "свитшот": "Худи",
+    "джинсы": "Джинсы",
+    "джинс": "Джинсы",
+    "брюки": "Брюки",
+    "штаны": "Брюки",
+    "куртка": "Куртки",
+    "куртки": "Куртки",
+    "пальто": "Верхняя одежда",
+    "пуховик": "Верхняя одежда",
+    "верхняя одежда": "Верхняя одежда",
+    "платье": "Платья",
+    "платья": "Платья",
+    "юбка": "Юбки",
+    "юбки": "Юбки",
+    "рубашка": "Рубашки",
+    "рубашки": "Рубашки",
+    "сумка": "Сумки",
+    "сумки": "Сумки",
+    "аксессуары": "Аксессуары",
+    "аксессуар": "Аксессуары",
+    "головной убор": "Аксессуары",
+    "кроссовки": "Обувь",
+    "ботинки": "Обувь",
+    "туфли": "Обувь",
+    "сандалии": "Обувь"
+};
 
-/*
-Защита от старого/битого localStorage.
-*/
+function loadJSON(key, fallback) {
+    try {
+        const value = localStorage.getItem(key);
 
-if (
-    !activeFilters ||
-    typeof activeFilters !== "object"
-) {
+        if (!value) {
+            return fallback;
+        }
 
+        const parsed = JSON.parse(value);
+
+        return parsed ?? fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+function saveJSON(key, value) {
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+        // ignore
+    }
+}
+
+function normalizeText(value) {
+    return String(value ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+}
+
+function uniqueArray(array) {
+    return [...new Set(
+        Array.isArray(array)
+            ? array.filter(Boolean)
+            : []
+    )];
+}
+
+function mergeUniqueIds(oldIds, newIds) {
+    return uniqueArray([
+        ...(Array.isArray(oldIds) ? oldIds : []),
+        ...(Array.isArray(newIds) ? newIds : [])
+    ]);
+}
+
+function mergeIds(oldIds, newIds) {
+    return [
+        ...(Array.isArray(oldIds) ? oldIds : []),
+        ...(Array.isArray(newIds) ? newIds : [])
+    ];
+}
+
+function getProductId(product) {
+    return String(
+        product?.id ??
+        product?.product_id ??
+        product?.external_id ??
+        ""
+    );
+}
+
+function getTelegramUserId() {
+    try {
+        const tg = window.Telegram?.WebApp;
+
+        if (!tg) {
+            return null;
+        }
+
+        const user = tg.initDataUnsafe?.user;
+
+        return user?.id
+            ? String(user.id)
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+function detectSource(url = "") {
+    const value = normalizeText(url);
+
+    if (value.includes("wildberries")) {
+        return "wildberries";
+    }
+
+    if (value.includes("ozon")) {
+        return "ozon";
+    }
+
+    if (value.includes("aliexpress")) {
+        return "aliexpress";
+    }
+
+    if (value.includes("kufar")) {
+        return "kufar";
+    }
+
+    return "marketplace";
+}
+
+function normalizeSource(source) {
+    const value = normalizeText(source);
+
+    if (
+        value.includes("wildberries") ||
+        value === "wb"
+    ) {
+        return "wildberries";
+    }
+
+    if (value.includes("ozon")) {
+        return "ozon";
+    }
+
+    if (
+        value.includes("aliexpress") ||
+        value.includes("ali express")
+    ) {
+        return "aliexpress";
+    }
+
+    if (value.includes("kufar")) {
+        return "kufar";
+    }
+
+    return value || "marketplace";
+}
+
+function sourceLabel(source) {
+    return SOURCE_LABELS[
+        normalizeSource(source)
+    ] || "🛍 Marketplace";
+}
+
+function parsePrice(value) {
+    if (
+        value === null ||
+        value === undefined ||
+        value === ""
+    ) {
+        return null;
+    }
+
+    if (typeof value === "number") {
+        return Number.isFinite(value)
+            ? value
+            : null;
+    }
+
+    let text = String(value)
+        .trim()
+        .replace(/\s/g, "")
+        .replace(/[^\d.,-]/g, "");
+
+    if (!text) {
+        return null;
+    }
+
+    const hasComma = text.includes(",");
+    const hasDot = text.includes(".");
+
+    if (hasComma && hasDot) {
+        if (text.lastIndexOf(",") > text.lastIndexOf(".")) {
+            text = text.replace(/\./g, "");
+            text = text.replace(",", ".");
+        } else {
+            text = text.replace(/,/g, "");
+        }
+    } else if (hasComma) {
+        text = text.replace(",", ".");
+    }
+
+    const number = Number(text);
+
+    return Number.isFinite(number)
+        ? number
+        : null;
+}
+
+function detectCurrency(value) {
+    const text = String(value ?? "").toUpperCase();
+
+    if (text.includes("BYN") || text.includes("БИН")) {
+        return "BYN";
+    }
+
+    if (
+        text.includes("RUB") ||
+        text.includes("₽") ||
+        text.includes("РУБ")
+    ) {
+        return "RUB";
+    }
+
+    if (
+        text.includes("USD") ||
+        text.includes("$")
+    ) {
+        return "USD";
+    }
+
+    return "BYN";
+}
+
+function formatPrice(price, currency = "BYN") {
+    if (
+        price === null ||
+        price === undefined ||
+        !Number.isFinite(Number(price))
+    ) {
+        return "—";
+    }
+
+    const symbols = {
+        BYN: "Br",
+        RUB: "₽",
+        USD: "$"
+    };
+
+    return `${Number(price).toLocaleString("ru-RU", {
+        minimumFractionDigits: Number(price) % 1 ? 2 : 0,
+        maximumFractionDigits: 2
+    })} ${symbols[currency] || currency}`;
+}
+
+function inferCategoryFromTitle(title) {
+    const text = normalizeText(title);
+
+    const checks = [
+        ["кроссов", "Обувь"],
+        ["ботин", "Обувь"],
+        ["туфл", "Обувь"],
+        ["сандал", "Обувь"],
+        ["футбол", "Футболки"],
+        ["майк", "Футболки"],
+        ["худи", "Худи"],
+        ["толстов", "Худи"],
+        ["свитшот", "Худи"],
+        ["джинс", "Джинсы"],
+        ["брюк", "Брюки"],
+        ["штан", "Брюки"],
+        ["куртк", "Куртки"],
+        ["пухов", "Верхняя одежда"],
+        ["пальто", "Верхняя одежда"],
+        ["плать", "Платья"],
+        ["юбк", "Юбки"],
+        ["рубаш", "Рубашки"],
+        ["сумк", "Сумки"],
+        ["кошел", "Аксессуары"],
+        ["кепк", "Аксессуары"],
+        ["шапк", "Аксессуары"]
+    ];
+
+    for (const [needle, category] of checks) {
+        if (text.includes(needle)) {
+            return category;
+        }
+    }
+
+    return "Одежда";
+}
+
+function normalizeCategory(value, product = null) {
+    const raw = String(value ?? "").trim();
+
+    if (!raw) {
+        return inferCategoryFromTitle(
+            product?.title || ""
+        );
+    }
+
+    const normalized = normalizeText(raw);
+
+    if (CATEGORY_ALIASES[normalized]) {
+        return CATEGORY_ALIASES[normalized];
+    }
+
+    if (
+        /^\d+$/.test(normalized) ||
+        normalized.length > 40
+    ) {
+        return inferCategoryFromTitle(
+            product?.title || ""
+        );
+    }
+
+    return raw
+        .replace(/\s+/g, " ")
+        .replace(/^./, char => char.toUpperCase());
+}
+
+function normalizeProduct(raw, index = 0) {
+    const sourceRaw =
+        raw?.source ??
+        raw?.marketplace ??
+        raw?.platform ??
+        "";
+
+    const url =
+        raw?.url ??
+        raw?.link ??
+        raw?.product_url ??
+        "";
+
+    const source = normalizeSource(
+        sourceRaw || detectSource(url)
+    );
+
+    const title = String(
+        raw?.title ??
+        raw?.name ??
+        raw?.product_name ??
+        "Без названия"
+    ).trim();
+
+    let image =
+        raw?.image ??
+        raw?.image_url ??
+        raw?.thumbnail ??
+        "";
+
+    if (
+        !image &&
+        Array.isArray(raw?.images) &&
+        raw.images.length
+    ) {
+        image = raw.images[0];
+    }
+
+    if (
+        image &&
+        typeof image === "object"
+    ) {
+        image =
+            image.url ??
+            image.src ??
+            image.link ??
+            "";
+    }
+
+    const price = parsePrice(
+        raw?.price ??
+        raw?.current_price ??
+        raw?.sale_price
+    );
+
+    const oldPrice = parsePrice(
+        raw?.old_price ??
+        raw?.oldPrice ??
+        raw?.original_price
+    );
+
+    const currency = detectCurrency(
+        raw?.currency ??
+        raw?.price_currency ??
+        raw?.price
+    );
+
+    const category = normalizeCategory(
+        raw?.category ??
+        raw?.category_name ??
+        raw?.categoryName ??
+        raw?.category_title ??
+        "",
+        {
+            title
+        }
+    );
+
+    const brand = String(
+        raw?.brand ??
+        raw?.brand_name ??
+        ""
+    ).trim();
+
+    const rating = Number(
+        raw?.rating ??
+        raw?.stars ??
+        0
+    ) || 0;
+
+    const id = String(
+        raw?.id ??
+        raw?.product_id ??
+        raw?.external_id ??
+        `${source}_${index}_${normalizeText(title)}`
+    );
+
+    return {
+        id,
+        external_id:
+            raw?.external_id ??
+            raw?.product_id ??
+            null,
+
+        title,
+        brand,
+        category,
+        source,
+
+        image:
+            image ||
+            "https://via.placeholder.com/800x1000?text=StyleFlow",
+
+        images:
+            Array.isArray(raw?.images)
+                ? raw.images
+                : image
+                    ? [image]
+                    : [],
+
+        url: String(url || ""),
+        price,
+        oldPrice,
+        currency,
+        rating,
+
+        raw
+    };
+}
+
+function sanitizeActiveFilters() {
+    if (!activeFilters || typeof activeFilters !== "object") {
+        activeFilters = {
+            minPrice: null,
+            maxPrice: null,
+            categories: [],
+            sources: []
+        };
+    }
+
+    activeFilters.categories = uniqueArray(
+        activeFilters.categories
+    );
+
+    activeFilters.sources = uniqueArray(
+        activeFilters.sources
+    );
+
+    if (
+        activeFilters.minPrice !== null &&
+        !Number.isFinite(Number(activeFilters.minPrice))
+    ) {
+        activeFilters.minPrice = null;
+    }
+
+    if (
+        activeFilters.maxPrice !== null &&
+        !Number.isFinite(Number(activeFilters.maxPrice))
+    ) {
+        activeFilters.maxPrice = null;
+    }
+}
+
+sanitizeActiveFilters();
+
+function getActiveFilterCount() {
+    let count = 0;
+
+    if (
+        activeFilters.minPrice !== null &&
+        activeFilters.minPrice !== ""
+    ) {
+        count++;
+    }
+
+    if (
+        activeFilters.maxPrice !== null &&
+        activeFilters.maxPrice !== ""
+    ) {
+        count++;
+    }
+
+    count += activeFilters.categories.length;
+    count += activeFilters.sources.length;
+
+    return count;
+}
+
+function updateFilterButton() {
+    const button = document.getElementById("filterButton");
+    const badge = document.getElementById("filterBadge");
+
+    const count = getActiveFilterCount();
+
+    if (button) {
+        button.classList.toggle(
+            "active",
+            count > 0
+        );
+    }
+
+    if (badge) {
+        badge.textContent = count > 9
+            ? "9+"
+            : String(count);
+
+        badge.classList.toggle(
+            "show",
+            count > 0
+        );
+    }
+}
+
+function openFilters() {
+    const overlay =
+        document.getElementById("filtersOverlay");
+
+    if (!overlay) {
+        return;
+    }
+
+    syncFilterUI();
+
+    overlay.classList.add("show");
+}
+
+function closeFilters(event) {
+    if (
+        event &&
+        event.target &&
+        event.target.id !== "filtersOverlay"
+    ) {
+        return;
+    }
+
+    const overlay =
+        document.getElementById("filtersOverlay");
+
+    overlay?.classList.remove("show");
+}
+
+function toggleFilterChip(button) {
+    if (!button) {
+        return;
+    }
+
+    const container = button.parentElement;
+
+    if (!container) {
+        return;
+    }
+
+    const isAll =
+        button.dataset.category === "__all__" ||
+        button.dataset.source === "__all__";
+
+    if (isAll) {
+        container
+            .querySelectorAll(".filter-chip")
+            .forEach(chip => {
+                chip.classList.remove("active");
+            });
+
+        button.classList.add("active");
+        return;
+    }
+
+    const allButton =
+        container.querySelector(
+            '.filter-chip[data-category="__all__"], .filter-chip[data-source="__all__"]'
+        );
+
+    allButton?.classList.remove("active");
+
+    button.classList.toggle("active");
+
+    const selected =
+        container.querySelectorAll(
+            ".filter-chip.active"
+        );
+
+    if (!selected.length && allButton) {
+        allButton.classList.add("active");
+    }
+}
+
+function populateFilterCategories() {
+    const container =
+        document.getElementById("filterCategories");
+
+    if (!container) {
+        return;
+    }
+
+    const categories = new Map();
+
+    for (const product of allProducts) {
+        const category = normalizeCategory(
+            product.category,
+            product
+        );
+
+        if (!category) {
+            continue;
+        }
+
+        const key = normalizeText(category);
+
+        if (!categories.has(key)) {
+            categories.set(key, category);
+        }
+    }
+
+    const sortedCategories =
+        [...categories.values()]
+            .sort((a, b) =>
+                a.localeCompare(
+                    b,
+                    "ru",
+                    { sensitivity: "base" }
+                )
+            );
+
+    activeFilters.categories =
+        activeFilters.categories.filter(
+            selected =>
+                sortedCategories.some(
+                    category =>
+                        normalizeText(category) ===
+                        normalizeText(selected)
+                )
+        );
+
+    container.innerHTML = "";
+
+    const allButton =
+        document.createElement("button");
+
+    allButton.type = "button";
+    allButton.className = "filter-chip";
+    allButton.dataset.category = "__all__";
+    allButton.textContent = "Все";
+
+    allButton.onclick = function () {
+        toggleFilterChip(this);
+    };
+
+    container.appendChild(allButton);
+
+    for (const category of sortedCategories) {
+        const button =
+            document.createElement("button");
+
+        button.type = "button";
+        button.className = "filter-chip";
+        button.dataset.category = category;
+        button.textContent = category;
+
+        button.onclick = function () {
+            toggleFilterChip(this);
+        };
+
+        container.appendChild(button);
+    }
+
+    syncCategoryFilterUI();
+}
+
+function populateFilterSources() {
+    const container =
+        document.getElementById("filterSources");
+
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = "";
+
+    const allButton =
+        document.createElement("button");
+
+    allButton.type = "button";
+    allButton.className = "filter-chip";
+    allButton.dataset.source = "__all__";
+    allButton.textContent = "Все";
+
+    allButton.onclick = function () {
+        toggleFilterChip(this);
+    };
+
+    container.appendChild(allButton);
+
+    for (const source of SOURCE_LIST) {
+        const button =
+            document.createElement("button");
+
+        button.type = "button";
+        button.className = "filter-chip";
+        button.dataset.source = source.value;
+        button.textContent = source.label;
+
+        button.onclick = function () {
+            toggleFilterChip(this);
+        };
+
+        container.appendChild(button);
+    }
+
+    syncSourceFilterUI();
+}
+
+function syncCategoryFilterUI() {
+    const container =
+        document.getElementById("filterCategories");
+
+    if (!container) {
+        return;
+    }
+
+    const chips =
+        container.querySelectorAll(
+            ".filter-chip"
+        );
+
+    let activeCount = 0;
+
+    chips.forEach(chip => {
+        const category =
+            chip.dataset.category;
+
+        if (category === "__all__") {
+            return;
+        }
+
+        const selected =
+            activeFilters.categories.some(
+                value =>
+                    normalizeText(value) ===
+                    normalizeText(category)
+            );
+
+        chip.classList.toggle(
+            "active",
+            selected
+        );
+
+        if (selected) {
+            activeCount++;
+        }
+    });
+
+    const all =
+        container.querySelector(
+            '.filter-chip[data-category="__all__"]'
+        );
+
+    all?.classList.toggle(
+        "active",
+        activeCount === 0
+    );
+}
+
+function syncSourceFilterUI() {
+    const container =
+        document.getElementById("filterSources");
+
+    if (!container) {
+        return;
+    }
+
+    const chips =
+        container.querySelectorAll(
+            ".filter-chip"
+        );
+
+    let activeCount = 0;
+
+    chips.forEach(chip => {
+        const source =
+            chip.dataset.source;
+
+        if (source === "__all__") {
+            return;
+        }
+
+        const selected =
+            activeFilters.sources.some(
+                value =>
+                    normalizeSource(value) ===
+                    normalizeSource(source)
+            );
+
+        chip.classList.toggle(
+            "active",
+            selected
+        );
+
+        if (selected) {
+            activeCount++;
+        }
+    });
+
+    const all =
+        container.querySelector(
+            '.filter-chip[data-source="__all__"]'
+        );
+
+    all?.classList.toggle(
+        "active",
+        activeCount === 0
+    );
+}
+
+function syncFilterUI() {
+    sanitizeActiveFilters();
+
+    const min =
+        document.getElementById("filterMinPrice");
+
+    const max =
+        document.getElementById("filterMaxPrice");
+
+    if (min) {
+        min.value =
+            activeFilters.minPrice ?? "";
+    }
+
+    if (max) {
+        max.value =
+            activeFilters.maxPrice ?? "";
+    }
+
+    populateFilterCategories();
+    populateFilterSources();
+
+    updateFilterButton();
+}
+
+function resetFilters() {
     activeFilters = {
         minPrice: null,
         maxPrice: null,
         categories: [],
         sources: []
     };
+
+    saveJSON(
+        "styleflow_filters",
+        activeFilters
+    );
+
+    syncFilterUI();
+
+    buildPersonalizedFeed();
+
+    closeFilters();
+
+    showToast("Фильтры сброшены");
 }
 
+function applyFilters() {
+    const minInput =
+        document.getElementById("filterMinPrice");
 
-if (
-    !Array.isArray(
-        activeFilters.categories
-    )
-) {
+    const maxInput =
+        document.getElementById("filterMaxPrice");
 
-    activeFilters.categories = [];
-}
+    let minPrice =
+        parsePrice(minInput?.value);
 
+    let maxPrice =
+        parsePrice(maxInput?.value);
 
-if (
-    !Array.isArray(
-        activeFilters.sources
-    )
-) {
+    if (
+        minPrice !== null &&
+        maxPrice !== null &&
+        minPrice > maxPrice
+    ) {
+        [minPrice, maxPrice] =
+            [maxPrice, minPrice];
+    }
 
-    activeFilters.sources = [];
-}
-
-
-/* =========================================================
-RECOMMENDATION SETTINGS
-========================================================= */
-
-const PERSONALIZATION_START =
-    5;
-
-const PERSONALIZATION_FULL =
-    50;
-
-
-const MIN_RANDOM_RATIO =
-    0.20;
-
-const MAX_RANDOM_RATIO =
-    0.75;
-
-
-const MAX_SAME_CATEGORY_STREAK =
-    2;
-
-const MAX_SAME_SOURCE_STREAK =
-    3;
-
-
-/* =========================================================
-TELEGRAM
-========================================================= */
-
-if (
-    window.Telegram &&
-    Telegram.WebApp
-) {
-
-    Telegram.WebApp.ready();
-
-    Telegram.WebApp.expand();
-
-    try {
-
-        Telegram.WebApp.setHeaderColor(
-            "#09090d"
+    const categoryChips =
+        document.querySelectorAll(
+            "#filterCategories .filter-chip.active"
         );
 
-        Telegram.WebApp.setBackgroundColor(
-            "#09090d"
+    const sourceChips =
+        document.querySelectorAll(
+            "#filterSources .filter-chip.active"
         );
 
-    } catch (e) {}
-}
+    const categories = [];
 
-
-/* =========================================================
-GET TELEGRAM USER ID
-========================================================= */
-
-function getTelegramUserId() {
-
-    try {
+    categoryChips.forEach(chip => {
+        const value =
+            chip.dataset.category;
 
         if (
-            window.Telegram &&
-            Telegram.WebApp &&
-            Telegram.WebApp.initDataUnsafe &&
-            Telegram.WebApp.initDataUnsafe.user
+            value &&
+            value !== "__all__"
         ) {
+            categories.push(value);
+        }
+    });
 
-            return String(
-                Telegram.WebApp
-                    .initDataUnsafe
-                    .user
-                    .id
+    const sources = [];
+
+    sourceChips.forEach(chip => {
+        const value =
+            chip.dataset.source;
+
+        if (
+            value &&
+            value !== "__all__"
+        ) {
+            sources.push(
+                normalizeSource(value)
             );
         }
+    });
 
-    } catch (error) {
+    activeFilters = {
+        minPrice,
+        maxPrice,
+        categories: uniqueArray(categories),
+        sources: uniqueArray(sources)
+    };
 
-        console.error(
-            "[StyleFlow] Ошибка получения Telegram user.id:",
-            error
+    saveJSON(
+        "styleflow_filters",
+        activeFilters
+    );
+
+    currentIndex = 0;
+
+    buildPersonalizedFeed();
+
+    updateFilterButton();
+
+    closeFilters();
+
+    const resultCount =
+        applyProductFilters(allProducts).length;
+
+    if (!resultCount) {
+        showToast(
+            "По этим фильтрам товаров нет"
+        );
+    } else {
+        showToast(
+            `Найдено товаров: ${resultCount}`
         );
     }
-
-
-    return "";
 }
 
-
-/* =========================================================
-START
-========================================================= */
-
-document.addEventListener(
-    "DOMContentLoaded",
-    async () => {
-
-        setupSearch();
-
-        setupSwipe();
-
-
-        telegramUserId =
-            getTelegramUserId();
-
-
-        console.log(
-            "[StyleFlow] Telegram user ID:",
-            telegramUserId || "не найден"
-        );
-
-
-        /*
-        Сначала история.
-        */
-
-        await loadUserHistory();
-
-
-        /*
-        Потом каталог.
-        */
-
-        await loadFeed();
-
-
-        /*
-        Обновляем профиль.
-        */
-
-        updateProfile();
+function applyProductFilters(source) {
+    if (!Array.isArray(source)) {
+        return [];
     }
-);
 
+    return source.filter(product => {
+        const price =
+            Number(product.price);
 
-/* =========================================================
-LOAD USER HISTORY
-========================================================= */
+        if (
+            activeFilters.minPrice !== null &&
+            (
+                !Number.isFinite(price) ||
+                price < Number(activeFilters.minPrice)
+            )
+        ) {
+            return false;
+        }
+
+        if (
+            activeFilters.maxPrice !== null &&
+            (
+                !Number.isFinite(price) ||
+                price > Number(activeFilters.maxPrice)
+            )
+        ) {
+            return false;
+        }
+
+        if (
+            activeFilters.categories.length
+        ) {
+            const productCategory =
+                normalizeText(
+                    normalizeCategory(
+                        product.category,
+                        product
+                    )
+                );
+
+            const matchesCategory =
+                activeFilters.categories.some(
+                    category =>
+                        productCategory ===
+                        normalizeText(category)
+                );
+
+            if (!matchesCategory) {
+                return false;
+            }
+        }
+
+        if (
+            activeFilters.sources.length
+        ) {
+            const productSource =
+                normalizeSource(
+                    product.source
+                );
+
+            const matchesSource =
+                activeFilters.sources.some(
+                    source =>
+                        productSource ===
+                        normalizeSource(source)
+                );
+
+            if (!matchesSource) {
+                return false;
+            }
+        }
+
+        return true;
+    });
+}
 
 async function loadUserHistory() {
-
     if (!telegramUserId) {
-
-        console.log(
-            "[StyleFlow] Telegram user.id не найден. Используем localStorage."
-        );
-
-
-        userHistoryLoaded = true;
-
         return;
     }
 
-
     try {
-
         const response =
             await fetch(
                 `/api/user/history?user_id=${encodeURIComponent(
                     telegramUserId
-                )}`,
-                {
-                    cache: "no-store"
-                }
+                )}`
             );
-
 
         if (!response.ok) {
-
-            throw new Error(
-                `History request failed: ${response.status}`
-            );
+            return;
         }
-
 
         const data =
             await response.json();
 
+        if (data?.status !== "ok") {
+            return;
+        }
 
-        console.log(
-            "[StyleFlow] История сервера:",
-            data
-        );
-
-
-        if (
-            data &&
-            data.status === "ok"
-        ) {
-
+        if (Array.isArray(data.viewed)) {
             viewedProducts =
                 mergeUniqueIds(
                     viewedProducts,
-                    Array.isArray(
-                        data.viewed
-                    )
-                        ? data.viewed
-                        : []
-                );
-
-
-            openedProducts =
-                mergeIds(
-                    openedProducts,
-                    Array.isArray(
-                        data.opened
-                    )
-                        ? data.opened
-                        : []
-                );
-
-
-            if (
-                viewedProducts.length >
-                500
-            ) {
-
-                viewedProducts =
-                    viewedProducts.slice(
-                        -500
-                    );
-            }
-
-
-            if (
-                openedProducts.length >
-                500
-            ) {
-
-                openedProducts =
-                    openedProducts.slice(
-                        -500
-                    );
-            }
-
+                    data.viewed
+                ).slice(-500);
 
             saveJSON(
                 "styleflow_viewed",
                 viewedProducts
             );
+        }
 
+        if (Array.isArray(data.opened)) {
+            openedProducts =
+                mergeIds(
+                    openedProducts,
+                    data.opened
+                ).slice(-500);
 
             saveJSON(
                 "styleflow_opened",
                 openedProducts
             );
-
-
-            console.log(
-                "[StyleFlow] История объединена.",
-                "Viewed:",
-                viewedProducts.length,
-                "Opened:",
-                openedProducts.length
-            );
         }
 
-
         userHistoryLoaded = true;
-
-    } catch (error) {
-
-        console.error(
-            "[StyleFlow] Ошибка загрузки истории:",
-            error
-        );
-
-
-        userHistoryLoaded = true;
+    } catch {
+        // local history remains usable
     }
 }
-
-
-/* =========================================================
-MERGE UNIQUE IDS
-========================================================= */
-
-function mergeUniqueIds(
-    existing,
-    incoming
-) {
-
-    const result = [];
-
-    const seen =
-        new Set();
-
-
-    [
-        ...(Array.isArray(existing)
-            ? existing
-            : []),
-
-        ...(Array.isArray(incoming)
-            ? incoming
-            : [])
-    ].forEach(
-        id => {
-
-            const normalized =
-                String(id);
-
-
-            if (
-                !seen.has(
-                    normalized
-                )
-            ) {
-
-                seen.add(
-                    normalized
-                );
-
-                result.push(
-                    normalized
-                );
-            }
-        }
-    );
-
-
-    return result;
-}
-
-
-/* =========================================================
-MERGE IDS
-========================================================= */
-
-function mergeIds(
-    existing,
-    incoming
-) {
-
-    const result = [];
-
-
-    [
-        ...(Array.isArray(existing)
-            ? existing
-            : []),
-
-        ...(Array.isArray(incoming)
-            ? incoming
-            : [])
-    ].forEach(
-        id => {
-
-            result.push(
-                String(id)
-            );
-        }
-    );
-
-
-    return result;
-}
-
-
-/* =========================================================
-SYNC USER ACTION
-========================================================= */
 
 async function syncUserAction(
     action,
     productId
 ) {
-
     if (
         !telegramUserId ||
         !productId
     ) {
-
         return;
     }
-
-
-    let endpoint;
-
-
-    if (
-        action === "view"
-    ) {
-
-        endpoint =
-            "/api/user/view";
-
-    } else if (
-        action === "open"
-    ) {
-
-        endpoint =
-            "/api/user/open";
-
-    } else {
-
-        return;
-    }
-
 
     try {
-
         await fetch(
-            endpoint,
+            `/api/user/${action}`,
             {
                 method: "POST",
-
                 headers: {
-                    "Content-Type":
-                        "application/json"
+                    "Content-Type": "application/json"
                 },
-
                 body: JSON.stringify({
-
-                    user_id:
-                        telegramUserId,
-
-                    product_id:
-                        String(
-                            productId
-                        )
+                    user_id: telegramUserId,
+                    product_id: String(productId)
                 })
             }
         );
-
-    } catch (error) {
-
-        console.error(
-            `[StyleFlow] Ошибка синхронизации ${action}:`,
-            error
-        );
+    } catch {
+        // local state remains source of truth on failure
     }
 }
 
+function registerView(product) {
+    if (!product) {
+        return;
+    }
 
-/* =========================================================
-LOAD FEED
-========================================================= */
+    const id =
+        getProductId(product);
+
+    if (!id) {
+        return;
+    }
+
+    if (!viewedProducts.includes(id)) {
+        viewedProducts.push(id);
+
+        if (viewedProducts.length > 500) {
+            viewedProducts =
+                viewedProducts.slice(-500);
+        }
+
+        saveJSON(
+            "styleflow_viewed",
+            viewedProducts
+        );
+
+        syncUserAction(
+            "view",
+            id
+        );
+    }
+
+    updateProfile();
+}
+
+function registerOpen(product) {
+    if (!product) {
+        return;
+    }
+
+    const id =
+        getProductId(product);
+
+    if (!id) {
+        return;
+    }
+
+    openedProducts.push(id);
+
+    if (openedProducts.length > 500) {
+        openedProducts =
+            openedProducts.slice(-500);
+    }
+
+    saveJSON(
+        "styleflow_opened",
+        openedProducts
+    );
+
+    syncUserAction(
+        "open",
+        id
+    );
+
+    rebuildFeedAfterSignal();
+}
+
+function rebuildFeedAfterSignal() {
+    const currentId =
+        getProductId(currentProduct);
+
+    buildPersonalizedFeed();
+
+    if (
+        currentId &&
+        products.length
+    ) {
+        const index =
+            products.findIndex(
+                product =>
+                    getProductId(product) ===
+                    currentId
+            );
+
+        if (index >= 0) {
+            currentIndex = index;
+            renderCurrentProduct();
+        }
+    }
+}
+
+function getSignalCount() {
+    return (
+        viewedProducts.length +
+        openedProducts.length +
+        favorites.length
+    );
+}
+
+function getPersonalizationStrength() {
+    const count =
+        getSignalCount();
+
+    if (count <= PERSONALIZATION_START) {
+        return 0;
+    }
+
+    return Math.min(
+        1,
+        (
+            count - PERSONALIZATION_START
+        ) /
+        (
+            PERSONALIZATION_FULL -
+            PERSONALIZATION_START
+        )
+    );
+}
+
+function buildUserProfile() {
+    const profile = {
+        categories: {},
+        brands: {},
+        sources: {},
+        prices: [],
+        totalSignals: 0
+    };
+
+    function addSignal(
+        product,
+        weight
+    ) {
+        if (!product) {
+            return;
+        }
+
+        const category =
+            normalizeCategory(
+                product.category,
+                product
+            );
+
+        const brand =
+            normalizeText(
+                product.brand
+            );
+
+        const source =
+            normalizeSource(
+                product.source
+            );
+
+        if (category) {
+            profile.categories[category] =
+                (
+                    profile.categories[category] ||
+                    0
+                ) + weight;
+        }
+
+        if (brand) {
+            profile.brands[brand] =
+                (
+                    profile.brands[brand] ||
+                    0
+                ) + weight;
+        }
+
+        if (source) {
+            profile.sources[source] =
+                (
+                    profile.sources[source] ||
+                    0
+                ) + weight;
+        }
+
+        if (
+            Number.isFinite(
+                Number(product.price)
+            )
+        ) {
+            profile.prices.push({
+                value: Number(product.price),
+                weight
+            });
+        }
+
+        profile.totalSignals += weight;
+    }
+
+    for (const id of viewedProducts) {
+        const product =
+            findProductById(id);
+
+        if (product) {
+            addSignal(product, 1);
+        }
+    }
+
+    for (const id of openedProducts) {
+        const product =
+            findProductById(id);
+
+        if (product) {
+            addSignal(product, 3);
+        }
+    }
+
+    for (const id of favorites) {
+        const product =
+            findProductById(id);
+
+        if (product) {
+            addSignal(product, 6);
+        }
+    }
+
+    return profile;
+}
+
+function weightedAveragePrice(
+    profile
+) {
+    if (!profile.prices.length) {
+        return null;
+    }
+
+    let total = 0;
+    let weight = 0;
+
+    for (const item of profile.prices) {
+        total += item.value * item.weight;
+        weight += item.weight;
+    }
+
+    return weight
+        ? total / weight
+        : null;
+}
+
+function scoreProduct(
+    product,
+    profile
+) {
+    let score = 0;
+
+    const category =
+        normalizeCategory(
+            product.category,
+            product
+        );
+
+    const categoryKey =
+        Object.keys(
+            profile.categories
+        ).find(
+            key =>
+                normalizeText(key) ===
+                normalizeText(category)
+        );
+
+    if (categoryKey) {
+        score +=
+            profile.categories[categoryKey] *
+            5;
+    }
+
+    const brand =
+        normalizeText(
+            product.brand
+        );
+
+    if (
+        brand &&
+        profile.brands[brand]
+    ) {
+        score +=
+            profile.brands[brand] *
+            7;
+    }
+
+    const source =
+        normalizeSource(
+            product.source
+        );
+
+    if (
+        source &&
+        profile.sources[source]
+    ) {
+        score +=
+            profile.sources[source] *
+            2;
+    }
+
+    const averagePrice =
+        weightedAveragePrice(
+            profile
+        );
+
+    if (
+        averagePrice !== null &&
+        Number.isFinite(
+            Number(product.price)
+        )
+    ) {
+        const price =
+            Number(product.price);
+
+        const difference =
+            Math.abs(
+                price - averagePrice
+            ) /
+            Math.max(
+                averagePrice,
+                1
+            );
+
+        if (difference <= 0.10) {
+            score += 12;
+        } else if (difference <= 0.25) {
+            score += 7;
+        } else if (difference <= 0.50) {
+            score += 3;
+        }
+    }
+
+    score += Math.random() * 4;
+
+    return score;
+}
+
+function shuffle(array) {
+    const result =
+        [...array];
+
+    for (
+        let i = result.length - 1;
+        i > 0;
+        i--
+    ) {
+        const j =
+            Math.floor(
+                Math.random() * (i + 1)
+            );
+
+        [
+            result[i],
+            result[j]
+        ] = [
+            result[j],
+            result[i]
+        ];
+    }
+
+    return result;
+}
+
+function buildDiverseFeed(
+    candidates,
+    profile,
+    strength
+) {
+    if (!candidates.length) {
+        return [];
+    }
+
+    const scored =
+        candidates.map(
+            product => ({
+                product,
+                score:
+                    scoreProduct(
+                        product,
+                        profile
+                    )
+            })
+        );
+
+    scored.sort(
+        (a, b) =>
+            b.score - a.score
+    );
+
+    const randomRatio =
+        MIN_RANDOM_RATIO +
+        (
+            MAX_RANDOM_RATIO -
+            MIN_RANDOM_RATIO
+        ) *
+        (1 - strength);
+
+    const randomCount =
+        Math.floor(
+            scored.length *
+            randomRatio
+        );
+
+    const randomProducts =
+        shuffle(
+            scored
+                .slice()
+                .sort(
+                    () => Math.random() - .5
+                )
+        )
+            .slice(0, randomCount)
+            .map(item => item.product);
+
+    const randomIds =
+        new Set(
+            randomProducts.map(
+                getProductId
+            )
+        );
+
+    const personalizedProducts =
+        scored
+            .filter(
+                item =>
+                    !randomIds.has(
+                        getProductId(
+                            item.product
+                        )
+                    )
+            )
+            .map(
+                item => item.product
+            );
+
+    let pool =
+        shuffle(randomProducts);
+
+    pool.push(
+        ...personalizedProducts
+    );
+
+    const result = [];
+
+    let previousCategory = "";
+    let previousSource = "";
+    let categoryStreak = 0;
+    let sourceStreak = 0;
+
+    while (pool.length) {
+        let selectedIndex = -1;
+
+        for (
+            let i = 0;
+            i < pool.length;
+            i++
+        ) {
+            const item =
+                pool[i];
+
+            const category =
+                normalizeText(
+                    normalizeCategory(
+                        item.category,
+                        item
+                    )
+                );
+
+            const source =
+                normalizeSource(
+                    item.source
+                );
+
+            const categoryBlocked =
+                category &&
+                category === previousCategory &&
+                categoryStreak >=
+                    MAX_SAME_CATEGORY_STREAK;
+
+            const sourceBlocked =
+                source &&
+                source === previousSource &&
+                sourceStreak >=
+                    MAX_SAME_SOURCE_STREAK;
+
+            if (
+                !categoryBlocked &&
+                !sourceBlocked
+            ) {
+                selectedIndex = i;
+                break;
+            }
+        }
+
+        if (selectedIndex < 0) {
+            selectedIndex = 0;
+        }
+
+        const [selected] =
+            pool.splice(
+                selectedIndex,
+                1
+            );
+
+        result.push(selected);
+
+        const category =
+            normalizeText(
+                normalizeCategory(
+                    selected.category,
+                    selected
+                )
+            );
+
+        const source =
+            normalizeSource(
+                selected.source
+            );
+
+        if (
+            category === previousCategory
+        ) {
+            categoryStreak++;
+        } else {
+            previousCategory =
+                category;
+            categoryStreak = 1;
+        }
+
+        if (
+            source === previousSource
+        ) {
+            sourceStreak++;
+        } else {
+            previousSource =
+                source;
+            sourceStreak = 1;
+        }
+    }
+
+    return result;
+}
+
+function buildPersonalizedFeed() {
+    const filtered =
+        applyProductFilters(
+            allProducts
+        );
+
+    const viewedSet =
+        new Set(
+            viewedProducts.map(String)
+        );
+
+    const unseen =
+        filtered.filter(
+            product =>
+                !viewedSet.has(
+                    getProductId(product)
+                )
+        );
+
+    if (!unseen.length) {
+        products = [];
+        currentIndex = 0;
+        currentProduct = null;
+        showEmptyFeed();
+        return;
+    }
+
+    const profile =
+        buildUserProfile();
+
+    const strength =
+        getPersonalizationStrength();
+
+    products =
+        strength === 0
+            ? buildDiverseFeed(
+                unseen,
+                profile,
+                0
+            )
+            : buildDiverseFeed(
+                unseen,
+                profile,
+                strength
+            );
+
+    currentIndex = 0;
+
+    hideEmptyFeed();
+    renderCurrentProduct();
+}
+
+function findProductById(id) {
+    const wanted =
+        String(id);
+
+    return allProducts.find(
+        product =>
+            getProductId(product) ===
+            wanted
+    );
+}
 
 async function loadFeed() {
-
     try {
-
         const response =
             await fetch(
                 "/api/feed",
@@ -580,112 +1816,49 @@ async function loadFeed() {
                 }
             );
 
-
         if (!response.ok) {
-
             throw new Error(
-                "Feed request failed"
+                `HTTP ${response.status}`
             );
         }
-
 
         const data =
             await response.json();
 
-
-        console.log(
-            "[StyleFlow] Feed response:",
-            data
-        );
-
-
         const rawProducts =
             Array.isArray(data)
                 ? data
-                : Array.isArray(data.products)
+                : Array.isArray(data?.products)
                     ? data.products
-                    : Array.isArray(data.items)
+                    : Array.isArray(data?.items)
                         ? data.items
-                        : [];
-
-
-        console.log(
-            "[StyleFlow] Получено товаров:",
-            rawProducts.length
-        );
-
+                        : Array.isArray(data?.data)
+                            ? data.data
+                            : [];
 
         allProducts =
             rawProducts.map(
-                normalizeProduct
+                (product, index) =>
+                    normalizeProduct(
+                        product,
+                        index
+                    )
             );
 
-
-        console.log(
-            "[StyleFlow] Нормализовано товаров:",
-            allProducts.length
-        );
-
-
-        if (
-            allProducts.length > 0
-        ) {
-
-            console.log(
-                "[StyleFlow] Первый товар:",
-                allProducts[0]
-            );
-        }
-
-
-        localStorage.setItem(
+        saveJSON(
             "styleflow_main_feed",
-            JSON.stringify(
-                allProducts
-            )
+            allProducts
         );
-
-
-        /*
-        Обновляем категории
-        фильтров после загрузки каталога.
-        */
 
         populateFilterCategories();
-
-
-        /*
-        Строим ленту.
-
-        Фильтры применятся внутри
-        buildPersonalizedFeed().
-        */
+        populateFilterSources();
 
         buildPersonalizedFeed();
-
-
-        currentIndex = 0;
-
-
-        if (
-            products.length > 0
-        ) {
-
-            showProduct();
-
-        } else {
-
-            showEmptyFeed();
-        }
-
-
     } catch (error) {
-
         console.error(
-            "[StyleFlow] Feed error:",
+            "STYLEFLOW feed error:",
             error
         );
-
 
         const cached =
             loadJSON(
@@ -693,3644 +1866,645 @@ async function loadFeed() {
                 []
             );
 
+        allProducts =
+            Array.isArray(cached)
+                ? cached.map(
+                    (product, index) =>
+                        normalizeProduct(
+                            product,
+                            index
+                        )
+                )
+                : [];
 
-        if (
-            cached.length > 0
-        ) {
+        populateFilterCategories();
+        populateFilterSources();
 
-            allProducts =
-                cached.map(
-                    normalizeProduct
-                );
+        buildPersonalizedFeed();
 
-
-            populateFilterCategories();
-
-
-            buildPersonalizedFeed();
-
-
-            currentIndex = 0;
-
-
-            if (
-                products.length > 0
-            ) {
-
-                showProduct();
-
-            } else {
-
-                showEmptyFeed();
-            }
-
-
-            showToast(
-                "Показана последняя сохранённая лента"
-            );
-
-
-        } else {
-
+        if (!allProducts.length) {
             showEmptyFeed();
         }
     }
 }
 
-
-/* =========================================================
-NORMALIZE PRODUCT
-========================================================= */
-
-function normalizeProduct(
-    item,
-    index = 0
-) {
-
-    const source =
-        item.source ||
-        item.marketplace ||
-        item.platform ||
-        detectSource(
-            item.url ||
-            item.link ||
-            ""
-        );
-
-
-    const title =
-        item.title ||
-        item.name ||
-        item.product_name ||
-        "Товар";
-
-
-    const image =
-        item.image ||
-        item.image_url ||
-        item.thumbnail ||
-        (
-            Array.isArray(item.images)
-                ? item.images[0]
-                : ""
-        ) ||
-        "https://via.placeholder.com/600x800?text=StyleFlow";
-
-
-    const url =
-        item.url ||
-        item.link ||
-        item.product_url ||
-        "#";
-
-
-    const price =
-        parsePrice(
-            item.price ??
-            item.current_price ??
-            item.sale_price
-        );
-
-
-    const oldPrice =
-        parsePrice(
-            item.old_price ??
-            item.oldPrice ??
-            item.original_price
-        );
-
-
-    const rating =
-        item.rating ??
-        item.stars ??
-        "";
-
-
-    const brand =
-        item.brand ||
-        item.vendor ||
-        "";
-
-
-    const category =
-        item.category ||
-        item.type ||
-        "Одежда";
-
-
-    const id =
-        String(
-            item.id ??
-            item.product_id ??
-            item.external_id ??
-            `${source}_${index}_${title}`
-        );
-
-
-    return {
-
-        id,
-
-        source:
-            normalizeSource(
-                source
-            ),
-
-        external_id:
-            String(
-                item.external_id ??
-                item.product_id ??
-                item.id ??
-                ""
-            ),
-
-        title,
-
-        brand,
-
-        category,
-
-        price,
-
-        oldPrice,
-
-        currency:
-            item.currency ||
-            detectCurrency(item),
-
-        rating,
-
-        image,
-
-        images:
-            Array.isArray(item.images)
-                ? item.images
-                : [image],
-
-        url,
-
-        raw: item
-    };
-}
-
-
-/* =========================================================
-SOURCE
-========================================================= */
-
-function detectSource(url) {
-
-    const value =
-        String(url)
-            .toLowerCase();
-
-
-    if (
-        value.includes(
-            "wildberries"
-        )
-    ) {
-
-        return "wildberries";
-    }
-
-
-    if (
-        value.includes("ozon")
-    ) {
-
-        return "ozon";
-    }
-
-
-    if (
-        value.includes(
-            "aliexpress"
-        )
-    ) {
-
-        return "aliexpress";
-    }
-
-
-    if (
-        value.includes("kufar")
-    ) {
-
-        return "kufar";
-    }
-
-
-    return "marketplace";
-}
-
-
-function normalizeSource(
-    source
-) {
-
-    const value =
-        String(
-            source || ""
-        )
-            .toLowerCase()
-            .trim();
-
-
-    if (
-        value.includes("wild") ||
-        value === "wb"
-    ) {
-
-        return "wildberries";
-    }
-
-
-    if (
-        value.includes("ozon")
-    ) {
-
-        return "ozon";
-    }
-
-
-    if (
-        value.includes("ali") ||
-        value.includes("aliexpress")
-    ) {
-
-        return "aliexpress";
-    }
-
-
-    if (
-        value.includes("kufar")
-    ) {
-
-        return "kufar";
-    }
-
-
-    return value ||
-        "marketplace";
-}
-
-
-function sourceLabel(
-    source
-) {
-
-    const labels = {
-
-        wildberries:
-            "🟣 Wildberries",
-
-        ozon:
-            "🔵 Ozon",
-
-        aliexpress:
-            "🟠 AliExpress",
-
-        kufar:
-            "🟢 Kufar",
-
-        marketplace:
-            "🛍 Marketplace"
-    };
-
-
-    return (
-        labels[source] ||
-        "🛍 " +
-        capitalize(source)
-    );
-}
-
-
-/* =========================================================
-PRICE
-========================================================= */
-
-function parsePrice(
-    value
-) {
-
-    if (
-        value === null ||
-        value === undefined ||
-        value === ""
-    ) {
-
-        return null;
-    }
-
-
-    if (
-        typeof value === "number"
-    ) {
-
-        return value;
-    }
-
-
-    const cleaned =
-        String(value)
-            .replace(
-                /[^\d.,-]/g,
-                ""
-            )
-            .replace(
-                ",",
-                "."
-            );
-
-
-    const number =
-        Number(cleaned);
-
-
-    return Number.isFinite(number)
-        ? number
-        : null;
-}
-
-
-function detectCurrency(
-    item
-) {
-
-    const raw =
-        String(
-            item.currency ||
-            item.price ||
-            ""
-        )
-            .toLowerCase();
-
-
-    if (
-        raw.includes("byn") ||
-        raw.includes("бел")
-    ) {
-
-        return "BYN";
-    }
-
-
-    if (
-        raw.includes("₽") ||
-        raw.includes("rub") ||
-        raw.includes("руб")
-    ) {
-
-        return "RUB";
-    }
-
-
-    if (
-        raw.includes("$") ||
-        raw.includes("usd")
-    ) {
-
-        return "USD";
-    }
-
-
-    return "BYN";
-}
-
-
-function formatPrice(
-    product
-) {
-
-    if (
-        product.price === null
-    ) {
-
-        return "Цена уточняется";
-    }
-
-
-    const currency =
-        product.currency ||
-        "BYN";
-
-
-    const symbols = {
-
-        BYN: "BYN",
-
-        RUB: "₽",
-
-        USD: "$",
-
-        EUR: "€"
-    };
-
-
-    const symbol =
-        symbols[currency] ||
-        currency;
-
-
-    return (
-        Number(product.price)
-            .toLocaleString(
-                "ru-RU",
-                {
-                    maximumFractionDigits:
-                        2
-                }
-            )
-        +
-        " " +
-        symbol
-    );
-}
-
-
-/* =========================================================
-FILTERS
-========================================================= */
-
-
-/*
-Возвращает количество активных фильтров.
-*/
-
-function getActiveFilterCount() {
-
-    let count = 0;
-
-
-    if (
-        activeFilters.minPrice !== null &&
-        activeFilters.minPrice !== ""
-    ) {
-
-        count++;
-    }
-
-
-    if (
-        activeFilters.maxPrice !== null &&
-        activeFilters.maxPrice !== ""
-    ) {
-
-        count++;
-    }
-
-
-    if (
-        Array.isArray(
-            activeFilters.categories
-        ) &&
-        activeFilters.categories.length
-    ) {
-
-        count +=
-            activeFilters.categories.length;
-    }
-
-
-    if (
-        Array.isArray(
-            activeFilters.sources
-        ) &&
-        activeFilters.sources.length
-    ) {
-
-        count +=
-            activeFilters.sources.length;
-    }
-
-
-    return count;
-}
-
-
-/*
-Открытие панели фильтров.
-*/
-
-function openFilters() {
-
-    const overlay =
-        document.getElementById(
-            "filtersOverlay"
-        );
-
-
-    if (!overlay) {
-
-        console.warn(
-            "[StyleFlow] filtersOverlay не найден"
-        );
-
-        return;
-    }
-
-
-    populateFilterCategories();
-
-
-    syncFilterUI();
-
-
-    overlay.classList.add(
-        "show"
-    );
-
-
-    document.body.classList.add(
-        "filters-open"
-    );
-}
-
-
-/*
-Закрытие панели фильтров.
-*/
-
-function closeFilters(
-    event
-) {
-
-    if (
-        event &&
-        event.target &&
-        event.target.id !==
-            "filtersOverlay"
-    ) {
-
-        return;
-    }
-
-
-    const overlay =
-        document.getElementById(
-            "filtersOverlay"
-        );
-
-
-    if (overlay) {
-
-        overlay.classList.remove(
-            "show"
-        );
-    }
-
-
-    document.body.classList.remove(
-        "filters-open"
-    );
-}
-
-
-/*
-Применить фильтры.
-*/
-
-function applyFilters() {
-
-    const minInput =
-        document.getElementById(
-            "filterMinPrice"
-        );
-
-
-    const maxInput =
-        document.getElementById(
-            "filterMaxPrice"
-        );
-
-
-    let minPrice =
-        minInput
-            ? parsePrice(
-                minInput.value
-            )
-            : null;
-
-
-    let maxPrice =
-        maxInput
-            ? parsePrice(
-                maxInput.value
-            )
-            : null;
-
-
-    /*
-    Если пользователь случайно
-    поставил максимум меньше минимума —
-    меняем местами.
-    */
-
-    if (
-        minPrice !== null &&
-        maxPrice !== null &&
-        minPrice > maxPrice
-    ) {
-
-        const temp =
-            minPrice;
-
-        minPrice =
-            maxPrice;
-
-        maxPrice =
-            temp;
-    }
-
-
-    const categoryButtons =
-        document.querySelectorAll(
-            "#filterCategories .filter-chip.active"
-        );
-
-
-    const sourceButtons =
-        document.querySelectorAll(
-            "#filterSources .filter-chip.active"
-        );
-
-
-    const categories = [];
-
-
-    categoryButtons.forEach(
-        button => {
-
-            const value =
-                String(
-                    button.dataset.category ||
-                    ""
-                )
-                    .trim();
-
-
-            if (
-                value &&
-                value !== "__all__"
-            ) {
-
-                categories.push(
-                    value
-                );
-            }
-        }
-    );
-
-
-    const sources = [];
-
-
-    sourceButtons.forEach(
-        button => {
-
-            const value =
-                String(
-                    button.dataset.source ||
-                    ""
-                )
-                    .trim();
-
-
-            if (
-                value &&
-                value !== "__all__"
-            ) {
-
-                sources.push(
-                    value
-                );
-            }
-        }
-    );
-
-
-    activeFilters = {
-
-        minPrice,
-
-        maxPrice,
-
-        categories:
-            uniqueStrings(
-                categories
-            ),
-
-        sources:
-            uniqueStrings(
-                sources
-            )
-    };
-
-
-    saveJSON(
-        "styleflow_filters",
-        activeFilters
-    );
-
-
-    /*
-    После изменения фильтров
-    строим ленту заново.
-
-    Важно:
-    фильтр → кандидаты → персонализация.
-    */
-
-    currentIndex = 0;
-
-
-    buildPersonalizedFeed();
-
-
-    if (
-        products.length > 0
-    ) {
-
-        showProduct();
-
-    } else {
-
-        showEmptyFeed();
-
-        showToast(
-            "По выбранным фильтрам товаров нет"
-        );
-    }
-
-
-    closeFilters();
-
-
-    updateFilterButton();
-
-
-    console.log(
-        "[StyleFlow] Фильтры применены:",
-        activeFilters
-    );
-}
-
-
-/*
-Сброс фильтров.
-*/
-
-function resetFilters() {
-
-    activeFilters = {
-
-        minPrice: null,
-
-        maxPrice: null,
-
-        categories: [],
-
-        sources: []
-    };
-
-
-    saveJSON(
-        "styleflow_filters",
-        activeFilters
-    );
-
-
-    const minInput =
-        document.getElementById(
-            "filterMinPrice"
-        );
-
-
-    const maxInput =
-        document.getElementById(
-            "filterMaxPrice"
-        );
-
-
-    if (minInput) {
-
-        minInput.value = "";
-    }
-
-
-    if (maxInput) {
-
-        maxInput.value = "";
-    }
-
-
-    syncFilterUI();
-
-
-    currentIndex = 0;
-
-
-    buildPersonalizedFeed();
-
-
-    if (
-        products.length > 0
-    ) {
-
-        showProduct();
-
-    } else {
-
-        showEmptyFeed();
-    }
-
-
-    updateFilterButton();
-
-
-    showToast(
-        "Фильтры сброшены"
-    );
-}
-
-
-/*
-Выбор категории/источника.
-
-Можно вызывать из HTML:
-toggleFilterChip(this)
-*/
-
-function toggleFilterChip(
-    button
-) {
-
-    if (!button) {
-        return;
-    }
-
-
-    const isAll =
-        button.dataset.category ===
-            "__all__" ||
-        button.dataset.source ===
-            "__all__";
-
-
-    /*
-    Если нажали "Все",
-    снимаем остальные кнопки.
-    */
-
-    if (isAll) {
-
-        const container =
-            button.parentElement;
-
-
-        if (container) {
-
-            container
-                .querySelectorAll(
-                    ".filter-chip"
-                )
-                .forEach(
-                    chip => {
-
-                        chip.classList.remove(
-                            "active"
-                        );
-                    }
-                );
-        }
-
-
-        button.classList.add(
-            "active"
-        );
-
-
-        return;
-    }
-
-
-    /*
-    Обычная кнопка.
-
-    Если она включается —
-    выключаем "Все".
-    */
-
-    const container =
-        button.parentElement;
-
-
-    if (container) {
-
-        const allButton =
-            container.querySelector(
-                '[data-category="__all__"], [data-source="__all__"]'
-            );
-
-
-        if (allButton) {
-
-            allButton.classList.remove(
-                "active"
-            );
-        }
-    }
-
-
-    button.classList.toggle(
-        "active"
-    );
-
-
-    /*
-    Если после выключения
-    ничего не осталось —
-    включаем "Все".
-    */
-
-    if (container) {
-
-        const selected =
-            container.querySelectorAll(
-                ".filter-chip.active"
-            );
-
-
-        if (!selected.length) {
-
-            const allButton =
-                container.querySelector(
-                    '[data-category="__all__"], [data-source="__all__"]'
-                );
-
-
-            if (allButton) {
-
-                allButton.classList.add(
-                    "active"
-                );
-            }
-        }
-    }
-}
-
-
-/*
-Заполняем категории автоматически
-из текущего каталога.
-*/
-
-function populateFilterCategories() {
-
-    const container =
-        document.getElementById(
-            "filterCategories"
-        );
-
-
-    if (!container) {
-        return;
-    }
-
-
-    const categoryMap =
-        new Map();
-
-
-    allProducts.forEach(
-        product => {
-
-            const original =
-                String(
-                    product.category ||
-                    ""
-                )
-                    .trim();
-
-
-            if (!original) {
-                return;
-            }
-
-
-            const key =
-                normalizeText(
-                    original
-                );
-
-
-            if (
-                !categoryMap.has(key)
-            ) {
-
-                categoryMap.set(
-                    key,
-                    original
-                );
-            }
-        }
-    );
-
-
-    const categories =
-        Array.from(
-            categoryMap.entries()
-        )
-            .sort(
-                (a, b) =>
-                    a[1].localeCompare(
-                        b[1],
-                        "ru"
-                    )
-            );
-
-
-    /*
-    Сохраняем текущий выбор,
-    но удаляем категории,
-    которых больше нет в каталоге.
-    */
-
-    const availableKeys =
-        new Set(
-            categories.map(
-                item =>
-                    item[0]
-            )
-        );
-
-
-    activeFilters.categories =
-        activeFilters.categories.filter(
-            category =>
-                availableKeys.has(
-                    normalizeText(
-                        category
-                    )
-                )
-        );
-
-
-    container.innerHTML = "";
-
-
-    const allButton =
-        document.createElement(
-            "button"
-        );
-
-
-    allButton.type =
-        "button";
-
-
-    allButton.className =
-        "filter-chip";
-
-
-    allButton.dataset.category =
-        "__all__";
-
-
-    allButton.textContent =
-        "Все";
-
-
-    allButton.onclick =
-        () =>
-            toggleFilterChip(
-                allButton
-            );
-
-
-    container.appendChild(
-        allButton
-    );
-
-
-    categories.forEach(
-        ([key, label]) => {
-
-            const button =
-                document.createElement(
-                    "button"
-                );
-
-
-            button.type =
-                "button";
-
-
-            button.className =
-                "filter-chip";
-
-
-            button.dataset.category =
-                label;
-
-
-            button.textContent =
-                label;
-
-
-            button.onclick =
-                () =>
-                    toggleFilterChip(
-                        button
-                    );
-
-
-            container.appendChild(
-                button
-            );
-        }
-    );
-
-
-    syncCategoryFilterUI();
-}
-
-
-/*
-Синхронизация UI фильтров
-с activeFilters.
-*/
-
-function syncFilterUI() {
-
-    const minInput =
-        document.getElementById(
-            "filterMinPrice"
-        );
-
-
-    const maxInput =
-        document.getElementById(
-            "filterMaxPrice"
-        );
-
-
-    if (minInput) {
-
-        minInput.value =
-            activeFilters.minPrice !== null
-                ? activeFilters.minPrice
-                : "";
-    }
-
-
-    if (maxInput) {
-
-        maxInput.value =
-            activeFilters.maxPrice !== null
-                ? activeFilters.maxPrice
-                : "";
-    }
-
-
-    syncCategoryFilterUI();
-
-
-    syncSourceFilterUI();
-
-
-    updateFilterButton();
-}
-
-
-/*
-Категории.
-*/
-
-function syncCategoryFilterUI() {
-
-    const container =
-        document.getElementById(
-            "filterCategories"
-        );
-
-
-    if (!container) {
-        return;
-    }
-
-
-    const buttons =
-        container.querySelectorAll(
-            ".filter-chip"
-        );
-
-
-    const selected =
-        new Set(
-            activeFilters.categories.map(
-                category =>
-                    normalizeText(
-                        category
-                    )
-            )
-        );
-
-
-    buttons.forEach(
-        button => {
-
-            const value =
-                button.dataset.category;
-
-
-            if (
-                value === "__all__"
-            ) {
-
-                button.classList.toggle(
-                    "active",
-                    selected.size === 0
-                );
-
-                return;
-            }
-
-
-            button.classList.toggle(
-                "active",
-                selected.has(
-                    normalizeText(
-                        value
-                    )
-                )
-            );
-        }
-    );
-}
-
-
-/*
-Источники.
-*/
-
-function syncSourceFilterUI() {
-
-    const container =
-        document.getElementById(
-            "filterSources"
-        );
-
-
-    if (!container) {
-        return;
-    }
-
-
-    const selected =
-        new Set(
-            activeFilters.sources.map(
-                source =>
-                    normalizeSource(
-                        source
-                    )
-            )
-        );
-
-
-    const buttons =
-        container.querySelectorAll(
-            ".filter-chip"
-        );
-
-
-    buttons.forEach(
-        button => {
-
-            const value =
-                button.dataset.source;
-
-
-            if (
-                value === "__all__"
-            ) {
-
-                button.classList.toggle(
-                    "active",
-                    selected.size === 0
-                );
-
-                return;
-            }
-
-
-            button.classList.toggle(
-                "active",
-                selected.has(
-                    normalizeSource(
-                        value
-                    )
-                )
-            );
-        }
-    );
-}
-
-
-/*
-Обновляем маленький индикатор
-на кнопке фильтров, если он есть.
-*/
-
-function updateFilterButton() {
-
-    const button =
-        document.querySelector(
-            ".top-filter"
-        );
-
-
-    if (!button) {
-        return;
-    }
-
-
-    const count =
-        getActiveFilterCount();
-
-
-    button.classList.toggle(
-        "active",
-        count > 0
-    );
-
-
-    const existingBadge =
-        button.querySelector(
-            ".filter-badge"
-        );
-
-
-    if (existingBadge) {
-
-        existingBadge.remove();
-    }
-
-
-    if (
-        count > 0
-    ) {
-
-        const badge =
-            document.createElement(
-                "span"
-            );
-
-
-        badge.className =
-            "filter-badge";
-
-
-        badge.textContent =
-            count;
-
-
-        button.appendChild(
-            badge
-        );
-    }
-}
-
-
-/*
-Главная функция фильтрации.
-
-Сначала фильтруем весь каталог,
-после чего результат передаётся
-в алгоритм рекомендаций.
-*/
-
-function applyProductFilters(
-    source
-) {
-
-    const input =
-        Array.isArray(source)
-            ? source
-            : [];
-
-
-    const minPrice =
-        activeFilters.minPrice !== null
-            ? Number(
-                activeFilters.minPrice
-            )
-            : null;
-
-
-    const maxPrice =
-        activeFilters.maxPrice !== null
-            ? Number(
-                activeFilters.maxPrice
-            )
-            : null;
-
-
-    const categories =
-        new Set(
-            activeFilters.categories.map(
-                category =>
-                    normalizeText(
-                        category
-                    )
-            )
-        );
-
-
-    const sources =
-        new Set(
-            activeFilters.sources.map(
-                source =>
-                    normalizeSource(
-                        source
-                    )
-            )
-        );
-
-
-    const hasCategoryFilter =
-        categories.size > 0;
-
-
-    const hasSourceFilter =
-        sources.size > 0;
-
-
-    return input.filter(
-        product => {
-
-            if (!product) {
-                return false;
-            }
-
-
-            /*
-            Цена.
-
-            Товары без цены при активном
-            ценовом фильтре не показываем,
-            потому что невозможно понять,
-            подходят они или нет.
-            */
-
-            if (
-                minPrice !== null ||
-                maxPrice !== null
-            ) {
-
-                if (
-                    product.price === null ||
-                    !Number.isFinite(
-                        Number(
-                            product.price
-                        )
-                    )
-                ) {
-
-                    return false;
-                }
-
-
-                const price =
-                    Number(
-                        product.price
-                    );
-
-
-                if (
-                    minPrice !== null &&
-                    price < minPrice
-                ) {
-
-                    return false;
-                }
-
-
-                if (
-                    maxPrice !== null &&
-                    price > maxPrice
-                ) {
-
-                    return false;
-                }
-            }
-
-
-            /*
-            Категория.
-            */
-
-            if (
-                hasCategoryFilter
-            ) {
-
-                const category =
-                    normalizeText(
-                        product.category
-                    );
-
-
-                if (
-                    !categories.has(
-                        category
-                    )
-                ) {
-
-                    return false;
-                }
-            }
-
-
-            /*
-            Площадка.
-            */
-
-            if (
-                hasSourceFilter
-            ) {
-
-                const sourceName =
-                    normalizeSource(
-                        product.source
-                    );
-
-
-                if (
-                    !sources.has(
-                        sourceName
-                    )
-                ) {
-
-                    return false;
-                }
-            }
-
-
-            return true;
-        }
-    );
-}
-
-
-/* =========================================================
-PERSONALIZED FEED
-========================================================= */
-
-function buildPersonalizedFeed() {
-
-    if (
-        !allProducts.length
-    ) {
-
-        products = [];
-
-        return;
-    }
-
-
-    /*
-    ========================================================
-    ЭТАП 1
-
-    Сначала применяем пользовательские фильтры.
-
-    Только после этого запускаем
-    персонализацию.
-    ========================================================
-    */
-
-    const filteredProducts =
-        applyProductFilters(
-            allProducts
-        );
-
-
-    console.log(
-        "[StyleFlow] После фильтров:",
-        filteredProducts.length
-    );
-
-
-    if (
-        !filteredProducts.length
-    ) {
-
-        products = [];
-
-
-        console.log(
-            "[StyleFlow] Фильтры не дали результатов."
-        );
-
-
-        return;
-    }
-
-
-    /*
-    ========================================================
-    ЭТАП 2
-
-    Убираем просмотренные товары.
-    ========================================================
-    */
-
-    const viewedSet =
-        new Set(
-            viewedProducts.map(
-                String
-            )
-        );
-
-
-    const unviewed =
-        filteredProducts.filter(
-            product =>
-                !viewedSet.has(
-                    String(product.id)
-                )
-        );
-
-
-    console.log(
-        "[StyleFlow] Всего товаров:",
-        allProducts.length
-    );
-
-
-    console.log(
-        "[StyleFlow] После фильтров:",
-        filteredProducts.length
-    );
-
-
-    console.log(
-        "[StyleFlow] Просмотрено:",
-        viewedSet.size
-    );
-
-
-    console.log(
-        "[StyleFlow] Непросмотренных:",
-        unviewed.length
-    );
-
-
-    /*
-    Уже просмотренные товары
-    никогда не возвращаем автоматически.
-    */
-
-    const candidates =
-        unviewed;
-
-
-    if (
-        !candidates.length
-    ) {
-
-        products = [];
-
-
-        console.log(
-            "[StyleFlow] Все доступные товары уже просмотрены."
-        );
-
-
-        return;
-    }
-
-
-    /*
-    ========================================================
-    ЭТАП 3
-
-    Существующий алгоритм
-    персонализации.
-    ========================================================
-    */
-
-    const profile =
-        buildUserProfile();
-
-
-    const personalization =
-        getPersonalizationStrength(
-            profile.totalSignals
-        );
-
-
-    console.log(
-        "[StyleFlow] Сила персонализации:",
-        personalization
-    );
-
-
-    const shuffled =
-        shuffleArray(
-            candidates
-        );
-
-
-    if (
-        personalization <= 0
-    ) {
-
-        products =
-            buildDiverseRandomFeed(
-                shuffled
-            );
-
-
-        console.log(
-            "[StyleFlow] Новая лента — полностью случайная"
-        );
-
-
-        return;
-    }
-
-
-    const scored =
-        candidates.map(
-            product => ({
-
-                product,
-
-                score:
-                    calculateRecommendationScore(
-                        product,
-                        profile
-                    )
-            })
-        );
-
-
-    products =
-        buildWeightedDiverseFeed(
-            scored,
-            personalization
-        );
-
-
-    console.log(
-        "[StyleFlow] Персональная лента построена"
-    );
-
-
-    console.log(
-        "[StyleFlow] Профиль:",
-        profile
-    );
-}
-
-
-/* =========================================================
-PERSONALIZATION STRENGTH
-========================================================= */
-
-function getPersonalizationStrength(
-    totalSignals
-) {
-
-    const signals =
-        Number(totalSignals) || 0;
-
-
-    if (
-        signals <= PERSONALIZATION_START
-    ) {
-
-        return 0;
-    }
-
-
-    const progress =
-        (
-            signals -
-            PERSONALIZATION_START
-        ) /
-        (
-            PERSONALIZATION_FULL -
-            PERSONALIZATION_START
-        );
-
-
-    return Math.max(
-        0,
-        Math.min(
-            1,
-            progress
-        )
-    );
-}
-
-
-/* =========================================================
-RANDOM FEED WITH DIVERSITY
-========================================================= */
-
-function buildDiverseRandomFeed(
-    source
-) {
-
-    const remaining =
-        [
-            ...source
-        ];
-
-
-    const result = [];
-
-
-    let lastCategory =
-        null;
-
-    let lastSource =
-        null;
-
-    let categoryStreak =
-        0;
-
-    let sourceStreak =
-        0;
-
-
-    while (
-        remaining.length
-    ) {
-
-        let available =
-            remaining.filter(
-                product => {
-
-                    const category =
-                        normalizeText(
-                            product.category
-                        );
-
-
-                    const source =
-                        normalizeText(
-                            product.source
-                        );
-
-
-                    const categoryBlocked =
-                        category &&
-                        category ===
-                            lastCategory &&
-                        categoryStreak >=
-                            MAX_SAME_CATEGORY_STREAK;
-
-
-                    const sourceBlocked =
-                        source &&
-                        source ===
-                            lastSource &&
-                        sourceStreak >=
-                            MAX_SAME_SOURCE_STREAK;
-
-
-                    return !(
-                        categoryBlocked ||
-                        sourceBlocked
-                    );
-                }
-            );
-
-
-        if (
-            !available.length
-        ) {
-
-            available =
-                remaining;
-        }
-
-
-        const randomIndex =
-            Math.floor(
-                Math.random() *
-                available.length
-            );
-
-
-        const selected =
-            available[randomIndex];
-
-
-        const originalIndex =
-            remaining.indexOf(
-                selected
-            );
-
-
-        if (
-            originalIndex >= 0
-        ) {
-
-            remaining.splice(
-                originalIndex,
-                1
-            );
-        }
-
-
-        const category =
-            normalizeText(
-                selected.category
-            );
-
-
-        const sourceName =
-            normalizeText(
-                selected.source
-            );
-
-
-        if (
-            category ===
-            lastCategory
-        ) {
-
-            categoryStreak++;
-
-        } else {
-
-            lastCategory =
-                category;
-
-            categoryStreak =
-                1;
-        }
-
-
-        if (
-            sourceName ===
-            lastSource
-        ) {
-
-            sourceStreak++;
-
-        } else {
-
-            lastSource =
-                sourceName;
-
-            sourceStreak =
-                1;
-        }
-
-
-        result.push(
-            selected
-        );
-    }
-
-
-    return result;
-}
-
-
-/* =========================================================
-WEIGHTED DIVERSE FEED
-========================================================= */
-
-function buildWeightedDiverseFeed(
-    scoredProducts,
-    personalization
-) {
-
-    const remaining =
-        scoredProducts.map(
-            item => ({
-                ...item
-            })
-        );
-
-
-    const result = [];
-
-
-    let lastCategory =
-        null;
-
-    let lastSource =
-        null;
-
-    let categoryStreak =
-        0;
-
-    let sourceStreak =
-        0;
-
-
-    const randomRatio =
-        MAX_RANDOM_RATIO -
-        (
-            MAX_RANDOM_RATIO -
-            MIN_RANDOM_RATIO
-        ) *
-        personalization;
-
-
-    while (
-        remaining.length
-    ) {
-
-        let available =
-            remaining.filter(
-                item => {
-
-                    const product =
-                        item.product;
-
-
-                    const category =
-                        normalizeText(
-                            product.category
-                        );
-
-
-                    const source =
-                        normalizeText(
-                            product.source
-                        );
-
-
-                    const categoryBlocked =
-                        category &&
-                        category ===
-                            lastCategory &&
-                        categoryStreak >=
-                            MAX_SAME_CATEGORY_STREAK;
-
-
-                    const sourceBlocked =
-                        source &&
-                        source ===
-                            lastSource &&
-                        sourceStreak >=
-                            MAX_SAME_SOURCE_STREAK;
-
-
-                    return !(
-                        categoryBlocked ||
-                        sourceBlocked
-                    );
-                }
-            );
-
-
-        if (
-            !available.length
-        ) {
-
-            available =
-                remaining;
-        }
-
-
-        let selected;
-
-
-        const useRandom =
-            Math.random() <
-            randomRatio;
-
-
-        if (
-            useRandom
-        ) {
-
-            const randomIndex =
-                Math.floor(
-                    Math.random() *
-                    available.length
-                );
-
-
-            selected =
-                available[randomIndex];
-
-        } else {
-
-            selected =
-                weightedRandomScoreChoice(
-                    available
-                );
-        }
-
-
-        const originalIndex =
-            remaining.indexOf(
-                selected
-            );
-
-
-        if (
-            originalIndex >= 0
-        ) {
-
-            remaining.splice(
-                originalIndex,
-                1
-            );
-        }
-
-
-        const category =
-            normalizeText(
-                selected.product.category
-            );
-
-
-        const source =
-            normalizeText(
-                selected.product.source
-            );
-
-
-        if (
-            category ===
-            lastCategory
-        ) {
-
-            categoryStreak++;
-
-        } else {
-
-            lastCategory =
-                category;
-
-            categoryStreak =
-                1;
-        }
-
-
-        if (
-            source ===
-            lastSource
-        ) {
-
-            sourceStreak++;
-
-        } else {
-
-            lastSource =
-                source;
-
-            sourceStreak =
-                1;
-        }
-
-
-        result.push(
-            selected.product
-        );
-    }
-
-
-    return result;
-}
-
-
-/* =========================================================
-WEIGHTED SCORE CHOICE
-========================================================= */
-
-function weightedRandomScoreChoice(
-    items
-) {
-
-    if (
-        !items.length
-    ) {
-
-        return null;
-    }
-
-
-    let maxScore =
-        0;
-
-
-    items.forEach(
-        item => {
-
-            if (
-                item.score > maxScore
-            ) {
-
-                maxScore =
-                    item.score;
-            }
-        }
-    );
-
-
-    let totalWeight =
-        0;
-
-
-    const weighted =
-        items.map(
-            item => {
-
-                const normalized =
-                    maxScore > 0
-                        ? item.score /
-                          maxScore
-                        : 0;
-
-
-                const weight =
-                    0.15 +
-                    Math.pow(
-                        Math.max(
-                            0,
-                            normalized
-                        ),
-                        2
-                    ) *
-                    10;
-
-
-                totalWeight +=
-                    weight;
-
-
-                return {
-                    item,
-                    weight
-                };
-            }
-        );
-
-
-    let random =
-        Math.random() *
-        totalWeight;
-
-
-    for (
-        const entry of weighted
-    ) {
-
-        random -=
-            entry.weight;
-
-
-        if (
-            random <= 0
-        ) {
-
-            return entry.item;
-        }
-    }
-
-
-    return weighted[
-        weighted.length - 1
-    ].item;
-}
-
-
-/* =========================================================
-USER PROFILE
-========================================================= */
-
-function buildUserProfile() {
-
-    const profile = {
-
-        categories: {},
-
-        brands: {},
-
-        sources: {},
-
-        prices: [],
-
-        totalSignals: 0
-    };
-
-
-    viewedProducts.forEach(
-        id => {
-
-            const product =
-                findProductById(id);
-
-
-            if (!product) {
-                return;
-            }
-
-
-            addProfileSignal(
-                profile,
-                product,
-                1
-            );
-        }
-    );
-
-
-    openedProducts.forEach(
-        id => {
-
-            const product =
-                findProductById(id);
-
-
-            if (!product) {
-                return;
-            }
-
-
-            addProfileSignal(
-                profile,
-                product,
-                3
-            );
-        }
-    );
-
-
-    favorites.forEach(
-        product => {
-
-            const normalized =
-                normalizeProduct(
-                    product
-                );
-
-
-            addProfileSignal(
-                profile,
-                normalized,
-                6
-            );
-        }
-    );
-
-
-    return profile;
-}
-
-
-/* =========================================================
-PROFILE SIGNAL
-========================================================= */
-
-function addProfileSignal(
-    profile,
-    product,
-    weight
-) {
-
-    if (!product) {
-        return;
-    }
-
-
-    const category =
-        normalizeText(
-            product.category
-        );
-
-
-    if (category) {
-
-        profile.categories[
-            category
-        ] =
-            (
-                profile.categories[
-                    category
-                ] || 0
-            ) +
-            weight;
-    }
-
-
-    const brand =
-        normalizeText(
-            product.brand
-        );
-
-
-    if (brand) {
-
-        profile.brands[
-            brand
-        ] =
-            (
-                profile.brands[
-                    brand
-                ] || 0
-            ) +
-            weight;
-    }
-
-
-    const source =
-        normalizeText(
-            product.source
-        );
-
-
-    if (source) {
-
-        profile.sources[
-            source
-        ] =
-            (
-                profile.sources[
-                    source
-                ] || 0
-            ) +
-            weight;
-    }
-
-
-    if (
-        product.price !== null &&
-        Number.isFinite(
-            Number(product.price)
-        )
-    ) {
-
-        profile.prices.push({
-
-            price:
-                Number(
-                    product.price
-                ),
-
-            weight
-        });
-    }
-
-
-    profile.totalSignals +=
-        weight;
-}
-
-
-/* =========================================================
-RECOMMENDATION SCORE
-========================================================= */
-
-function calculateRecommendationScore(
-    product,
-    profile
-) {
-
-    let score = 0;
-
-
-    const category =
-        normalizeText(
-            product.category
-        );
-
-
-    if (
-        category &&
-        profile.categories[
-            category
-        ]
-    ) {
-
-        score +=
-            profile.categories[
-                category
-            ] *
-            5;
-    }
-
-
-    const brand =
-        normalizeText(
-            product.brand
-        );
-
-
-    if (
-        brand &&
-        profile.brands[
-            brand
-        ]
-    ) {
-
-        score +=
-            profile.brands[
-                brand
-            ] *
-            7;
-    }
-
-
-    const source =
-        normalizeText(
-            product.source
-        );
-
-
-    if (
-        source &&
-        profile.sources[
-            source
-        ]
-    ) {
-
-        score +=
-            profile.sources[
-                source
-            ] *
-            2;
-    }
-
-
-    if (
-        product.price !== null &&
-        profile.prices.length > 0
-    ) {
-
-        const averagePrice =
-            getWeightedAveragePrice(
-                profile.prices
-            );
-
-
-        if (
-            averagePrice > 0
-        ) {
-
-            const difference =
-                Math.abs(
-                    Number(
-                        product.price
-                    ) -
-                    averagePrice
-                );
-
-
-            const percentage =
-                difference /
-                averagePrice;
-
-
-            if (
-                percentage <= 0.10
-            ) {
-
-                score += 12;
-
-            } else if (
-                percentage <= 0.25
-            ) {
-
-                score += 7;
-
-            } else if (
-                percentage <= 0.50
-            ) {
-
-                score += 3;
-            }
-        }
-    }
-
-
-    score +=
-        Math.random() * 4;
-
-
-    return Math.max(
-        0,
-        score
-    );
-}
-
-
-/* =========================================================
-WEIGHTED PRICE
-========================================================= */
-
-function getWeightedAveragePrice(
-    prices
-) {
-
-    let total =
-        0;
-
-    let weight =
-        0;
-
-
-    prices.forEach(
-        item => {
-
-            total +=
-                item.price *
-                item.weight;
-
-
-            weight +=
-                item.weight;
-        }
-    );
-
-
-    if (!weight) {
-        return 0;
-    }
-
-
-    return total / weight;
-}
-
-
-/* =========================================================
-HELPERS FOR RECOMMENDATIONS
-========================================================= */
-
-function normalizeText(
-    value
-) {
-
-    return String(
-        value || ""
-    )
-        .toLowerCase()
-        .trim();
-}
-
-
-function findProductById(
-    id
-) {
-
-    const target =
-        String(id);
-
-
-    return allProducts.find(
-        product =>
-            String(
-                product.id
-            ) ===
-            target
-    );
-}
-
-
-function shuffleArray(
-    array
-) {
-
-    const result =
-        [
-            ...array
-        ];
-
-
-    for (
-        let i =
-            result.length - 1;
-        i > 0;
-        i--
-    ) {
-
-        const j =
-            Math.floor(
-                Math.random() *
-                (i + 1)
-            );
-
-
-        [
-            result[i],
-            result[j]
-        ] =
-        [
-            result[j],
-            result[i]
-        ];
-    }
-
-
-    return result;
-}
-
-
-function uniqueStrings(
-    values
-) {
-
-    const result = [];
-
-    const seen =
-        new Set();
-
-
-    (Array.isArray(values)
-        ? values
-        : []
-    ).forEach(
-        value => {
-
-            const normalized =
-                String(
-                    value
-                ).trim();
-
-
-            const key =
-                normalizeText(
-                    normalized
-                );
-
-
-            if (
-                !key ||
-                seen.has(key)
-            ) {
-
-                return;
-            }
-
-
-            seen.add(
-                key
-            );
-
-
-            result.push(
-                normalized
-            );
-        }
-    );
-
-
-    return result;
-}
-
-
-/* =========================================================
-VIEWED HELPERS
-========================================================= */
-
-function isProductViewed(
-    product
-) {
-
-    if (!product) {
-        return false;
-    }
-
-
-    const id =
-        String(
-            product.id
-        );
-
-
-    return viewedProducts.some(
-        viewedId =>
-            String(
-                viewedId
-            ) ===
-            id
-    );
-}
-
-
-function findNextUnviewedIndex(
-    startIndex,
-    direction
-) {
-
-    if (
-        !products.length
-    ) {
-
-        return -1;
-    }
-
-
-    for (
-        let step = 1;
-        step <= products.length;
-        step++
-    ) {
-
-        let index =
-            startIndex +
-            direction *
-            step;
-
-
-        while (
-            index < 0
-        ) {
-
-            index +=
-                products.length;
-        }
-
-
-        while (
-            index >=
-            products.length
-        ) {
-
-            index -=
-                products.length;
-        }
-
-
-        const product =
-            products[index];
-
-
-        if (
-            !isProductViewed(
-                product
-            )
-        ) {
-
-            return index;
-        }
-    }
-
-
-    return -1;
-}
-
-
-/* =========================================================
-SHOW PRODUCT
-========================================================= */
-
-function showProduct() {
-
-    if (
-        !products.length
-    ) {
-
-        showEmptyFeed();
-
-        return;
-    }
-
-
-    const productCard =
+function showEmptyFeed() {
+    const card =
         document.getElementById(
             "productCard"
         );
 
-
-    const feedEmpty =
+    const empty =
         document.getElementById(
             "feedEmpty"
         );
 
-
-    if (productCard) {
-
-        productCard.style.display =
-            "";
+    if (card) {
+        card.style.display = "none";
     }
 
+    if (empty) {
+        empty.style.display = "flex";
+    }
+}
 
-    if (feedEmpty) {
+function hideEmptyFeed() {
+    const card =
+        document.getElementById(
+            "productCard"
+        );
 
-        feedEmpty.style.display =
-            "none";
+    const empty =
+        document.getElementById(
+            "feedEmpty"
+        );
+
+    if (card) {
+        card.style.display = "";
     }
 
+    if (empty) {
+        empty.style.display = "none";
+    }
+}
 
+function renderCurrentProduct() {
     if (
-        currentIndex < 0
+        !products.length ||
+        currentIndex < 0 ||
+        currentIndex >= products.length
     ) {
-
-        currentIndex =
-            products.length - 1;
+        showEmptyFeed();
+        return;
     }
 
+    const product =
+        products[currentIndex];
 
-    if (
-        currentIndex >=
-        products.length
-    ) {
+    currentProduct = product;
 
-        currentIndex = 0;
-    }
-
-
-    currentProduct =
-        products[
-            currentIndex
-        ];
-
-
-    if (
-        isProductViewed(
-            currentProduct
-        )
-    ) {
-
-        const nextIndex =
-            findNextUnviewedIndex(
-                currentIndex,
-                1
-            );
-
-
-        if (
-            nextIndex === -1
-        ) {
-
-            showEmptyFeed();
-
-            return;
-        }
-
-
-        currentIndex =
-            nextIndex;
-
-
-        currentProduct =
-            products[
-                currentIndex
-            ];
-    }
-
+    hideEmptyFeed();
 
     const image =
         document.getElementById(
             "productImage"
         );
 
-
-    const title =
+    const source =
         document.getElementById(
-            "productTitle"
+            "productSource"
         );
-
 
     const brand =
         document.getElementById(
             "productBrand"
         );
 
-
-    const source =
+    const title =
         document.getElementById(
-            "productSource"
+            "productTitle"
         );
-
-
-    const price =
-        document.getElementById(
-            "productPrice"
-        );
-
-
-    const oldPrice =
-        document.getElementById(
-            "productOldPrice"
-        );
-
 
     const rating =
         document.getElementById(
             "productRating"
         );
 
-
     const category =
         document.getElementById(
             "productCategory"
         );
 
-
-    image.src =
-        currentProduct.image;
-
-
-    image.alt =
-        currentProduct.title;
-
-
-    title.textContent =
-        currentProduct.title;
-
-
-    brand.textContent =
-        currentProduct.brand ||
-        "StyleFlow";
-
-
-    source.textContent =
-        sourceLabel(
-            currentProduct.source
+    const price =
+        document.getElementById(
+            "productPrice"
         );
 
-
-    price.textContent =
-        formatPrice(
-            currentProduct
+    const oldPrice =
+        document.getElementById(
+            "productOldPrice"
         );
 
+    if (image) {
+        image.src =
+            product.image;
 
-    if (
-        currentProduct.oldPrice
-    ) {
-
-        oldPrice.textContent =
-            formatPrice({
-
-                price:
-                    currentProduct.oldPrice,
-
-                currency:
-                    currentProduct.currency
-            });
-
-    } else {
-
-        oldPrice.textContent =
-            "";
+        image.alt =
+            product.title;
     }
 
-
-    if (
-        currentProduct.rating !== ""
-    ) {
-
-        rating.textContent =
-            "★ " +
-            currentProduct.rating;
-
-    } else {
-
-        rating.textContent =
-            "★ —";
+    if (source) {
+        source.textContent =
+            sourceLabel(
+                product.source
+            );
     }
 
+    if (brand) {
+        brand.textContent =
+            product.brand || "";
+        brand.style.display =
+            product.brand
+                ? ""
+                : "none";
+    }
 
-    category.textContent =
-        currentProduct.category ||
-        "Одежда";
+    if (title) {
+        title.textContent =
+            product.title;
+    }
 
+    if (rating) {
+        rating.textContent =
+            product.rating
+                ? `★ ${product.rating}`
+                : "";
+    }
+
+    if (category) {
+        category.textContent =
+            normalizeCategory(
+                product.category,
+                product
+            );
+    }
+
+    if (price) {
+        price.textContent =
+            formatPrice(
+                product.price,
+                product.currency
+            );
+    }
+
+    if (oldPrice) {
+        oldPrice.textContent =
+            product.oldPrice &&
+            product.oldPrice >
+                product.price
+                ? formatPrice(
+                    product.oldPrice,
+                    product.currency
+                )
+                : "";
+    }
 
     updateLikeButton();
 
-
-    registerView(
-        currentProduct
-    );
-
-
-    resetCardPosition();
+    registerView(product);
 }
 
+function showProduct(index) {
+    if (
+        !products.length
+    ) {
+        showEmptyFeed();
+        return;
+    }
 
-/* =========================================================
-EMPTY FEED
-========================================================= */
+    if (
+        index < 0 ||
+        index >= products.length
+    ) {
+        return;
+    }
 
-function showEmptyFeed() {
+    currentIndex = index;
 
-    const productCard =
+    renderCurrentProduct();
+}
+
+function nextProduct() {
+    if (!products.length) {
+        return;
+    }
+
+    if (
+        currentIndex <
+        products.length - 1
+    ) {
+        currentIndex++;
+        renderCurrentProduct();
+        return;
+    }
+
+    showToast(
+        "Ты просмотрел всю доступную ленту"
+    );
+
+    showEmptyFeed();
+}
+
+function previousProduct() {
+    if (!products.length) {
+        return;
+    }
+
+    if (currentIndex > 0) {
+        currentIndex--;
+        renderCurrentProduct();
+    }
+}
+
+function setupSwipe() {
+    const card =
         document.getElementById(
             "productCard"
         );
 
+    if (!card) {
+        return;
+    }
 
-    const feedEmpty =
+    card.addEventListener(
+        "touchstart",
+        event => {
+            if (
+                event.touches.length !== 1
+            ) {
+                return;
+            }
+
+            touchStartX =
+                event.touches[0].clientX;
+
+            touchStartY =
+                event.touches[0].clientY;
+
+            isDragging = true;
+
+            card.classList.add(
+                "dragging"
+            );
+        },
+        { passive: true }
+    );
+
+    card.addEventListener(
+        "touchmove",
+        event => {
+            if (!isDragging) {
+                return;
+            }
+
+            const x =
+                event.touches[0].clientX;
+
+            const y =
+                event.touches[0].clientY;
+
+            const dx =
+                x - touchStartX;
+
+            const dy =
+                y - touchStartY;
+
+            if (
+                Math.abs(dx) <
+                Math.abs(dy)
+            ) {
+                return;
+            }
+
+            card.style.transform =
+                `translateX(${dx}px) rotate(${dx / 18}deg)`;
+        },
+        { passive: true }
+    );
+
+    card.addEventListener(
+        "touchend",
+        event => {
+            if (!isDragging) {
+                return;
+            }
+
+            isDragging = false;
+
+            card.classList.remove(
+                "dragging"
+            );
+
+            const touch =
+                event.changedTouches[0];
+
+            const dx =
+                touch.clientX -
+                touchStartX;
+
+            const dy =
+                touch.clientY -
+                touchStartY;
+
+            card.style.transform = "";
+
+            if (
+                Math.abs(dy) >
+                Math.abs(dx) &&
+                Math.abs(dy) > 70
+            ) {
+                if (dy < 0) {
+                    nextProduct();
+                } else {
+                    previousProduct();
+                }
+
+                return;
+            }
+
+            if (
+                Math.abs(dx) > 90
+            ) {
+                if (dx < 0) {
+                    nextProduct();
+                } else {
+                    previousProduct();
+                }
+            }
+        },
+        { passive: true }
+    );
+
+    card.addEventListener(
+        "dblclick",
+        () => {
+            toggleLike();
+        }
+    );
+}
+
+function setupSearch() {
+    const input =
         document.getElementById(
-            "feedEmpty"
+            "searchInput"
         );
 
+    if (!input) {
+        return;
+    }
 
-    if (productCard) {
+    input.addEventListener(
+        "input",
+        () => {
+            clearTimeout(
+                searchTimer
+            );
 
-        productCard.style.display =
+            searchTimer =
+                setTimeout(
+                    () =>
+                        performSearch(
+                            input.value
+                        ),
+                    180
+                );
+        }
+    );
+}
+
+function quickSearch(query) {
+    switchTab("search");
+
+    const input =
+        document.getElementById(
+            "searchInput"
+        );
+
+    if (!input) {
+        return;
+    }
+
+    input.value = query;
+
+    performSearch(query);
+
+    input.focus();
+}
+
+function clearSearch() {
+    const input =
+        document.getElementById(
+            "searchInput"
+        );
+
+    if (input) {
+        input.value = "";
+    }
+
+    performSearch("");
+
+    input?.focus();
+}
+
+function performSearch(query) {
+    const text =
+        normalizeText(query);
+
+    const home =
+        document.getElementById(
+            "searchHome"
+        );
+
+    const results =
+        document.getElementById(
+            "searchResults"
+        );
+
+    const list =
+        document.getElementById(
+            "resultList"
+        );
+
+    const count =
+        document.getElementById(
+            "resultCount"
+        );
+
+    const clear =
+        document.getElementById(
+            "searchClear"
+        );
+
+    if (!text) {
+        home?.style &&
+            (home.style.display = "");
+
+        results?.classList.remove(
+            "active"
+        );
+
+        if (clear) {
+            clear.style.display =
+                "none";
+        }
+
+        return;
+    }
+
+    if (home?.style) {
+        home.style.display =
             "none";
     }
 
-
-    if (feedEmpty) {
-
-        feedEmpty.style.display =
+    if (clear) {
+        clear.style.display =
             "flex";
     }
-}
 
-
-/* =========================================================
-TABS
-========================================================= */
-
-function switchTab(
-    tab
-) {
-
-    currentTab = tab;
-
-
-    const screens = {
-
-        feed:
-            "feedScreen",
-
-        favorites:
-            "favoritesScreen",
-
-        search:
-            "searchScreen",
-
-        profile:
-            "profileScreen"
-    };
-
-
-    Object.values(
-        screens
-    ).forEach(
-        id => {
-
-            const element =
-                document.getElementById(
-                    id
-                );
-
-
-            if (element) {
-
-                element.classList.remove(
-                    "active"
-                );
-            }
-        }
-    );
-
-
-    const targetScreen =
-        document.getElementById(
-            screens[tab]
-        );
-
-
-    if (targetScreen) {
-
-        targetScreen.classList.add(
-            "active"
-        );
-    }
-
-
-    const navs = {
-
-        feed:
-            "navFeed",
-
-        favorites:
-            "navFavorites",
-
-        search:
-            "navSearch",
-
-        profile:
-            "navProfile"
-    };
-
-
-    Object.values(
-        navs
-    ).forEach(
-        id => {
-
-            const element =
-                document.getElementById(
-                    id
-                );
-
-
-            if (element) {
-
-                element.classList.remove(
-                    "active"
-                );
-            }
-        }
-    );
-
-
-    const targetNav =
-        document.getElementById(
-            navs[tab]
-        );
-
-
-    if (targetNav) {
-
-        targetNav.classList.add(
-            "active"
-        );
-    }
-
-
-    if (
-        tab === "favorites"
-    ) {
-
-        renderFavorites();
-    }
-
-
-    if (
-        tab === "profile"
-    ) {
-
-        updateProfile();
-    }
-
-
-    if (
-        tab === "search"
-    ) {
-
-        setTimeout(
-            () => {
-
-                const input =
-                    document.getElementById(
-                        "searchInput"
+    const found =
+        allProducts.filter(
+            product => {
+                const haystack =
+                    normalizeText(
+                        [
+                            product.title,
+                            product.brand,
+                            product.category,
+                            product.source
+                        ].join(" ")
                     );
 
-
-                if (input) {
-
-                    input.focus();
-                }
-
-            },
-            100
+                return haystack.includes(
+                    text
+                );
+            }
         );
+
+    if (count) {
+        count.textContent =
+            `Найдено: ${found.length}`;
     }
-}
 
+    if (list) {
+        list.innerHTML = "";
 
-/* =========================================================
-FAVORITES
-========================================================= */
+        found
+            .slice(0, 100)
+            .forEach(product => {
+                const card =
+                    document.createElement(
+                        "div"
+                    );
 
-function isFavorite(
-    productId
-) {
+                card.className =
+                    "result-card";
 
-    return favorites.some(
-        item =>
-            String(item.id) ===
-            String(productId)
+                card.innerHTML = `
+                    <img
+                        class="result-image"
+                        src="${escapeHtml(product.image)}"
+                        alt=""
+                    >
+
+                    <div class="result-info">
+                        <div class="result-brand">
+                            ${escapeHtml(product.brand || sourceLabel(product.source))}
+                        </div>
+
+                        <div class="result-title">
+                            ${escapeHtml(product.title)}
+                        </div>
+
+                        <div class="result-price">
+                            ${escapeHtml(
+                                formatPrice(
+                                    product.price,
+                                    product.currency
+                                )
+                            )}
+                        </div>
+                    </div>
+                `;
+
+                card.onclick =
+                    () =>
+                        openProductFromObject(
+                            product
+                        );
+
+                list.appendChild(card);
+            });
+    }
+
+    results?.classList.add(
+        "active"
     );
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
 
-function toggleLike() {
-
-    if (!currentProduct) {
+function openProductFromObject(product) {
+    if (!product) {
         return;
     }
 
+    const id =
+        getProductId(product);
 
     const index =
-        favorites.findIndex(
+        products.findIndex(
             item =>
-                String(item.id) ===
-                String(
-                    currentProduct.id
-                )
+                getProductId(item) === id
         );
 
-
-    if (
-        index >= 0
-    ) {
-
-        favorites.splice(
-            index,
-            1
-        );
-
-
-        showToast(
-            "Удалено из избранного"
-        );
-
-    } else {
-
-        favorites.unshift(
-            currentProduct
-        );
-
-
-        showToast(
-            "❤️ Добавлено в избранное"
-        );
-
-
-        showHeart();
-    }
-
-
-    saveJSON(
-        "styleflow_favorites",
-        favorites
-    );
-
-
-    rebuildFeedAfterSignal();
-
-
-    updateLikeButton();
-
-    updateProfile();
-}
-
-
-/* =========================================================
-LIKE BUTTON
-========================================================= */
-
-function updateLikeButton() {
-
-    const button =
-        document.getElementById(
-            "likeButton"
-        );
-
-
-    if (
-        !button ||
-        !currentProduct
-    ) {
-
+    if (index >= 0) {
+        switchTab("feed");
+        currentIndex = index;
+        renderCurrentProduct();
         return;
     }
 
+    currentProduct = product;
 
-    const icon =
-        button.querySelector(
-            ".action-icon"
-        );
+    const oldProducts =
+        products;
 
-
-    if (
-        isFavorite(
-            currentProduct.id
-        )
-    ) {
-
-        button.classList.add(
-            "liked"
-        );
-
-
-        if (icon) {
-
-            icon.textContent =
-                "❤️";
-        }
-
-    } else {
-
-        button.classList.remove(
-            "liked"
-        );
-
-
-        if (icon) {
-
-            icon.textContent =
-                "♥";
-        }
-    }
-}
-
-
-/* =========================================================
-REBUILD AFTER USER ACTION
-========================================================= */
-
-function rebuildFeedAfterSignal() {
-
-    const currentId =
-        currentProduct
-            ? String(
-                currentProduct.id
-            )
-            : null;
-
-
-    buildPersonalizedFeed();
-
-
-    if (
-        currentId
-    ) {
-
-        products =
-            products.filter(
-                product =>
-                    String(
-                        product.id
-                    ) !==
-                    currentId
-            );
-    }
-
-
+    products = [product];
     currentIndex = 0;
 
+    switchTab("feed");
 
-    if (
-        !products.length
-    ) {
+    renderCurrentProduct();
 
-        showEmptyFeed();
-
-        return;
-    }
+    products = oldProducts;
 }
-
-
-/* =========================================================
-FAVORITES RENDER
-========================================================= */
-
-function renderFavorites() {
-
-    const grid =
-        document.getElementById(
-            "favoritesGrid"
-        );
-
-
-    const empty =
-        document.getElementById(
-            "favoritesEmpty"
-        );
-
-
-    if (!grid || !empty) {
-        return;
-    }
-
-
-    grid.innerHTML = "";
-
-
-    if (
-        !favorites.length
-    ) {
-
-        empty.style.display =
-            "flex";
-
-        return;
-    }
-
-
-    empty.style.display =
-        "none";
-
-
-    favorites.forEach(
-        product => {
-
-            const card =
-                document.createElement(
-                    "div"
-                );
-
-
-            card.className =
-                "favorite-card";
-
-
-            card.innerHTML = `
-
-                <img
-                    src="${escapeAttribute(product.image)}"
-                    alt="${escapeAttribute(product.title)}"
-                >
-
-                <div class="favorite-info">
-
-                    <div class="favorite-title">
-                        ${escapeHTML(product.title)}
-                    </div>
-
-                    <div class="favorite-price">
-                        ${escapeHTML(
-                            formatPrice(product)
-                        )}
-                    </div>
-
-                </div>
-            `;
-
-
-            card.onclick =
-                () => {
-
-                    openProductFromObject(
-                        product
-                    );
-                };
-
-
-            grid.appendChild(
-                card
-            );
-        }
-    );
-}
-
-
-/* =========================================================
-OPEN PRODUCT
-========================================================= */
 
 function openCurrentProduct() {
-
-    if (!currentProduct) {
-        return;
-    }
-
-
     if (
-        !currentProduct.url ||
-        currentProduct.url === "#"
+        !currentProduct ||
+        !currentProduct.url
     ) {
-
         showToast(
-            "Ссылка на товар пока не подключена"
+            "Ссылка на товар недоступна"
         );
-
         return;
     }
-
 
     registerOpen(
         currentProduct
     );
 
-
     try {
-
         if (
-            window.Telegram &&
-            Telegram.WebApp &&
-            Telegram.WebApp.openLink
+            window.Telegram?.WebApp?.openLink
         ) {
-
             Telegram.WebApp.openLink(
                 currentProduct.url
             );
-
         } else {
-
             window.open(
                 currentProduct.url,
                 "_blank"
             );
         }
-
-    } catch (error) {
-
+    } catch {
         window.open(
             currentProduct.url,
             "_blank"
@@ -4338,1830 +2512,587 @@ function openCurrentProduct() {
     }
 }
 
-
-function openProductFromObject(
-    product
-) {
-
-    const index =
-        products.findIndex(
-            item =>
-                String(item.id) ===
-                String(product.id)
-        );
-
-
-    if (
-        index >= 0
-    ) {
-
-        currentIndex =
-            index;
-
-
-        showProduct();
-
-
-        switchTab(
-            "feed"
-        );
-
-
-        return;
-    }
-
-
-    currentProduct =
-        product;
-
-
-    registerView(
-        product
-    );
-
-
-    renderSingleProductObject(
-        product
-    );
-
-
-    switchTab(
-        "feed"
-    );
-}
-
-
-function renderSingleProductObject(
-    product
-) {
-
-    const productCard =
-        document.getElementById(
-            "productCard"
-        );
-
-
-    const feedEmpty =
-        document.getElementById(
-            "feedEmpty"
-        );
-
-
-    if (productCard) {
-
-        productCard.style.display =
-            "";
-    }
-
-
-    if (feedEmpty) {
-
-        feedEmpty.style.display =
-            "none";
-    }
-
-
-    const image =
-        document.getElementById(
-            "productImage"
-        );
-
-
-    if (image) {
-
-        image.src =
-            product.image;
-    }
-
-
-    const title =
-        document.getElementById(
-            "productTitle"
-        );
-
-
-    if (title) {
-
-        title.textContent =
-            product.title;
-    }
-
-
-    const brand =
-        document.getElementById(
-            "productBrand"
-        );
-
-
-    if (brand) {
-
-        brand.textContent =
-            product.brand ||
-            "StyleFlow";
-    }
-
-
-    const source =
-        document.getElementById(
-            "productSource"
-        );
-
-
-    if (source) {
-
-        source.textContent =
-            sourceLabel(
-                product.source
-            );
-    }
-
-
-    const price =
-        document.getElementById(
-            "productPrice"
-        );
-
-
-    if (price) {
-
-        price.textContent =
-            formatPrice(
-                product
-            );
-    }
-
-
-    const oldPrice =
-        document.getElementById(
-            "productOldPrice"
-        );
-
-
-    if (oldPrice) {
-
-        oldPrice.textContent =
-            product.oldPrice
-                ? formatPrice({
-
-                    price:
-                        product.oldPrice,
-
-                    currency:
-                        product.currency
-                })
-                : "";
-    }
-
-
-    const rating =
-        document.getElementById(
-            "productRating"
-        );
-
-
-    if (rating) {
-
-        rating.textContent =
-            product.rating
-                ? "★ " +
-                  product.rating
-                : "★ —";
-    }
-
-
-    const category =
-        document.getElementById(
-            "productCategory"
-        );
-
-
-    if (category) {
-
-        category.textContent =
-            product.category ||
-            "Одежда";
-    }
-
-
-    updateLikeButton();
-
-    resetCardPosition();
-}
-
-
-/* =========================================================
-SHARE
-========================================================= */
-
-async function shareCurrentProduct() {
-
+function toggleLike() {
     if (!currentProduct) {
         return;
     }
 
-
-    const text =
-        `${currentProduct.title} — ${formatPrice(currentProduct)}`;
-
-
-    try {
-
-        if (
-            navigator.share
-        ) {
-
-            await navigator.share({
-
-                title:
-                    currentProduct.title,
-
-                text,
-
-                url:
-                    currentProduct.url
-            });
-
-        } else {
-
-            await navigator.clipboard.writeText(
-                currentProduct.url
-            );
-
-
-            showToast(
-                "🔗 Ссылка скопирована"
-            );
-        }
-
-    } catch (error) {
-
-        // User cancelled share.
-    }
-}
-
-
-/* =========================================================
-COMMENTS
-========================================================= */
-
-function openComments() {
-
-    const overlay =
-        document.getElementById(
-            "commentsOverlay"
+    const id =
+        getProductId(
+            currentProduct
         );
 
-
-    const list =
-        document.getElementById(
-            "commentsList"
-        );
-
-
-    if (!overlay || !list) {
+    if (!id) {
         return;
     }
 
+    const index =
+        favorites.indexOf(id);
 
-    const comments = [
+    if (index >= 0) {
+        favorites.splice(
+            index,
+            1
+        );
 
-        {
-            user: "Алекс",
-            text: "Выглядит очень круто 👍"
-        },
+        showToast(
+            "Убрано из избранного"
+        );
+    } else {
+        favorites.push(id);
 
-        {
-            user: "Мария",
-            text: "Кто-нибудь уже заказывал?"
-        },
-
-        {
-            user: "Илья",
-            text: "Цена интересная"
-        },
-
-        {
-            user: "Катя",
-            text: "Размер подошёл идеально"
-        }
-    ];
-
-
-    list.innerHTML =
-        comments
-            .map(
-                comment => `
-
-                    <div class="comment">
-
-                        <div class="comment-user">
-                            ${escapeHTML(
-                                comment.user
-                            )}
-                        </div>
-
-                        <div class="comment-text">
-                            ${escapeHTML(
-                                comment.text
-                            )}
-                        </div>
-
-                    </div>
-
-                `
-            )
-            .join("");
-
-
-    overlay.classList.add(
-        "show"
-    );
-}
-
-
-function closeComments(
-    event
-) {
-
-    if (
-        !event ||
-        event.target.id ===
-            "commentsOverlay"
-    ) {
-
-        const overlay =
+        const heart =
             document.getElementById(
-                "commentsOverlay"
+                "bigHeart"
             );
 
-
-        if (overlay) {
-
-            overlay.classList.remove(
-                "show"
-            );
-        }
-    }
-}
-
-
-/* =========================================================
-SEARCH
-========================================================= */
-
-function setupSearch() {
-
-    const input =
-        document.getElementById(
-            "searchInput"
+        heart?.classList.remove(
+            "show"
         );
 
+        void heart?.offsetWidth;
 
-    if (!input) {
+        heart?.classList.add(
+            "show"
+        );
+
+        showToast(
+            "Добавлено в избранное ❤️"
+        );
+    }
+
+    saveJSON(
+        "styleflow_favorites",
+        favorites
+    );
+
+    updateLikeButton();
+    updateProfile();
+}
+
+function updateLikeButton() {
+    const button =
+        document.getElementById(
+            "likeButton"
+        );
+
+    if (!button || !currentProduct) {
         return;
     }
 
+    const liked =
+        favorites.includes(
+            getProductId(
+                currentProduct
+            )
+        );
 
-    input.addEventListener(
-        "input",
-        () => {
-
-            const value =
-                input.value.trim();
-
-
-            const clearButton =
-                document.getElementById(
-                    "searchClear"
-                );
-
-
-            if (clearButton) {
-
-                clearButton.style.display =
-                    value
-                        ? "flex"
-                        : "none";
-            }
-
-
-            clearTimeout(
-                searchTimer
-            );
-
-
-            searchTimer =
-                setTimeout(
-                    () =>
-                        performSearch(
-                            value
-                        ),
-                    150
-                );
-        }
-    );
-
-
-    input.addEventListener(
-        "keydown",
-        event => {
-
-            if (
-                event.key ===
-                "Enter"
-            ) {
-
-                event.preventDefault();
-
-
-                performSearch(
-                    input.value.trim()
-                );
-            }
-        }
+    button.classList.toggle(
+        "liked",
+        liked
     );
 }
 
-
-function quickSearch(
-    query
-) {
-
-    switchTab(
-        "search"
-    );
-
-
-    const input =
+function renderFavorites() {
+    const grid =
         document.getElementById(
-            "searchInput"
+            "favoritesGrid"
         );
 
+    const empty =
+        document.getElementById(
+            "favoritesEmpty"
+        );
 
-    if (!input) {
+    if (!grid || !empty) {
         return;
     }
 
+    grid.innerHTML = "";
 
-    input.value =
-        query;
-
-
-    const clearButton =
-        document.getElementById(
-            "searchClear"
-        );
-
-
-    if (clearButton) {
-
-        clearButton.style.display =
-            "flex";
-    }
-
-
-    performSearch(
-        query
-    );
-}
-
-
-function clearSearch() {
-
-    const input =
-        document.getElementById(
-            "searchInput"
-        );
-
-
-    if (!input) {
-        return;
-    }
-
-
-    input.value = "";
-
-
-    const clearButton =
-        document.getElementById(
-            "searchClear"
-        );
-
-
-    if (clearButton) {
-
-        clearButton.style.display =
-            "none";
-    }
-
-
-    const results =
-        document.getElementById(
-            "searchResults"
-        );
-
-
-    if (results) {
-
-        results.classList.remove(
-            "active"
-        );
-    }
-
-
-    const home =
-        document.getElementById(
-            "searchHome"
-        );
-
-
-    if (home) {
-
-        home.style.display =
-            "block";
-    }
-
-
-    input.focus();
-}
-
-
-function performSearch(
-    query
-) {
-
-    const home =
-        document.getElementById(
-            "searchHome"
-        );
-
-
-    const results =
-        document.getElementById(
-            "searchResults"
-        );
-
-
-    const resultList =
-        document.getElementById(
-            "resultList"
-        );
-
-
-    const resultCount =
-        document.getElementById(
-            "resultCount"
-        );
-
-
-    if (
-        !home ||
-        !results ||
-        !resultList ||
-        !resultCount
-    ) {
-
-        return;
-    }
-
-
-    if (!query) {
-
-        home.style.display =
-            "block";
-
-
-        results.classList.remove(
-            "active"
-        );
-
-
-        return;
-    }
-
-
-    home.style.display =
-        "none";
-
-
-    results.classList.add(
-        "active"
-    );
-
-
-    const normalizedQuery =
-        query
-            .toLowerCase()
-            .trim();
-
-
-    const tokens =
-        normalizedQuery
-            .split(/\s+/)
+    const favoriteProducts =
+        favorites
+            .map(findProductById)
             .filter(Boolean);
 
+    empty.style.display =
+        favoriteProducts.length
+            ? "none"
+            : "flex";
 
-    const filtered =
-        allProducts.filter(
-            product => {
+    for (const product of favoriteProducts) {
+        const card =
+            document.createElement(
+                "div"
+            );
 
-                const searchable = [
+        card.className =
+            "favorite-card";
 
-                    product.title,
-
-                    product.brand,
-
-                    product.category,
-
-                    product.source,
-
-                    sourceLabel(
-                        product.source
-                    )
-
-                ]
-                    .join(" ")
-                    .toLowerCase();
-
-
-                return tokens.every(
-                    token =>
-                        searchable.includes(
-                            token
-                        )
-                );
-            }
-        );
-
-
-    resultCount.textContent =
-        filtered.length === 1
-            ? "Найден 1 товар"
-            : `Найдено товаров: ${filtered.length}`;
-
-
-    resultList.innerHTML = "";
-
-
-    if (
-        !filtered.length
-    ) {
-
-        resultList.innerHTML = `
-
-            <div
-                class="empty"
-                style="
-                    position:relative;
-                    min-height:300px;
-                "
+        card.innerHTML = `
+            <img
+                src="${escapeHtml(product.image)}"
+                alt=""
             >
 
-                <div class="empty-inner">
-
-                    <div class="empty-icon">
-                        🔎
-                    </div>
-
-                    <h2>
-                        Ничего не нашли
-                    </h2>
-
-                    <p>
-                        Попробуй другое название,
-                        бренд или категорию.
-                    </p>
-
+            <div class="favorite-info">
+                <div class="favorite-title">
+                    ${escapeHtml(product.title)}
                 </div>
 
+                <div class="favorite-price">
+                    ${escapeHtml(
+                        formatPrice(
+                            product.price,
+                            product.currency
+                        )
+                    )}
+                </div>
             </div>
-
         `;
 
-
-        return;
-    }
-
-
-    filtered.forEach(
-        product => {
-
-            const card =
-                document.createElement(
-                    "div"
+        card.onclick =
+            () =>
+                openProductFromObject(
+                    product
                 );
 
-
-            card.className =
-                "result-card";
-
-
-            card.innerHTML = `
-
-                <img
-                    class="result-image"
-                    src="${escapeAttribute(product.image)}"
-                    alt="${escapeAttribute(product.title)}"
-                >
-
-                <div class="result-info">
-
-                    <div class="result-brand">
-                        ${escapeHTML(
-                            product.brand ||
-                            sourceLabel(
-                                product.source
-                            )
-                        )}
-                    </div>
-
-                    <div class="result-title">
-                        ${escapeHTML(
-                            product.title
-                        )}
-                    </div>
-
-                    <div class="result-price">
-                        ${escapeHTML(
-                            formatPrice(
-                                product
-                            )
-                        )}
-                    </div>
-
-                </div>
-
-            `;
-
-
-            card.onclick =
-                () => {
-
-                    openProductFromObject(
-                        product
-                    );
-                };
-
-
-            resultList.appendChild(
-                card
-            );
-        }
-    );
+        grid.appendChild(card);
+    }
 }
 
-
-/* =========================================================
-PROFILE
-========================================================= */
-
-function updateProfile() {
-
-    const likedCount =
-        document.getElementById(
-            "likedCount"
-        );
-
-
-    const viewedCount =
-        document.getElementById(
-            "viewedCount"
-        );
-
-
-    const openedCount =
-        document.getElementById(
-            "openedCount"
-        );
-
-
-    const collectionCount =
-        document.getElementById(
-            "collectionCount"
-        );
-
-
-    if (likedCount) {
-
-        likedCount.textContent =
-            favorites.length;
-    }
-
-
-    if (viewedCount) {
-
-        viewedCount.textContent =
-            viewedProducts.length;
-    }
-
-
-    if (openedCount) {
-
-        openedCount.textContent =
-            openedProducts.length;
-    }
-
-
-    if (collectionCount) {
-
-        collectionCount.textContent =
-            `${favorites.length} ${
-                getRussianPlural(
-                    favorites.length,
-                    "товар",
-                    "товара",
-                    "товаров"
-                )
-            }`;
-    }
-
-
-    renderRecentProducts();
-}
-
-
-function renderRecentProducts() {
-
+function renderRecent() {
     const grid =
         document.getElementById(
             "recentGrid"
         );
 
-
     if (!grid) {
         return;
     }
 
-
     grid.innerHTML = "";
 
-
     const recentIds =
-        [
-            ...viewedProducts
-        ]
+        viewedProducts
+            .slice()
             .reverse()
-            .slice(
-                0,
-                6
+            .slice(0, 10);
+
+    for (const id of recentIds) {
+        const product =
+            findProductById(id);
+
+        if (!product) {
+            continue;
+        }
+
+        const card =
+            document.createElement(
+                "div"
             );
 
+        card.className =
+            "recent-card";
 
-    const recent =
-        recentIds
-            .map(
-                id =>
-                    allProducts.find(
-                        product =>
-                            String(
-                                product.id
-                            ) ===
-                            String(id)
+        card.innerHTML = `
+            <img
+                src="${escapeHtml(product.image)}"
+                alt=""
+            >
+
+            <div class="recent-price">
+                ${escapeHtml(
+                    formatPrice(
+                        product.price,
+                        product.currency
                     )
-            )
-            .filter(Boolean);
+                )}
+            </div>
+        `;
 
-
-    recent.forEach(
-        product => {
-
-            const card =
-                document.createElement(
-                    "div"
+        card.onclick =
+            () =>
+                openProductFromObject(
+                    product
                 );
 
-
-            card.className =
-                "recent-card";
-
-
-            card.innerHTML = `
-
-                <img
-                    src="${escapeAttribute(product.image)}"
-                    alt="${escapeAttribute(product.title)}"
-                >
-
-                <div class="recent-price">
-                    ${escapeHTML(
-                        formatPrice(
-                            product
-                        )
-                    )}
-                </div>
-
-            `;
-
-
-            card.onclick =
-                () => {
-
-                    openProductFromObject(
-                        product
-                    );
-                };
-
-
-            grid.appendChild(
-                card
-            );
-        }
-    );
-
-
-    if (
-        !recent.length
-    ) {
-
-        grid.innerHTML = `
-
-            <div
-                style="
-                    grid-column:1/-1;
-                    padding:25px 5px;
-                    color:rgba(255,255,255,.4);
-                    font-size:13px;
-                "
-            >
-                Начни листать ленту —
-                здесь появятся твои находки.
-            </div>
-
-        `;
+        grid.appendChild(card);
     }
 }
 
+function updateProfile() {
+    const liked =
+        document.getElementById(
+            "likedCount"
+        );
 
-function openCollection(
-    type
-) {
+    const viewed =
+        document.getElementById(
+            "viewedCount"
+        );
 
+    const opened =
+        document.getElementById(
+            "openedCount"
+        );
+
+    const collection =
+        document.getElementById(
+            "collectionCount"
+        );
+
+    if (liked) {
+        liked.textContent =
+            favorites.length;
+    }
+
+    if (viewed) {
+        viewed.textContent =
+            viewedProducts.length;
+    }
+
+    if (opened) {
+        opened.textContent =
+            openedProducts.length;
+    }
+
+    if (collection) {
+        const count =
+            favorites.length;
+
+        collection.textContent =
+            `${count} ${
+                count === 1
+                    ? "товар"
+                    : "товаров"
+            }`;
+    }
+
+    renderFavorites();
+    renderRecent();
+
+    updateTelegramProfile();
+}
+
+function updateTelegramProfile() {
+    const tg =
+        window.Telegram?.WebApp;
+
+    const name =
+        document.getElementById(
+            "profileName"
+        );
+
+    const avatar =
+        document.getElementById(
+            "profileAvatar"
+        );
+
+    if (!tg?.initDataUnsafe?.user) {
+        return;
+    }
+
+    const user =
+        tg.initDataUnsafe.user;
+
+    const fullName =
+        [
+            user.first_name,
+            user.last_name
+        ]
+            .filter(Boolean)
+            .join(" ");
+
+    if (name) {
+        name.textContent =
+            fullName ||
+            user.username ||
+            "Style Explorer";
+    }
+
+    if (avatar) {
+        avatar.textContent =
+            (
+                user.first_name ||
+                user.username ||
+                "S"
+            )
+                .charAt(0)
+                .toUpperCase();
+    }
+}
+
+function openCollection(name) {
     if (
-        type === "favorites"
+        name === "favorites"
     ) {
-
         switchTab(
             "favorites"
         );
     }
 }
 
+function switchTab(tab) {
+    currentTab = tab;
 
-/* =========================================================
-VIEW TRACKING
-========================================================= */
+    const screens = {
+        feed:
+            document.getElementById(
+                "feedScreen"
+            ),
+        favorites:
+            document.getElementById(
+                "favoritesScreen"
+            ),
+        search:
+            document.getElementById(
+                "searchScreen"
+            ),
+        profile:
+            document.getElementById(
+                "profileScreen"
+            )
+    };
 
-function registerView(
-    product
-) {
+    Object.entries(
+        screens
+    ).forEach(
+        ([name, screen]) => {
+            screen?.classList.toggle(
+                "active",
+                name === tab
+            );
+        }
+    );
 
-    if (!product) {
-        return;
-    }
+    const navs = {
+        feed:
+            document.getElementById(
+                "navFeed"
+            ),
+        favorites:
+            document.getElementById(
+                "navFavorites"
+            ),
+        search:
+            document.getElementById(
+                "navSearch"
+            ),
+        profile:
+            document.getElementById(
+                "navProfile"
+            )
+    };
 
-
-    const id =
-        String(
-            product.id
-        );
-
+    Object.entries(
+        navs
+    ).forEach(
+        ([name, nav]) => {
+            nav?.classList.toggle(
+                "active",
+                name === tab
+            );
+        }
+    );
 
     if (
-        !viewedProducts
-            .map(String)
-            .includes(id)
+        tab === "favorites"
     ) {
+        renderFavorites();
+    }
 
-        viewedProducts.push(
-            id
-        );
-
-
-        if (
-            viewedProducts.length >
-            500
-        ) {
-
-            viewedProducts.shift();
-        }
-
-
-        saveJSON(
-            "styleflow_viewed",
-            viewedProducts
-        );
-
-
-        console.log(
-            "[StyleFlow] Просмотрен товар:",
-            product.title
-        );
-
-
+    if (
+        tab === "profile"
+    ) {
         updateProfile();
-
-
-        syncUserAction(
-            "view",
-            id
-        );
     }
 }
 
-
-/* =========================================================
-OPEN TRACKING
-========================================================= */
-
-function registerOpen(
-    product
-) {
-
-    if (!product) {
-        return;
-    }
-
-
-    const id =
-        String(
-            product.id
-        );
-
-
-    openedProducts.push(
-        id
-    );
-
-
-    if (
-        openedProducts.length >
-        500
-    ) {
-
-        openedProducts.shift();
-    }
-
-
-    saveJSON(
-        "styleflow_opened",
-        openedProducts
-    );
-
-
-    syncUserAction(
-        "open",
-        id
-    );
-
-
-    rebuildFeedAfterSignal();
-
-
-    updateProfile();
-}
-
-
-/* =========================================================
-SWIPE
-========================================================= */
-
-function setupSwipe() {
-
-    const card =
+function openComments() {
+    const overlay =
         document.getElementById(
-            "productCard"
+            "commentsOverlay"
         );
 
+    const list =
+        document.getElementById(
+            "commentsList"
+        );
 
-    if (!card) {
+    if (!overlay || !list) {
         return;
     }
 
-
-    card.addEventListener(
-        "touchstart",
-        event => {
-
-            if (!currentProduct) {
-                return;
-            }
-
-
-            touchStartY =
-                event.touches[0]
-                    .clientY;
-
-
-            touchStartX =
-                event.touches[0]
-                    .clientX;
-
-
-            isDragging =
-                true;
-
-
-            card.classList.add(
-                "dragging"
-            );
-        },
-        {
-            passive: true
-        }
-    );
-
-
-    card.addEventListener(
-        "touchmove",
-        event => {
-
-            if (!isDragging) {
-                return;
-            }
-
-
-            const y =
-                event.touches[0]
-                    .clientY;
-
-
-            const x =
-                event.touches[0]
-                    .clientX;
-
-
-            const deltaY =
-                y - touchStartY;
-
-
-            const deltaX =
-                x - touchStartX;
-
-
-            if (
-                Math.abs(deltaY) >
-                Math.abs(deltaX)
-            ) {
-
-                event.preventDefault();
-
-
-                card.style.transform =
-                    `translateY(${deltaY}px)
-                     rotate(${deltaY * -.025}deg)`;
-            }
-        },
-        {
-            passive: false
-        }
-    );
-
-
-    card.addEventListener(
-        "touchend",
-        event => {
-
-            if (!isDragging) {
-                return;
-            }
-
-
-            isDragging =
-                false;
-
-
-            card.classList.remove(
-                "dragging"
-            );
-
-
-            const touch =
-                event.changedTouches[0];
-
-
-            const deltaY =
-                touch.clientY -
-                touchStartY;
-
-
-            card.style.transform =
-                "";
-
-
-            if (
-                Math.abs(deltaY) >
-                80
-            ) {
-
-                if (
-                    deltaY < 0
-                ) {
-
-                    nextProduct();
-
-                } else {
-
-                    previousProduct();
-                }
-
-
-                return;
-            }
-
-
-            const now =
-                Date.now();
-
-
-            if (
-                now - lastTapTime <
-                350
-            ) {
-
-                toggleLike();
-            }
-
-
-            lastTapTime =
-                now;
-        },
-        {
-            passive: true
-        }
-    );
-
-
-    let wheelLocked =
-        false;
-
-
-    card.addEventListener(
-        "wheel",
-        event => {
-
-            if (wheelLocked) {
-                return;
-            }
-
-
-            wheelLocked =
-                true;
-
-
-            if (
-                event.deltaY > 0
-            ) {
-
-                nextProduct();
-
-            } else {
-
-                previousProduct();
-            }
-
-
-            setTimeout(
-                () => {
-
-                    wheelLocked =
-                        false;
-
-                },
-                300
-            );
-        },
-        {
-            passive: true
-        }
-    );
-
-
-    document.addEventListener(
-        "keydown",
-        event => {
-
-            if (
-                currentTab !==
-                "feed"
-            ) {
-
-                return;
-            }
-
-
-            if (
-                event.key ===
-                    "ArrowDown" ||
-                event.key ===
-                    "ArrowRight"
-            ) {
-
-                nextProduct();
-            }
-
-
-            if (
-                event.key ===
-                    "ArrowUp" ||
-                event.key ===
-                    "ArrowLeft"
-            ) {
-
-                previousProduct();
-            }
-        }
+    list.innerHTML = `
+        <div class="comment">
+            <div class="comment-user">
+                Отзывы
+            </div>
+
+            <div class="comment-text">
+                Отзывы для этого товара пока не подключены.
+            </div>
+        </div>
+    `;
+
+    overlay.classList.add(
+        "show"
     );
 }
 
+function closeComments(event) {
+    if (
+        event &&
+        event.target &&
+        event.target.id !==
+            "commentsOverlay"
+    ) {
+        return;
+    }
 
-/* =========================================================
-NEXT / PREVIOUS
-========================================================= */
+    document
+        .getElementById(
+            "commentsOverlay"
+        )
+        ?.classList.remove(
+            "show"
+        );
+}
 
-function nextProduct() {
+function shareCurrentProduct() {
+    if (!currentProduct) {
+        return;
+    }
+
+    const url =
+        currentProduct.url;
+
+    if (!url) {
+        showToast(
+            "Ссылка на товар недоступна"
+        );
+        return;
+    }
+
+    const text =
+        `${currentProduct.title}\n${formatPrice(
+            currentProduct.price,
+            currentProduct.currency
+        )}`;
+
+    const tg =
+        window.Telegram?.WebApp;
 
     if (
-        !products.length
+        tg?.openTelegramLink
     ) {
+        const shareUrl =
+            "https://t.me/share/url" +
+            `?url=${encodeURIComponent(url)}` +
+            `&text=${encodeURIComponent(text)}`;
 
-        buildPersonalizedFeed();
-
-
-        currentIndex = 0;
-
-
-        if (
-            !products.length
-        ) {
-
-            showEmptyFeed();
-
-            return;
-        }
-
-
-        showProduct();
+        tg.openTelegramLink(
+            shareUrl
+        );
 
         return;
     }
 
-
-    const nextIndex =
-        findNextUnviewedIndex(
-            currentIndex,
-            1
-        );
-
-
     if (
-        nextIndex >= 0
+        navigator.share
     ) {
-
-        currentIndex =
-            nextIndex;
-
-
-        animateCardChange(
-            "next"
-        );
-
-
+        navigator.share({
+            title:
+                currentProduct.title,
+            text,
+            url
+        }).catch(() => {});
         return;
     }
 
-
-    /*
-    Проверяем новые товары
-    с учётом текущих фильтров.
-    */
-
-    const filteredProducts =
-        applyProductFilters(
-            allProducts
-        );
-
-
-    const unviewed =
-        filteredProducts.filter(
-            product =>
-                !isProductViewed(
-                    product
+    navigator.clipboard
+        ?.writeText(url)
+        .then(
+            () =>
+                showToast(
+                    "Ссылка скопирована"
+                )
+        )
+        .catch(
+            () =>
+                showToast(
+                    "Не удалось скопировать ссылку"
                 )
         );
-
-
-    if (
-        unviewed.length > 0
-    ) {
-
-        buildPersonalizedFeed();
-
-
-        currentIndex = 0;
-
-
-        if (
-            products.length > 0
-        ) {
-
-            animateCardChange(
-                "next"
-            );
-
-        } else {
-
-            showEmptyFeed();
-        }
-
-
-        return;
-    }
-
-
-    /*
-    Не начинаем новый круг.
-
-    Пользователь просмотрел всё,
-    что подходит под текущие фильтры.
-    */
-
-    console.log(
-        "[StyleFlow] Все доступные товары просмотрены."
-    );
-
-
-    showEmptyFeed();
-
-
-    showToast(
-        "Ты просмотрел все доступные товары"
-    );
 }
 
-
-function previousProduct() {
-
-    if (
-        !products.length
-    ) {
-
-        return;
-    }
-
-
-    const previousIndex =
-        findNextUnviewedIndex(
-            currentIndex,
-            -1
-        );
-
-
-    if (
-        previousIndex < 0
-    ) {
-
-        showToast(
-            "Больше непросмотренных товаров нет"
-        );
-
-
-        return;
-    }
-
-
-    currentIndex =
-        previousIndex;
-
-
-    animateCardChange(
-        "previous"
-    );
-}
-
-
-/* =========================================================
-CARD ANIMATION
-========================================================= */
-
-function animateCardChange(
-    direction
-) {
-
-    const card =
-        document.getElementById(
-            "productCard"
-        );
-
-
-    if (!card) {
-        return;
-    }
-
-
-    card.style.opacity =
-        "0";
-
-
-    card.style.transform =
-        direction === "next"
-            ? "translateY(-20px)"
-            : "translateY(20px)";
-
-
-    setTimeout(
-        () => {
-
-            showProduct();
-
-
-            requestAnimationFrame(
-                () => {
-
-                    card.style.opacity =
-                        "1";
-
-
-                    card.style.transform =
-                        "";
-                }
-            );
-
-        },
-        100
-    );
-}
-
-
-function resetCardPosition() {
-
-    const card =
-        document.getElementById(
-            "productCard"
-        );
-
-
-    if (!card) {
-        return;
-    }
-
-
-    card.style.opacity =
-        "1";
-
-
-    card.style.transform =
-        "";
-}
-
-
-/* =========================================================
-HEART
-========================================================= */
-
-function showHeart() {
-
-    const heart =
-        document.getElementById(
-            "bigHeart"
-        );
-
-
-    if (!heart) {
-        return;
-    }
-
-
-    heart.classList.remove(
-        "show"
-    );
-
-
-    void heart.offsetWidth;
-
-
-    heart.classList.add(
-        "show"
-    );
-}
-
-
-/* =========================================================
-TOAST
-========================================================= */
-
-let toastTimer =
-    null;
-
-
-function showToast(
-    message
-) {
-
+function showToast(message) {
     const toast =
         document.getElementById(
             "toast"
         );
 
-
     if (!toast) {
         return;
     }
 
-
     toast.textContent =
         message;
-
 
     toast.classList.add(
         "show"
     );
 
-
     clearTimeout(
-        toastTimer
+        showToast.timer
     );
 
-
-    toastTimer =
+    showToast.timer =
         setTimeout(
-            () => {
-
+            () =>
                 toast.classList.remove(
                     "show"
-                );
-
-            },
+                ),
             1800
         );
 }
 
+document.addEventListener(
+    "DOMContentLoaded",
+    async () => {
+        try {
+            const tg =
+                window.Telegram?.WebApp;
 
-/* =========================================================
-LOCAL STORAGE
-========================================================= */
+            tg?.ready();
+            tg?.expand();
 
-function loadJSON(
-    key,
-    fallback
-) {
+            try {
+                tg?.setHeaderColor(
+                    "#09090d"
+                );
 
-    try {
-
-        const value =
-            localStorage.getItem(
-                key
-            );
-
-
-        if (!value) {
-            return fallback;
+                tg?.setBackgroundColor(
+                    "#09090d"
+                );
+            } catch {
+                // ignore
+            }
+        } catch {
+            // ignore
         }
 
+        setupSearch();
+        setupSwipe();
 
-        const parsed =
-            JSON.parse(value);
+        telegramUserId =
+            getTelegramUserId();
 
+        await loadUserHistory();
+        await loadFeed();
 
-        return parsed ??
-            fallback;
-
-    } catch (error) {
-
-        return fallback;
+        updateProfile();
+        updateFilterButton();
     }
-}
-
-
-function saveJSON(
-    key,
-    value
-) {
-
-    try {
-
-        localStorage.setItem(
-            key,
-            JSON.stringify(value)
-        );
-
-    } catch (error) {
-
-        console.error(
-            "localStorage error:",
-            error
-        );
-    }
-}
-
-
-/* =========================================================
-ESCAPING
-========================================================= */
-
-function escapeHTML(
-    value
-) {
-
-    return String(
-        value ?? ""
-    )
-        .replace(
-            /&/g,
-            "&amp;"
-        )
-        .replace(
-            /</g,
-            "&lt;"
-        )
-        .replace(
-            />/g,
-            "&gt;"
-        )
-        .replace(
-            /"/g,
-            "&quot;"
-        )
-        .replace(
-            /'/g,
-            "&#039;"
-        );
-}
-
-
-function escapeAttribute(
-    value
-) {
-
-    return escapeHTML(
-        value
-    );
-}
-
-
-function capitalize(
-    value
-) {
-
-    const text =
-        String(
-            value || ""
-        );
-
-
-    if (!text) {
-        return "";
-    }
-
-
-    return (
-        text.charAt(0)
-            .toUpperCase() +
-        text.slice(1)
-    );
-}
-
-
-function getRussianPlural(
-    number,
-    one,
-    few,
-    many
-) {
-
-    const n =
-        Math.abs(number) %
-        100;
-
-
-    const n1 =
-        n % 10;
-
-
-    if (
-        n > 10 &&
-        n < 20
-    ) {
-
-        return many;
-    }
-
-
-    if (
-        n1 === 1
-    ) {
-
-        return one;
-    }
-
-
-    if (
-        n1 >= 2 &&
-        n1 <= 4
-    ) {
-
-        return few;
-    }
-
-
-    return many;
-}
+);
