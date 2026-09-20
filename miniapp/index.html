@@ -959,6 +959,85 @@
             font-size: 10px;
         }
 
+        .profile-recommendations-box {
+            margin-top: 10px;
+            padding: 12px;
+            border-radius: 18px;
+            background:
+                linear-gradient(145deg, rgba(139,92,246,.12), rgba(255,255,255,.035));
+            border: 1px solid rgba(255,255,255,.07);
+        }
+
+        .profile-recommendation-caption {
+            margin-bottom: 9px;
+            color: rgba(255,255,255,.42);
+            font-size: 10px;
+        }
+
+        .profile-recommendation-button {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 7px;
+            padding: 11px 12px;
+            border: 1px solid rgba(255,255,255,.07);
+            border-radius: 14px;
+            background: rgba(255,255,255,.045);
+            color: rgba(255,255,255,.88);
+            text-align: left;
+            font: inherit;
+            cursor: pointer;
+            transition: transform .16s ease, background .16s ease, border-color .16s ease;
+        }
+
+        .profile-recommendation-button:first-of-type {
+            margin-top: 0;
+        }
+
+        .profile-recommendation-button:active {
+            transform: scale(.985);
+            background: rgba(255,255,255,.075);
+        }
+
+        .profile-recommendation-button strong {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .profile-recommendation-button small {
+            display: block;
+            margin-top: 3px;
+            color: rgba(255,255,255,.36);
+            font-size: 9px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .profile-rec-icon {
+            width: 29px;
+            height: 29px;
+            display: grid;
+            place-items: center;
+            flex: 0 0 29px;
+            border-radius: 10px;
+            background: rgba(139,92,246,.13);
+            font-size: 14px;
+        }
+
+        .profile-recommendation-main {
+            background: rgba(139,92,246,.10);
+        }
+
+        .profile-recommendation-fresh {
+            background: rgba(255,255,255,.025);
+        }
+
         /* =========================
            PROFILE
         ========================= */
@@ -1786,7 +1865,17 @@
                     Никаких настроек интересов вручную — всё работает автоматически.
                 </div>
             </div>
-        </div>        <div class="profile-section">
+        </div>
+
+        <div class="profile-section">
+            <div class="profile-section-title">Вам может понравиться</div>
+            <div
+                id="profileRecommendations"
+                class="profile-recommendations-box"
+            ></div>
+        </div>
+
+        <div class="profile-section">
             <div class="profile-section-title">Быстрые действия</div>
             <div class="profile-quick-actions">
                 <button class="profile-quick-action" onclick="openCollection('favorites')">
@@ -2774,11 +2863,16 @@ function normalizeProduct(
         "";
 
 
+    const rawCategory =
+        item.category ||
+        item.type ||
+        item.category_name ||
+        item.product_category ||
+        "";
+
     const category =
         getFilterCategoryLabel(
-            item.category ||
-            item.type ||
-            "Одежда"
+            rawCategory
         );
 
 
@@ -2813,6 +2907,13 @@ function normalizeProduct(
         brand,
 
         category,
+
+        description:
+            item.description ||
+            item.short_description ||
+            item.subtitle ||
+            item.details ||
+            "",
 
         price,
 
@@ -3151,11 +3252,11 @@ function getFilterCategoryKey(value) {
         normalizeText(text);
 
     if (/^\d+$/.test(normalized)) {
-        return "одежда";
+        return "";
     }
 
     if (/^[\d\s._-]+$/.test(normalized)) {
-        return "одежда";
+        return "";
     }
 
     return normalized;
@@ -3176,11 +3277,11 @@ function getFilterCategoryLabel(value) {
         normalizeText(text);
 
     if (/^\d+$/.test(normalized)) {
-        return "Одежда";
+        return "";
     }
 
     if (/^[\d\s._-]+$/.test(normalized)) {
-        return "Одежда";
+        return "";
     }
 
     return text;
@@ -5864,7 +5965,7 @@ function showProduct(allowViewed = false) {
 
     category.textContent =
         currentProduct.category ||
-        "Одежда";
+        "";
 
 
     updateLikeButton();
@@ -6603,7 +6704,7 @@ function renderSingleProductObject(
 
         category.textContent =
             product.category ||
-            "Одежда";
+            "";
     }
 
 
@@ -9033,6 +9134,1552 @@ function getRussianPlural(
 
     return many;
 }
+
+/* =========================================================
+STYLEFLOW — UNIVERSAL RECOMMENDATION ENGINE V3
+=========================================================
+
+Главный принцип:
+STYLEFLOW не предполагает заранее, что пользователь интересуется
+одеждой. Профиль строится из реальных действий пользователя и
+содержимого товаров/объявлений.
+
+Сигналы:
+- просмотр — слабый сигнал экспозиции;
+- открытие — сильный сигнал намерения;
+- избранное — очень сильный явный сигнал;
+- поисковые запросы — сильный сигнал текущего намерения;
+- свежесть действий — важнее старых;
+- совпадение слов/фраз — дополнительный сигнал;
+- категория/бренд/источник — структурные сигналы;
+- цена — мягкое предпочтение, а не жёсткое правило.
+
+Лента:
+- никогда намеренно не возвращает просмотренное;
+- ранжирует по релевантности;
+- смешивает близкие интересы с небольшим exploration;
+- ограничивает повторение одной темы/источника;
+- постепенно меняет профиль по новым действиям.
+========================================================= */
+
+const SF_V3_VERSION = "3.0-universal";
+
+const SF_V3_STOPWORDS = new Set([
+    "и","или","но","а","в","во","на","по","из","за","для","с","со",
+    "к","ко","у","от","до","о","об","про","как","что","это","так",
+    "же","ли","бы","не","да","нет","все","всё","мой","моя","мои",
+    "мое","твой","твоя","твои","этот","эта","эти","того","там","тут",
+    "есть","был","была","были","будет","можно","нужно","хочу","ищу",
+    "купить","найти","показать","покажи","товар","товары","объявление",
+    "объявления","цена","новый","новая","новое","новые","шт","шт.",
+    "руб","руб.","byn","бел","бел.р","рб"
+]);
+
+function sfV3NormalizeToken(value) {
+    let word = String(value || "")
+        .toLowerCase()
+        .replace(/ё/g, "е")
+        .replace(/[^a-zа-я0-9]+/gi, "")
+        .trim();
+
+    if (word.length < 2 || SF_V3_STOPWORDS.has(word)) {
+        return "";
+    }
+
+    /*
+    Лёгкая нормализация окончаний.
+    Это намеренно не полноценный морфологический анализатор:
+    для браузерного Mini App он должен быть быстрым.
+    */
+    const endings = [
+        "иями","ами","ого","ему","ому","ыми","ими","ая","яя",
+        "ое","ее","ый","ий","ой","ые","ие","ов","ев","ам","ям",
+        "ах","ях","ом","ем","ым","им","ую","юю","ою","ею",
+        "а","я","ы","и","о","е","у","ю"
+    ];
+
+    for (const ending of endings) {
+        if (word.length > ending.length + 3 &&
+            word.endsWith(ending)) {
+            word = word.slice(0, -ending.length);
+            break;
+        }
+    }
+
+    return word;
+}
+
+function sfV3Tokens(value) {
+    return Array.from(
+        new Set(
+            String(value || "")
+                .toLowerCase()
+                .replace(/ё/g, "е")
+                .split(/[^a-zа-я0-9]+/gi)
+                .map(sfV3NormalizeToken)
+                .filter(Boolean)
+        )
+    );
+}
+
+function sfV3ProductText(product) {
+    if (!product) return "";
+
+    return [
+        product.title,
+        product.brand,
+        product.category,
+        product.description,
+        product.type,
+        product.subtitle,
+        product.raw && product.raw.name,
+        product.raw && product.raw.product_name,
+        product.raw && product.raw.description
+    ]
+        .filter(Boolean)
+        .join(" ");
+}
+
+function sfV3CanonicalProductId(productOrId) {
+    if (productOrId === null || productOrId === undefined) {
+        return "";
+    }
+
+    if (typeof productOrId === "object") {
+        const p = productOrId;
+
+        const source = normalizeSource(
+            p.source ||
+            p.marketplace ||
+            p.platform ||
+            ""
+        );
+
+        const external = String(
+            p.external_id ??
+            p.externalId ??
+            p.product_id ??
+            p.productId ??
+            ""
+        ).trim();
+
+        if (source && external) {
+            return `${source}:${external}`;
+        }
+
+        return String(
+            p.id ??
+            external ??
+            ""
+        ).trim();
+    }
+
+    return String(productOrId).trim();
+}
+
+function sfV3ProductIdVariants(productOrId) {
+    if (
+        productOrId === null ||
+        productOrId === undefined
+    ) {
+        return [];
+    }
+
+    if (typeof productOrId !== "object") {
+        const raw = String(productOrId).trim();
+        return raw ? [raw] : [];
+    }
+
+    const p = productOrId;
+    const source = normalizeSource(
+        p.source ||
+        p.marketplace ||
+        p.platform ||
+        ""
+    );
+
+    const values = [
+        p.id,
+        p.external_id,
+        p.externalId,
+        p.product_id,
+        p.productId
+    ];
+
+    if (source) {
+        values.push(
+            `${source}:${p.external_id || p.product_id || p.id || ""}`,
+            `${source}_${p.external_id || p.product_id || p.id || ""}`
+        );
+    }
+
+    return Array.from(
+        new Set(
+            values
+                .filter(v => v !== null && v !== undefined)
+                .map(v => String(v).trim())
+                .filter(Boolean)
+        )
+    );
+}
+
+function sfV3SameProduct(a, b) {
+    const left = new Set(
+        sfV3ProductIdVariants(a)
+    );
+
+    return sfV3ProductIdVariants(b)
+        .some(id => left.has(id));
+}
+
+function sfV3IsViewed(product) {
+    if (!product) return true;
+
+    return Array.isArray(viewedProducts) &&
+        viewedProducts.some(
+            id => sfV3SameProduct(id, product)
+        );
+}
+
+function sfV3ActionRecency(index, total) {
+    if (!total) return 1;
+
+    /*
+    Последнее действие ≈ 1.0.
+    Старые действия постепенно ослабевают, но не исчезают мгновенно.
+    */
+    const position = (index + 1) / total;
+
+    return 0.35 + Math.pow(position, 0.65) * 0.65;
+}
+
+function sfV3AddMap(map, key, amount) {
+    if (!key) return;
+
+    map[key] =
+        (Number(map[key]) || 0) +
+        amount;
+}
+
+function sfV3AddTokens(profile, text, weight) {
+    sfV3Tokens(text).forEach(token => {
+        sfV3AddMap(
+            profile.keywords,
+            token,
+            weight
+        );
+    });
+}
+
+function sfV3AddProductSignal(
+    profile,
+    product,
+    weight,
+    options = {}
+) {
+    if (!product || !Number.isFinite(weight)) {
+        return;
+    }
+
+    const category = normalizeText(
+        product.category
+    );
+
+    const brand = normalizeText(
+        product.brand
+    );
+
+    const source = normalizeText(
+        product.source
+    );
+
+    sfV3AddMap(
+        profile.categories,
+        category,
+        weight
+    );
+
+    sfV3AddMap(
+        profile.brands,
+        brand,
+        weight
+    );
+
+    sfV3AddMap(
+        profile.sources,
+        source,
+        weight
+    );
+
+    sfV3AddTokens(
+        profile,
+        sfV3ProductText(product),
+        weight * 0.72
+    );
+
+    if (
+        product.price !== null &&
+        Number.isFinite(Number(product.price))
+    ) {
+        profile.prices.push({
+            price: Number(product.price),
+            weight
+        });
+    }
+
+    if (options.countSignal !== false) {
+        profile.totalSignals += weight;
+    }
+}
+
+function sfV3FindHistoryProduct(id) {
+    /*
+    Сначала обычный поиск проекта.
+    Затем расширенный поиск по всем ID-вариантам.
+    */
+    const direct = findProductById(id);
+
+    if (direct) {
+        return direct;
+    }
+
+    const catalog = [
+        ...(Array.isArray(allProducts) ? allProducts : []),
+        ...(Array.isArray(products) ? products : [])
+    ];
+
+    return catalog.find(
+        product => sfV3SameProduct(id, product)
+    ) || null;
+}
+
+function sfV3GetSearchHistory() {
+    const raw = loadJSON(
+        "styleflow_search_history",
+        []
+    );
+
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+
+    return raw
+        .map(entry => {
+            if (typeof entry === "string") {
+                return {
+                    query: entry,
+                    weight: 1
+                };
+            }
+
+            return {
+                query: entry && entry.query
+                    ? entry.query
+                    : "",
+                weight:
+                    Number(entry && entry.weight) || 1
+            };
+        })
+        .filter(entry => entry.query);
+}
+
+/* =========================================================
+UNIVERSAL USER PROFILE
+========================================================= */
+
+function buildUserProfile() {
+    const profile = {
+        categories: {},
+        brands: {},
+        sources: {},
+        keywords: {},
+        prices: [],
+        totalSignals: 0,
+        explicitSignals: 0,
+        viewedOnlySignals: 0,
+        searchIntent: {},
+        generatedAt: Date.now()
+    };
+
+    const viewed = Array.isArray(viewedProducts)
+        ? viewedProducts.slice(-250)
+        : [];
+
+    viewed.forEach((id, index) => {
+        const product = sfV3FindHistoryProduct(id);
+        if (!product) return;
+
+        const recency =
+            sfV3ActionRecency(
+                index,
+                viewed.length
+            );
+
+        /*
+        Сам просмотр — не считаем доказательством любви.
+        Это только слабый сигнал того, что направление было показано.
+        */
+        sfV3AddProductSignal(
+            profile,
+            product,
+            0.35 * recency
+        );
+
+        profile.viewedOnlySignals += 1;
+    });
+
+    const opened = Array.isArray(openedProducts)
+        ? openedProducts.slice(-180)
+        : [];
+
+    opened.forEach((id, index) => {
+        const product = sfV3FindHistoryProduct(id);
+        if (!product) return;
+
+        const recency =
+            sfV3ActionRecency(
+                index,
+                opened.length
+            );
+
+        sfV3AddProductSignal(
+            profile,
+            product,
+            4.5 * recency
+        );
+
+        profile.explicitSignals += 1;
+    });
+
+    (Array.isArray(favorites) ? favorites : [])
+        .forEach(productRaw => {
+            const product =
+                normalizeProduct(
+                    productRaw
+                );
+
+            if (!product) return;
+
+            sfV3AddProductSignal(
+                profile,
+                product,
+                9.5
+            );
+
+            profile.explicitSignals += 1;
+        });
+
+    const searches =
+        sfV3GetSearchHistory()
+            .slice(-50);
+
+    searches.forEach((entry, index) => {
+        const recency =
+            sfV3ActionRecency(
+                index,
+                searches.length
+            );
+
+        const queryWeight =
+            5.5 *
+            recency *
+            Math.max(
+                0.5,
+                Number(entry.weight) || 1
+            );
+
+        const tokens =
+            sfV3Tokens(
+                entry.query
+            );
+
+        tokens.forEach(token => {
+            sfV3AddMap(
+                profile.keywords,
+                token,
+                queryWeight
+            );
+
+            sfV3AddMap(
+                profile.searchIntent,
+                token,
+                queryWeight
+            );
+        });
+
+        profile.totalSignals +=
+            queryWeight;
+
+        profile.explicitSignals += 1;
+    });
+
+    return profile;
+}
+
+/* =========================================================
+SIMILARITY
+========================================================= */
+
+function sfV3TokenSimilarity(
+    productTokens,
+    profileKeywords
+) {
+    if (!productTokens.length) {
+        return 0;
+    }
+
+    let matched = 0;
+    let totalImportance = 0;
+
+    productTokens.forEach(token => {
+        const value =
+            Number(
+                profileKeywords[token]
+            ) || 0;
+
+        if (value > 0) {
+            matched += Math.min(
+                1,
+                value / 10
+            );
+
+            totalImportance +=
+                Math.min(
+                    2.5,
+                    value / 8
+                );
+        }
+    });
+
+    return Math.min(
+        1,
+        (matched / productTokens.length) * 0.65 +
+        (totalImportance /
+            Math.max(1, productTokens.length * 1.4)
+        ) * 0.35
+    );
+}
+
+function sfV3PriceFit(product, profile) {
+    if (
+        !product ||
+        product.price === null ||
+        !Number.isFinite(Number(product.price)) ||
+        !profile.prices.length
+    ) {
+        return 0;
+    }
+
+    const price =
+        Number(product.price);
+
+    let totalWeight = 0;
+    let weightedFit = 0;
+
+    profile.prices.forEach(item => {
+        const p = Number(item.price);
+        const w = Number(item.weight) || 0;
+
+        if (
+            !Number.isFinite(p) ||
+            p <= 0 ||
+            w <= 0
+        ) {
+            return;
+        }
+
+        /*
+        Относительное расстояние лучше абсолютного:
+        20 BYN для дешёвого товара и 20 BYN для дорогого товара
+        означают совершенно разное.
+        */
+        const distance =
+            Math.abs(price - p) /
+            Math.max(
+                1,
+                Math.max(price, p)
+            );
+
+        const fit =
+            Math.exp(
+                -Math.pow(distance / 0.28, 2)
+            );
+
+        weightedFit +=
+            fit * w;
+
+        totalWeight += w;
+    });
+
+    if (!totalWeight) {
+        return 0;
+    }
+
+    return Math.max(
+        0,
+        Math.min(
+            1,
+            weightedFit / totalWeight
+        )
+    );
+}
+
+function sfV3Freshness(product) {
+    const rawDate =
+        product &&
+        (
+            product.updated_at ||
+            product.updatedAt ||
+            product.created_at ||
+            product.createdAt
+        );
+
+    const timestamp =
+        new Date(rawDate || 0).getTime();
+
+    if (
+        !Number.isFinite(timestamp) ||
+        timestamp <= 0
+    ) {
+        return 0;
+    }
+
+    const ageDays =
+        Math.max(
+            0,
+            (Date.now() - timestamp) /
+            86400000
+        );
+
+    return Math.exp(
+        -ageDays / 14
+    );
+}
+
+/* =========================================================
+SMART SCORE
+========================================================= */
+
+function calculateRecommendationScore(
+    product,
+    profile
+) {
+    if (!product || !profile) {
+        return 0;
+    }
+
+    const tokens =
+        sfV3Tokens(
+            sfV3ProductText(product)
+        );
+
+    const keywordSimilarity =
+        sfV3TokenSimilarity(
+            tokens,
+            profile.keywords
+        );
+
+    const category =
+        normalizeText(
+            product.category
+        );
+
+    const brand =
+        normalizeText(
+            product.brand
+        );
+
+    const source =
+        normalizeText(
+            product.source
+        );
+
+    const categoryAffinity =
+        category &&
+        profile.categories[category]
+            ? Math.min(
+                1,
+                profile.categories[category] / 24
+            )
+            : 0;
+
+    const brandAffinity =
+        brand &&
+        profile.brands[brand]
+            ? Math.min(
+                1,
+                profile.brands[brand] / 18
+            )
+            : 0;
+
+    const sourceAffinity =
+        source &&
+        profile.sources[source]
+            ? Math.min(
+                1,
+                profile.sources[source] / 35
+            )
+            : 0;
+
+    const priceFit =
+        sfV3PriceFit(
+            product,
+            profile
+        );
+
+    const searchFit =
+        sfV3TokenSimilarity(
+            tokens,
+            profile.searchIntent
+        );
+
+    const freshness =
+        sfV3Freshness(
+            product
+        );
+
+    /*
+    Баланс намерения:
+    - поиск и содержание товара;
+    - точные структурные совпадения;
+    - цена;
+    - источник;
+    - свежесть.
+
+    Никакой отдельный признак не способен один
+    полностью определить результат.
+    */
+    let score =
+        keywordSimilarity * 34 +
+        searchFit * 22 +
+        categoryAffinity * 18 +
+        brandAffinity * 20 +
+        priceFit * 13 +
+        sourceAffinity * 5 +
+        freshness * 3;
+
+    /*
+    Сильный бонус, если товар одновременно совпал
+    по нескольким признакам. Например:
+    "наушники" + Sony + привычный диапазон цены.
+    */
+    const matchedDimensions =
+        [
+            keywordSimilarity >= 0.25,
+            searchFit >= 0.25,
+            categoryAffinity >= 0.25,
+            brandAffinity >= 0.25,
+            priceFit >= 0.55
+        ]
+            .filter(Boolean)
+            .length;
+
+    if (matchedDimensions >= 3) {
+        score += 10;
+    }
+
+    if (matchedDimensions >= 4) {
+        score += 8;
+    }
+
+    /*
+    Очень маленькая случайность нужна только
+    для разведения почти одинаковых карточек.
+    */
+    score += Math.random() * 0.35;
+
+    return Math.max(
+        0,
+        score
+    );
+}
+
+/* =========================================================
+DIVERSIFIED PERSONALIZED FEED
+========================================================= */
+
+function buildPersonalizedFeed() {
+    if (!Array.isArray(allProducts) || !allProducts.length) {
+        products = [];
+        return;
+    }
+
+    const filtered =
+        applyProductFilters(
+            allProducts
+        );
+
+    const candidates =
+        filtered.filter(
+            product =>
+                !sfV3IsViewed(product)
+        );
+
+    if (!candidates.length) {
+        products = [];
+        return;
+    }
+
+    /*
+    Явные сортировки пользователя имеют приоритет.
+    */
+    if (activeFilters.sort === "price_asc") {
+        products = sortByPrice(
+            candidates,
+            "asc"
+        );
+        return;
+    }
+
+    if (activeFilters.sort === "price_desc") {
+        products = sortByPrice(
+            candidates,
+            "desc"
+        );
+        return;
+    }
+
+    if (activeFilters.sort === "newest") {
+        products = sortNewest(
+            candidates
+        );
+        return;
+    }
+
+    const profile =
+        buildUserProfile();
+
+    const signalLevel =
+        Math.min(
+            1,
+            (
+                Number(profile.totalSignals) || 0
+            ) / 42
+        );
+
+    /*
+    Для нового пользователя больше exploration.
+    По мере накопления поведения алгоритм становится точнее.
+    Но exploration никогда не исчезает полностью.
+    */
+    const explorationRatio =
+        0.38 -
+        signalLevel * 0.28;
+
+    const scored =
+        candidates.map(
+            product => ({
+                product,
+                score:
+                    calculateRecommendationScore(
+                        product,
+                        profile
+                    ),
+                tokens:
+                    new Set(
+                        sfV3Tokens(
+                            sfV3ProductText(
+                                product
+                            )
+                        )
+                    )
+            })
+        );
+
+    /*
+    Сначала сортируем по силе интереса.
+    */
+    scored.sort(
+        (a, b) =>
+            b.score - a.score
+    );
+
+    const result = [];
+    const remaining = scored.slice();
+
+    let lastSource = "";
+    let sourceStreak = 0;
+
+    let lastCategory = "";
+    let categoryStreak = 0;
+
+    while (remaining.length) {
+        let available =
+            remaining.filter(
+                entry => {
+                    const category =
+                        normalizeText(
+                            entry.product.category
+                        );
+
+                    const source =
+                        normalizeText(
+                            entry.product.source
+                        );
+
+                    const categoryBlocked =
+                        category &&
+                        category === lastCategory &&
+                        categoryStreak >= 2;
+
+                    const sourceBlocked =
+                        source &&
+                        source === lastSource &&
+                        sourceStreak >= 3;
+
+                    return !(
+                        categoryBlocked ||
+                        sourceBlocked
+                    );
+                }
+            );
+
+        if (!available.length) {
+            available = remaining;
+        }
+
+        /*
+        Exploration:
+        выбираем один из менее очевидных кандидатов,
+        но не полностью случайный товар.
+        */
+        let selected;
+
+        if (
+            Math.random() <
+            explorationRatio
+        ) {
+            const topPoolSize =
+                Math.min(
+                    available.length,
+                    Math.max(
+                        5,
+                        Math.ceil(
+                            available.length * 0.30
+                        )
+                    )
+                );
+
+            const pool =
+                available
+                    .slice()
+                    .sort(
+                        (a, b) =>
+                            b.score - a.score
+                    )
+                    .slice(
+                        0,
+                        topPoolSize
+                    );
+
+            selected =
+                pool[
+                    Math.floor(
+                        Math.random() *
+                        pool.length
+                    )
+                ];
+
+        } else {
+            /*
+            В exploitation используем score с мягким
+            уменьшением разрыва между соседями.
+            */
+            const poolSize =
+                Math.min(
+                    available.length,
+                    12
+                );
+
+            const pool =
+                available
+                    .slice()
+                    .sort(
+                        (a, b) =>
+                            b.score - a.score
+                    )
+                    .slice(
+                        0,
+                        poolSize
+                    );
+
+            const maxScore =
+                Math.max(
+                    1,
+                    ...pool.map(
+                        item => item.score
+                    )
+                );
+
+            const weighted =
+                pool.map(
+                    item => ({
+                        item,
+                        weight:
+                            0.25 +
+                            Math.pow(
+                                Math.max(
+                                    0,
+                                    item.score /
+                                    maxScore
+                                ),
+                                2.2
+                            ) * 8
+                    })
+                );
+
+            const total =
+                weighted.reduce(
+                    (sum, item) =>
+                        sum + item.weight,
+                    0
+                );
+
+            let random =
+                Math.random() *
+                total;
+
+            selected =
+                weighted[
+                    weighted.length - 1
+                ].item;
+
+            for (const item of weighted) {
+                random -= item.weight;
+
+                if (random <= 0) {
+                    selected = item.item;
+                    break;
+                }
+            }
+        }
+
+        const index =
+            remaining.indexOf(
+                selected
+            );
+
+        if (index >= 0) {
+            remaining.splice(
+                index,
+                1
+            );
+        }
+
+        const category =
+            normalizeText(
+                selected.product.category
+            );
+
+        const source =
+            normalizeText(
+                selected.product.source
+            );
+
+        if (category === lastCategory) {
+            categoryStreak += 1;
+        } else {
+            lastCategory = category;
+            categoryStreak = 1;
+        }
+
+        if (source === lastSource) {
+            sourceStreak += 1;
+        } else {
+            lastSource = source;
+            sourceStreak = 1;
+        }
+
+        result.push(
+            selected.product
+        );
+    }
+
+    products = result;
+
+    console.log(
+        "[StyleFlow V3] Универсальная персональная лента:",
+        {
+            candidates: candidates.length,
+            result: products.length,
+            signals: profile.totalSignals,
+            exploration:
+                Math.round(
+                    explorationRatio * 100
+                ) + "%"
+        }
+    );
+}
+
+/* =========================================================
+PROFILE — "ВАМ МОЖЕТ ПОНРАВИТЬСЯ"
+========================================================= */
+
+function sfV3GetRecommendationTopics(limit = 5) {
+    const profile =
+        buildUserProfile();
+
+    const topics = [];
+
+    const addTopic = (
+        text,
+        score,
+        query
+    ) => {
+        const clean =
+            String(text || "")
+                .trim();
+
+        if (
+            !clean ||
+            clean.length < 2 ||
+            !query
+        ) {
+            return;
+        }
+
+        const duplicate =
+            topics.some(
+                item =>
+                    normalizeText(
+                        item.query
+                    ) ===
+                    normalizeText(
+                        query
+                    )
+            );
+
+        if (duplicate) {
+            return;
+        }
+
+        topics.push({
+            text: clean,
+            query: String(query),
+            score:
+                Number(score) || 0
+        });
+    };
+
+    Object.entries(
+        profile.searchIntent || {}
+    ).forEach(
+        ([token, score]) => {
+            addTopic(
+                token,
+                score + 50,
+                token
+            );
+        }
+    );
+
+    Object.entries(
+        profile.brands || {}
+    ).forEach(
+        ([brand, score]) => {
+            addTopic(
+                brand,
+                score + 35,
+                brand
+            );
+        }
+    );
+
+    Object.entries(
+        profile.categories || {}
+    ).forEach(
+        ([category, score]) => {
+            addTopic(
+                category,
+                score + 20,
+                category
+            );
+        }
+    );
+
+    Object.entries(
+        profile.keywords || {}
+    ).forEach(
+        ([keyword, score]) => {
+            addTopic(
+                keyword,
+                score,
+                keyword
+            );
+        }
+    );
+
+    return topics
+        .sort(
+            (a, b) =>
+                b.score - a.score
+        )
+        .slice(
+            0,
+            limit
+        );
+}
+
+function sfV3SearchByTopic(query) {
+    const clean =
+        String(query || "")
+            .trim();
+
+    if (!clean) {
+        return;
+    }
+
+    activeFilters = {
+        ...activeFilters,
+        query: clean,
+        sort: "relevance"
+    };
+
+    saveJSON(
+        "styleflow_filters",
+        activeFilters
+    );
+
+    /*
+    Если в проекте есть существующий search launcher,
+    используем его. Иначе просто перестраиваем локальную ленту.
+    */
+    const input =
+        document.getElementById(
+            "searchInput"
+        );
+
+    if (input) {
+        input.value = clean;
+    }
+
+    switchTab("feed");
+
+    if (typeof renderFilterState === "function") {
+        try {
+            renderFilterState();
+        } catch (e) {}
+    }
+
+    buildPersonalizedFeed();
+
+    currentIndex = 0;
+
+    resetNavigationHistory();
+
+    showProduct();
+
+    showToast(
+        `Подбираем: ${clean}`
+    );
+}
+
+function sfV3OpenFreshDiscovery() {
+    activeFilters = {
+        ...activeFilters,
+        query: "",
+        sort: "relevance"
+    };
+
+    saveJSON(
+        "styleflow_filters",
+        activeFilters
+    );
+
+    switchTab("feed");
+
+    buildPersonalizedFeed();
+
+    currentIndex = 0;
+
+    resetNavigationHistory();
+
+    showProduct();
+
+    showToast(
+        "Показываем что-то новое"
+    );
+}
+
+function renderProfileRecommendations() {
+    const container =
+        document.getElementById(
+            "profileRecommendations"
+        );
+
+    if (!container) {
+        return;
+    }
+
+    const topics =
+        sfV3GetRecommendationTopics(
+            5
+        );
+
+    container.innerHTML = "";
+
+    if (!topics.length) {
+        container.innerHTML = `
+            <button
+                type="button"
+                class="profile-recommendation-button profile-recommendation-main"
+                onclick="sfV3OpenFreshDiscovery()"
+            >
+                <span class="profile-rec-icon">✨</span>
+                <span>
+                    <strong>Попробовать что-то новое</strong>
+                    <small>Алгоритм начнёт изучать твои интересы</small>
+                </span>
+            </button>
+
+            <button
+                type="button"
+                class="profile-recommendation-button"
+                onclick="switchTab('search')"
+            >
+                <span class="profile-rec-icon">🔎</span>
+                <span>
+                    <strong>Найти что угодно</strong>
+                    <small>Товар, техника, авто, услуги и другое</small>
+                </span>
+            </button>
+        `;
+
+        return;
+    }
+
+    const header =
+        document.createElement(
+            "div"
+        );
+
+    header.className =
+        "profile-recommendation-caption";
+
+    header.textContent =
+        "На основе твоих поисков и действий";
+
+    container.appendChild(
+        header
+    );
+
+    topics.forEach(
+        topic => {
+            const button =
+                document.createElement(
+                    "button"
+                );
+
+            button.type = "button";
+
+            button.className =
+                "profile-recommendation-button";
+
+            button.innerHTML = `
+                <span class="profile-rec-icon">✦</span>
+                <span>
+                    <strong>${escapeHTML(
+                        capitalize(
+                            topic.text
+                        )
+                    )}</strong>
+                    <small>Вам может понравиться</small>
+                </span>
+            `;
+
+            button.addEventListener(
+                "click",
+                () => {
+                    sfV3SearchByTopic(
+                        topic.query
+                    );
+                }
+            );
+
+            container.appendChild(
+                button
+            );
+        }
+    );
+
+    const fresh =
+        document.createElement(
+            "button"
+        );
+
+    fresh.type = "button";
+
+    fresh.className =
+        "profile-recommendation-button profile-recommendation-fresh";
+
+    fresh.innerHTML = `
+        <span class="profile-rec-icon">🌐</span>
+        <span>
+            <strong>Что-нибудь новое</strong>
+            <small>Исследовать другие интересы</small>
+        </span>
+    `;
+
+    fresh.addEventListener(
+        "click",
+        sfV3OpenFreshDiscovery
+    );
+
+    container.appendChild(
+        fresh
+    );
+}
+
+function updateProfileInterests() {
+    renderProfileRecommendations();
+}
+
+/*
+Переопределяем профиль, чтобы новый блок
+обновлялся вместе со статистикой.
+*/
+function updateProfile() {
+    const likedCount =
+        document.getElementById(
+            "likedCount"
+        );
+
+    const viewedCount =
+        document.getElementById(
+            "viewedCount"
+        );
+
+    const openedCount =
+        document.getElementById(
+            "openedCount"
+        );
+
+    const collectionCount =
+        document.getElementById(
+            "collectionCount"
+        );
+
+    if (likedCount) {
+        likedCount.textContent =
+            Array.isArray(favorites)
+                ? favorites.length
+                : 0;
+    }
+
+    if (viewedCount) {
+        viewedCount.textContent =
+            Array.isArray(viewedProducts)
+                ? viewedProducts.length
+                : 0;
+    }
+
+    if (openedCount) {
+        openedCount.textContent =
+            Array.isArray(openedProducts)
+                ? openedProducts.length
+                : 0;
+    }
+
+    if (collectionCount) {
+        const count =
+            Array.isArray(favorites)
+                ? favorites.length
+                : 0;
+
+        collectionCount.textContent =
+            `${count} ${getRussianPlural(
+                count,
+                "товар",
+                "товара",
+                "товаров"
+            )}`;
+    }
+
+    renderProfileRecommendations();
+
+    if (
+        typeof renderRecentProducts ===
+        "function"
+    ) {
+        renderRecentProducts();
+    }
+}
+
+/* =========================================================
+UNIVERSAL CATEGORY FALLBACK
+========================================================= */
+
+function sfV3DisplayCategory(product) {
+    if (!product) {
+        return "";
+    }
+
+    const value =
+        String(
+            product.category || ""
+        ).trim();
+
+    if (
+        !value ||
+        /^\\d+$/.test(value)
+    ) {
+        return "";
+    }
+
+    return value;
+}
+
+/*
+Обновляем текст категории карточки без
+автоматического "Одежда".
+*/
+function sfV3PatchProductCategoryLabel() {
+    const category =
+        document.getElementById(
+            "productCategory"
+        );
+
+    if (!category || !currentProduct) {
+        return;
+    }
+
+    category.textContent =
+        sfV3DisplayCategory(
+            currentProduct
+        );
+}
+
+/*
+После каждой карточки можно безопасно обновить
+подпись категории.
+*/
+const sfV3OriginalShowProduct =
+    showProduct;
+
+function sfV3ShowProductWrapper() {
+    sfV3OriginalShowProduct();
+
+    try {
+        sfV3PatchProductCategoryLabel();
+    } catch (e) {}
+}
+
+showProduct =
+    sfV3ShowProductWrapper;
+
+/* =========================================================
+BOOT
+========================================================= */
+
+setTimeout(
+    () => {
+        try {
+            updateProfile();
+        } catch (e) {}
+    },
+    0
+);
+
 </script>
 
 </body>
