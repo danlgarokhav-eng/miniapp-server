@@ -85,6 +85,15 @@ let serverSearchRequestId = 0;
 let serverSearchHasMore = true;
 let serverSearchLastFetchAt = 0;
 
+let feedOffset = 0;
+let feedHasMore = true;
+let feedLoading = false;
+const FEED_PAGE_SIZE = 120;
+const FEED_PREFETCH_THRESHOLD = 12;
+
+const NAVIGATION_HISTORY_LIMIT = 150;
+let productDetailsCollapsed = false;
+
 
 /* =========================================================
 SERVER USER HISTORY
@@ -236,33 +245,60 @@ GET TELEGRAM USER ID
 function getTelegramUserId() {
 
     try {
-
         if (
             window.Telegram &&
             Telegram.WebApp &&
             Telegram.WebApp.initDataUnsafe &&
             Telegram.WebApp.initDataUnsafe.user
         ) {
-
-            return String(
-                Telegram.WebApp
-                    .initDataUnsafe
-                    .user
-                    .id
-            );
+            return String(Telegram.WebApp.initDataUnsafe.user.id);
         }
-
     } catch (error) {
-
-        console.error(
-            "[StyleFlow] Ошибка получения Telegram user.id:",
-            error
-        );
+        console.error("[StyleFlow] Ошибка получения Telegram user.id:", error);
     }
-
 
     return "";
 }
+
+
+function getTelegramInitData() {
+    try {
+        if (window.Telegram && Telegram.WebApp) {
+            return String(Telegram.WebApp.initData || "");
+        }
+    } catch (error) {
+        console.error("[StyleFlow] Ошибка получения Telegram initData:", error);
+    }
+    return "";
+}
+
+
+async function authenticateTelegram() {
+    const initData = getTelegramInitData();
+    if (!initData) return false;
+
+    try {
+        const response = await fetch("/api/auth/telegram", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({init_data: initData}),
+            cache: "no-store"
+        });
+
+        const data = await response.json();
+
+        if (data && data.verified && data.user_id) {
+            telegramUserId = String(data.user_id);
+            console.log("[StyleFlow] Telegram аккаунт подтверждён:", telegramUserId);
+            return true;
+        }
+    } catch (error) {
+        console.error("[StyleFlow] Ошибка Telegram auth:", error);
+    }
+
+    return Boolean(telegramUserId);
+}
+
 
 
 /* =========================================================
@@ -276,37 +312,27 @@ document.addEventListener(
         setupSearch();
         setupSearchSources();
         setupSearchSuggestionFocus();
-
         setupSwipe();
 
-
-        telegramUserId =
-            getTelegramUserId();
-
+        telegramUserId = getTelegramUserId();
 
         console.log(
             "[StyleFlow] Telegram user ID:",
             telegramUserId || "не найден"
         );
 
+        renderCachedFeedImmediately();
 
-        /*
-        Сначала история.
-        */
+        const authPromise = authenticateTelegram();
+        const feedPromise = loadFeed();
 
+        await authPromise;
         await loadUserHistory();
+        await feedPromise;
 
-
-        /*
-        Потом каталог.
-        */
-
-        await loadFeed();
-
-
-        /*
-        Обновляем профиль.
-        */
+        if (!activeServerSearch.query) {
+            rebuildFeedKeepingPosition();
+        }
 
         updateProfile();
         updateProfileInterests();
@@ -393,12 +419,12 @@ async function loadUserHistory() {
 
             if (
                 viewedProducts.length >
-                500
+                150
             ) {
 
                 viewedProducts =
                     viewedProducts.slice(
-                        -500
+                        -150
                     );
             }
 
@@ -618,203 +644,229 @@ async function syncUserAction(
 LOAD FEED
 ========================================================= */
 
-async function loadFeed() {
+function renderCachedFeedImmediately() {
+    if (activeServerSearch.query) return false;
 
-    // Если поиск стартовал во время загрузки общей ленты,
-    // общий /api/feed не имеет права перезаписать результаты поиска.
+    const cached = loadJSON("styleflow_main_feed", []);
+    if (!Array.isArray(cached) || !cached.length) return false;
+
+    allProducts = cached.map(normalizeProduct);
+    feedOffset = allProducts.length;
+
+    populateFilterCategories();
+    renderFilterSources();
+    buildPersonalizedFeed();
+
+    if (products.length) {
+        currentIndex = 0;
+        resetNavigationHistory();
+        showProduct();
+        rememberCurrentProduct();
+        preloadUpcomingImages();
+        return true;
+    }
+
+    showEmptyFeed();
+    return false;
+}
+
+
+function rebuildFeedKeepingPosition() {
+    if (activeServerSearch.query) return;
+
+    const currentId = currentProduct ? String(currentProduct.id) : "";
+    buildPersonalizedFeed();
+
+    if (!products.length) {
+        showEmptyFeed();
+        return;
+    }
+
+    let index = currentId
+        ? products.findIndex(product => String(product.id) === currentId)
+        : -1;
+
+    if (index < 0) index = Math.min(currentIndex, products.length - 1);
+    currentIndex = Math.max(0, index);
+    showProduct(true);
+    preloadUpcomingImages();
+}
+
+
+async function loadFeed() {
     const feedLoadSearchRequestId = serverSearchRequestId;
 
+    renderCachedFeedImmediately();
+
     try {
-
-        const response =
-            await fetch(
-                "/api/feed",
-                {
-                    cache: "no-store"
-                }
-            );
-
-
-        if (!response.ok) {
-
-            throw new Error(
-                "Feed request failed"
-            );
-        }
-
-
-        const data =
-            await response.json();
-
-
-        console.log(
-            "[StyleFlow] Feed response:",
-            data
+        const response = await fetch(
+            `/api/feed?limit=${FEED_PAGE_SIZE}&offset=0`,
+            {cache: "no-store"}
         );
 
+        if (!response.ok) throw new Error("Feed request failed");
 
-        const rawProducts =
-            Array.isArray(data)
-                ? data
-                : Array.isArray(data.products)
-                    ? data.products
-                    : Array.isArray(data.items)
-                        ? data.items
-                        : [];
+        const data = await response.json();
 
-
-        console.log(
-            "[StyleFlow] Получено товаров:",
-            rawProducts.length
-        );
-
-        // Пользователь уже начал поиск, пока /api/feed отвечал.
-        // Не даём общей ленте затереть активный поисковый запрос.
         if (
             feedLoadSearchRequestId !== serverSearchRequestId ||
             activeServerSearch.query
-        ) {
-            console.log(
-                "[StyleFlow] Общая лента не применена: уже активен поиск."
-            );
-            return;
-        }
+        ) return;
 
+        const rawProducts = Array.isArray(data)
+            ? data
+            : (Array.isArray(data.products) ? data.products : []);
 
-        allProducts =
-            rawProducts.map(
-                normalizeProduct
-            );
+        const incoming = rawProducts.map(normalizeProduct);
+        feedOffset = incoming.length;
+        feedHasMore = data && data.has_more !== false;
 
-
-        console.log(
-            "[StyleFlow] Нормализовано товаров:",
-            allProducts.length
-        );
-
-
-        if (
-            allProducts.length > 0
-        ) {
-
-            console.log(
-                "[StyleFlow] Первый товар:",
-                allProducts[0]
-            );
-        }
-
-
-        localStorage.setItem(
-            "styleflow_main_feed",
-            JSON.stringify(
-                allProducts
-            )
-        );
-
-
-        /*
-        Обновляем категории
-        фильтров после загрузки каталога.
-        */
+        const hadCurrent = Boolean(currentProduct);
+        mergeProductsIntoCatalog(incoming);
+        localStorage.setItem("styleflow_main_feed", JSON.stringify(allProducts));
 
         populateFilterCategories();
         renderFilterSources();
 
-
-        /*
-        Строим ленту.
-
-        Фильтры применятся внутри
-        buildPersonalizedFeed().
-        */
-
-        buildPersonalizedFeed();
-
-
-        currentIndex = 0;
-
-
-        if (
-            products.length > 0
-        ) {
-
-            resetNavigationHistory();
-            showProduct();
-            rememberCurrentProduct();
-
-        } else {
-
-            showEmptyFeed();
-        }
-
-
-    } catch (error) {
-
-        console.error(
-            "[StyleFlow] Feed error:",
-            error
-        );
-
-        // Даже при ошибке общей ленты не перезаписываем активный поиск
-        // старым кэшем.
-        if (
-            feedLoadSearchRequestId !== serverSearchRequestId ||
-            activeServerSearch.query
-        ) {
-            return;
-        }
-
-
-        const cached =
-            loadJSON(
-                "styleflow_main_feed",
-                []
-            );
-
-
-        if (
-            cached.length > 0
-        ) {
-
-            allProducts =
-                cached.map(
-                    normalizeProduct
-                );
-
-
-            populateFilterCategories();
-            renderFilterSources();
-
-
+        if (!hadCurrent) {
             buildPersonalizedFeed();
-
-
             currentIndex = 0;
 
-
-            if (
-                products.length > 0
-            ) {
-
+            if (products.length) {
+                resetNavigationHistory();
                 showProduct();
-
+                rememberCurrentProduct();
             } else {
-
                 showEmptyFeed();
             }
-
-
-            showToast(
-                "Показана последняя сохранённая лента"
-            );
-
-
         } else {
+            appendNewRecommendedProducts(incoming);
+        }
 
-            showEmptyFeed();
+        preloadUpcomingImages();
+        void maybeLoadMoreFeedProducts(true);
+
+    } catch (error) {
+        console.error("[StyleFlow] Feed error:", error);
+
+        if (!allProducts.length) {
+            renderCachedFeedImmediately();
         }
     }
 }
+
+
+async function loadMoreFeedProducts(force = false) {
+    if (feedLoading || !feedHasMore || activeServerSearch.query) return false;
+
+    if (!force && products.length - currentIndex - 1 > FEED_PREFETCH_THRESHOLD) {
+        return false;
+    }
+
+    feedLoading = true;
+
+    try {
+        const response = await fetch(
+            `/api/feed?limit=${FEED_PAGE_SIZE}&offset=${feedOffset}`,
+            {cache: "no-store"}
+        );
+
+        if (!response.ok) {
+            throw new Error(`Feed page failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const incoming = Array.isArray(data.products)
+            ? data.products.map(normalizeProduct)
+            : [];
+
+        if (!incoming.length) {
+            feedHasMore = false;
+            return false;
+        }
+
+        feedOffset += incoming.length;
+        feedHasMore = data.has_more !== false;
+
+        const beforeIds = new Set(allProducts.map(product => String(product.id)));
+        const fresh = incoming.filter(product => !beforeIds.has(String(product.id)));
+
+        mergeProductsIntoCatalog(fresh);
+        localStorage.setItem("styleflow_main_feed", JSON.stringify(allProducts));
+
+        if (fresh.length) {
+            appendNewRecommendedProducts(fresh);
+        }
+
+        preloadUpcomingImages();
+        return fresh.length > 0;
+
+    } catch (error) {
+        console.error("[StyleFlow] Ошибка догрузки общей ленты:", error);
+        return false;
+    } finally {
+        feedLoading = false;
+    }
+}
+
+
+async function maybeLoadMoreFeedProducts(force = false) {
+    return loadMoreFeedProducts(force);
+}
+
+
+function appendNewRecommendedProducts(incoming) {
+    if (!Array.isArray(incoming) || !incoming.length || activeServerSearch.query) {
+        return;
+    }
+
+    const existing = new Set(products.map(product => String(product.id)));
+    const viewed = new Set(viewedProducts.map(id => String(id)));
+
+    const candidates = incoming.filter(product =>
+        product &&
+        !existing.has(String(product.id)) &&
+        !viewed.has(String(product.id))
+    );
+
+    if (!candidates.length) return;
+
+    const profile = buildUserProfile();
+    const personalization = getPersonalizationStrength(profile.totalSignals);
+
+    let additions;
+
+    if (personalization <= 0) {
+        additions = buildDiverseRandomFeed(shuffleArray(candidates));
+    } else {
+        additions = buildWeightedDiverseFeed(
+            candidates.map(product => ({
+                product,
+                score: calculateRecommendationScore(product, profile)
+            })),
+            personalization
+        );
+    }
+
+    products.push(...additions);
+}
+
+
+function preloadUpcomingImages() {
+    const start = Math.max(0, currentIndex + 1);
+    const end = Math.min(products.length, start + 10);
+
+    for (let i = start; i < end; i++) {
+        const product = products[i];
+        const src = product && product.image;
+        if (!src) continue;
+
+        const img = new Image();
+        img.decoding = "async";
+        img.src = src;
+    }
+}
+
 
 
 /* =========================================================
@@ -3842,6 +3894,8 @@ function showProduct(allowViewed = false) {
             currentIndex
         ];
 
+    preloadUpcomingImages();
+
 
     if (
         !allowViewed &&
@@ -5468,6 +5522,22 @@ function hideSearchSuggestions() {
     if (box) box.classList.remove("active");
 }
 
+async function isBlockedSearchQueryLocal(query) {
+    const text = normalizeText(query || "").replace(/\s+/g, "");
+    if (!text) return false;
+
+    const blocked = [
+        "хуй", "хуя", "хуе", "хуйн", "хует",
+        "пизд", "еб", "еба", "ебл", "ебан",
+        "бля", "бляд", "сука", "шлюх",
+        "дилдо", "вибратор", "порно", "порн", "секс",
+        "porn", "fuck", "dildo", "xxx"
+    ];
+
+    return blocked.some(term => text.includes(term));
+}
+
+
 async function performSearch(query, searchOptions = null) {
     const home = document.getElementById("searchHome");
     const results = document.getElementById("searchResults");
@@ -5479,6 +5549,25 @@ async function performSearch(query, searchOptions = null) {
     }
 
     query = String(query || "").trim();
+
+    if (isBlockedSearchQueryLocal(query)) {
+        const resultCount = document.getElementById("resultCount");
+        const resultList = document.getElementById("resultList");
+
+        if (resultCount) resultCount.textContent = "Поиск ограничен";
+
+        if (resultList) {
+            resultList.innerHTML = `
+                <div class="search-no-results search-blocked-message">
+                    🚫 Этот запрос нельзя использовать в поиске.<br>
+                    <span>Попробуй сформулировать запрос иначе.</span>
+                </div>
+            `;
+        }
+
+        showToast("Поисковый запрос заблокирован");
+        return;
+    }
 
     if (!query) {
         /*
@@ -5586,6 +5675,24 @@ async function performSearch(query, searchOptions = null) {
             return;
         }
 
+        if (data && data.blocked) {
+            products = [];
+            currentIndex = 0;
+            currentProduct = null;
+            serverSearchHasMore = false;
+
+            resultCount.textContent = "Поиск ограничен";
+            resultList.innerHTML = `
+                <div class="search-no-results search-blocked-message">
+                    🚫 Этот запрос нельзя использовать в поиске.<br>
+                    <span>Попробуй сформулировать запрос иначе.</span>
+                </div>
+            `;
+
+            showToast("Поисковый запрос заблокирован");
+            return;
+        }
+
         const incoming = Array.isArray(data.products)
             ? data.products.map(normalizeProduct)
             : [];
@@ -5674,6 +5781,9 @@ function buildServerSearchUrl(more = false) {
 
     params.set("query", activeServerSearch.query || "");
     params.set("limit", "100");
+    if (telegramUserId) {
+        params.set("user_id", String(telegramUserId));
+    }
 
     if (activeServerSearch.sources && activeServerSearch.sources.length) {
         params.set("sources", activeServerSearch.sources.join(","));
@@ -5702,6 +5812,15 @@ async function fetchServerSearch(more = false) {
     }
 
     const data = await response.json();
+
+    if (data.status === "blocked" || data.blocked) {
+        return {
+            ...data,
+            blocked: true,
+            products: [],
+            has_more: false
+        };
+    }
 
     if (data.status === "error") {
         throw new Error(data.message || "Server search error");
@@ -6039,8 +6158,84 @@ function getTopUserInterests(limit = 8) {
 }
 
 function updateProfileInterests() {
-    // Interests remain internal to the recommendation algorithm.
-    // They are intentionally not displayed in the profile UI.
+    const box = document.getElementById("profileRecommendations");
+    if (!box) return;
+
+    const profile = buildUserProfile();
+    const items = [];
+
+    const pushInterest = (type, text, score, icon) => {
+        const value = String(text || "").trim();
+        if (
+            !value ||
+            value.length < 2 ||
+            items.some(item => item.text === value)
+        ) return;
+
+        items.push({
+            type,
+            text: value,
+            score: Number(score) || 0,
+            icon
+        });
+    };
+
+    Object.entries(profile.brands || {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .forEach(([text, score]) =>
+            pushInterest("brand", text, score, "🏷️")
+        );
+
+    Object.entries(profile.categories || {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .forEach(([text, score]) =>
+            pushInterest("category", text, score, "◉")
+        );
+
+    Object.entries(profile.keywords || {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .forEach(([text, score]) => {
+            if (text.length >= 3) {
+                pushInterest("keyword", text, score, "✦");
+            }
+        });
+
+    const top = items
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8);
+
+    if (!top.length || profile.totalSignals < 3) {
+        box.innerHTML = `
+            <div class="profile-recommendation-empty">
+                ✨ Пока я тебя изучаю. Листай, открывай и добавляй товары в избранное —
+                здесь появятся персональные интересы.
+            </div>
+            <button
+                class="profile-interest-button neutral"
+                onclick="switchTab('search')"
+            >
+                🔎 Найти что-нибудь
+            </button>
+        `;
+        return;
+    }
+
+    box.innerHTML = top.map(item => `
+        <button
+            class="profile-interest-button"
+            onclick="quickSearch(${JSON.stringify(item.text)})"
+        >
+            <span class="profile-interest-icon">${item.icon}</span>
+            <span class="profile-interest-text">
+                <strong>${escapeHTML(item.text)}</strong>
+                <small>Вам может понравиться</small>
+            </span>
+            <span class="profile-interest-arrow">→</span>
+        </button>
+    `).join("");
 }
 
 function updateProfile() {
@@ -6132,7 +6327,7 @@ function renderRecentProducts() {
             .reverse()
             .slice(
                 0,
-                6
+                150
             );
 
 
@@ -6353,6 +6548,20 @@ function registerOpen(
 /* =========================================================
 SWIPE
 ========================================================= */
+
+function toggleProductDetails() {
+    const card = document.getElementById("productCard");
+    if (!card) return;
+
+    productDetailsCollapsed = !productDetailsCollapsed;
+    card.classList.toggle("details-collapsed", productDetailsCollapsed);
+
+    const button = document.getElementById("productDetailsToggle");
+    if (button) {
+        button.textContent = productDetailsCollapsed ? "⌃ Показать" : "⌄ Свернуть";
+    }
+}
+
 
 function setupSwipe() {
 
@@ -6646,7 +6855,7 @@ function rememberProductInNavigation(product) {
 
     navigationPosition = navigationHistory.length - 1;
 
-    if (navigationHistory.length > 500) {
+    if (navigationHistory.length > NAVIGATION_HISTORY_LIMIT) {
         navigationHistory.shift();
         navigationPosition--;
     }
@@ -6678,8 +6887,9 @@ function findProductById(id) {
 async function nextProduct() {
 
     if (activeServerSearch.query && products.length) {
-        // Догружаем следующую пачку ещё до того, как пользователь упрётся в конец.
         void maybeLoadMoreServerProducts();
+    } else if (products.length) {
+        void maybeLoadMoreFeedProducts();
     }
 
     if (!products.length) {
@@ -6774,8 +6984,24 @@ async function nextProduct() {
         return;
     }
 
-    // Только без активного поиска разрешаем переход к общей
-    // персонализированной ленте.
+    // Если подошли к концу текущего пула, сначала синхронно пытаемся
+    // получить следующую пачку. Пользователь не должен увидеть пустой
+    // экран в момент, когда сервер ещё может дать новые карточки.
+    if (feedHasMore) {
+        const loaded = await loadMoreFeedProducts(true);
+
+        if (loaded) {
+            const nextAfterLoad = findNextUnviewedIndex(currentIndex, 1);
+
+            if (nextAfterLoad >= 0) {
+                rememberProductInNavigation(products[nextAfterLoad]);
+                currentIndex = nextAfterLoad;
+                animateCardChange("next");
+                return;
+            }
+        }
+    }
+
     const filteredProducts =
         applyProductFilters(allProducts);
 
