@@ -7405,7 +7405,7 @@ function renderSearchSuggestions(query) {
     box.classList.add("active");
 }
 
-function selectSearchSuggestion(index) {
+async function selectSearchSuggestion(index) {
     const box = document.getElementById("searchSuggestions");
     const input = document.getElementById("searchInput");
     if (!box || !input || !box._suggestions) return;
@@ -7413,13 +7413,34 @@ function selectSearchSuggestion(index) {
     const item = box._suggestions[index];
     if (!item) return;
 
-    input.value = item.text;
+    // Подсказка должна стать именно поисковым запросом.
+    // Раньше здесь запускался поиск без явной фиксации выбранного
+    // значения, из-за чего в некоторых сценариях в ленту попадал
+    // предыдущий каталог.
+    const selectedQuery = String(item.text || "").trim();
+    if (!selectedQuery) return;
+
+    input.value = selectedQuery;
+
     const clearButton = document.getElementById("searchClear");
     if (clearButton) clearButton.style.display = "flex";
 
     box.classList.remove("active");
-    rememberSearchQuery(item.text);
-    performSearch(item.text);
+    box.innerHTML = "";
+    box._suggestions = [];
+
+    // Сохраняем именно выбранную подсказку как запрос пользователя.
+    rememberSearchQuery(selectedQuery);
+
+    // Передаём запрос напрямую в серверный поиск и не используем
+    // старое значение фильтра/предыдущего поиска.
+    await performSearch(selectedQuery, {
+        sources: Array.isArray(activeSearchSources)
+            ? activeSearchSources.slice()
+            : [],
+        minPrice: null,
+        maxPrice: null
+    });
 }
 
 
