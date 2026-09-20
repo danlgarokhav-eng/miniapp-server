@@ -5,6 +5,10 @@ import sqlite3
 import requests
 import re
 import time
+import hashlib
+import hmac
+import secrets
+import urllib.parse
 from datetime import datetime, timezone
 
 
@@ -17,20 +21,44 @@ app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DB_PATH = os.path.join(
-    BASE_DIR,
-    "products.db"
-)
+# Railway Volume: /data.
+# Локально, если /data недоступна, используем папку проекта.
+DATA_DIR = os.getenv("DATA_DIR", "/data")
+try:
+    os.makedirs(DATA_DIR, exist_ok=True)
+except Exception:
+    DATA_DIR = BASE_DIR
 
-FEED_PATH = os.path.join(
-    BASE_DIR,
-    "feed.json"
-)
 
-SETTINGS_PATH = os.path.join(
-    BASE_DIR,
-    "settings.json"
-)
+def persistent_path(filename):
+    return os.path.join(DATA_DIR, filename)
+
+
+def migrate_legacy_file(filename):
+    target = persistent_path(filename)
+    legacy = os.path.join(BASE_DIR, filename)
+
+    if DATA_DIR == BASE_DIR:
+        return target
+
+    if not os.path.exists(target) and os.path.exists(legacy):
+        try:
+            import shutil
+            shutil.copy2(legacy, target)
+            print(f"Миграция {filename}: {legacy} -> {target}")
+        except Exception as exc:
+            print(f"Не удалось мигрировать {filename}: {exc}")
+
+    return target
+
+
+DB_PATH = migrate_legacy_file("products.db")
+FEED_PATH = migrate_legacy_file("feed.json")
+SETTINGS_PATH = migrate_legacy_file("settings.json")
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+SESSION_COOKIE_NAME = "styleflow_session"
+SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
 
 
 # =========================
@@ -124,6 +152,46 @@ def init_db():
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_user_history_product
         ON user_history(user_id, product_id)
+    """)
+
+    # ---------------------------------
+    # STYLEFLOW USERS
+    # ---------------------------------
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id TEXT NOT NULL UNIQUE,
+            telegram_username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            photo_url TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            recommendations_reset_at TIMESTAMP
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_sessions_token_hash
+        ON sessions(token_hash)
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_sessions_user
+        ON sessions(user_id)
     """)
 
     # ---------------------------------
@@ -929,6 +997,279 @@ def lazy_search(query, sources=None, min_price=None, max_price=None, limit=100):
         "fetched": fetched_total,
         "source": "local+reefapi" if fetched_total else "local"
     }
+
+
+# =========================
+# STYLEFLOW ACCOUNT / TELEGRAM AUTH
+# =========================
+
+def verify_telegram_init_data(init_data):
+    """Проверяет подпись Telegram WebApp initData."""
+    if not init_data or not TELEGRAM_BOT_TOKEN:
+        return None
+
+    try:
+        parsed = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+        received_hash = parsed.pop("hash", "")
+        if not received_hash:
+            return None
+
+        data_check_string = "\n".join(
+            f"{key}={value}"
+            for key, value in sorted(parsed.items())
+        )
+
+        secret_key = hmac.new(
+            b"WebAppData",
+            TELEGRAM_BOT_TOKEN.encode("utf-8"),
+            hashlib.sha256
+        ).digest()
+
+        calculated_hash = hmac.new(
+            secret_key,
+            data_check_string.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(calculated_hash, received_hash):
+            return None
+
+        user_raw = parsed.get("user", "")
+        if not user_raw:
+            return None
+
+        user = json.loads(user_raw)
+        if not user.get("id"):
+            return None
+
+        return user
+    except Exception as exc:
+        print(f"Ошибка проверки Telegram initData: {exc}")
+        return None
+
+
+def hash_session_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def cleanup_expired_sessions(conn):
+    conn.execute(
+        "DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP"
+    )
+
+
+def create_styleflow_session(conn, user_id):
+    token = secrets.token_urlsafe(48)
+    token_hash = hash_session_token(token)
+
+    conn.execute(
+        """
+        INSERT INTO sessions (user_id, token_hash, expires_at)
+        VALUES (?, ?, datetime('now', '+30 days'))
+        """,
+        (user_id, token_hash)
+    )
+
+    return token
+
+
+def get_current_account():
+    token = request.cookies.get(SESSION_COOKIE_NAME, "").strip()
+    if not token:
+        return None
+
+    token_hash = hash_session_token(token)
+    conn = get_db()
+    cleanup_expired_sessions(conn)
+
+    row = conn.execute(
+        """
+        SELECT
+            u.id AS account_id,
+            u.telegram_id,
+            u.telegram_username,
+            u.first_name,
+            u.last_name,
+            u.photo_url,
+            u.created_at,
+            u.last_login_at,
+            u.recommendations_reset_at
+        FROM sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = ?
+          AND s.expires_at > CURRENT_TIMESTAMP
+        LIMIT 1
+        """,
+        (token_hash,)
+    ).fetchone()
+
+    if row:
+        conn.execute(
+            "UPDATE sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?",
+            (token_hash,)
+        )
+        conn.commit()
+
+    conn.close()
+    return dict(row) if row else None
+
+
+def account_public(row):
+    if not row:
+        return None
+
+    name = " ".join(
+        x for x in [row.get("first_name"), row.get("last_name")]
+        if x
+    ).strip()
+
+    if not name:
+        name = row.get("telegram_username") or "Пользователь STYLEFLOW"
+
+    return {
+        "id": int(row["account_id"]),
+        "name": name,
+        "first_name": row.get("first_name") or "",
+        "last_name": row.get("last_name") or "",
+        "username": row.get("telegram_username") or "",
+        "photo_url": row.get("photo_url") or "",
+        "telegram_id": str(row["telegram_id"]),
+        "created_at": row.get("created_at"),
+    }
+
+
+@app.route("/api/auth/telegram", methods=["POST"])
+def api_auth_telegram():
+    data = request.get_json(silent=True) or {}
+    init_data = str(data.get("init_data") or "").strip()
+
+    if not init_data:
+        return jsonify({
+            "status": "error",
+            "message": "Telegram initData не передан"
+        }), 400
+
+    if not TELEGRAM_BOT_TOKEN:
+        return jsonify({
+            "status": "error",
+            "verified": False,
+            "message": "На сервере не задан TELEGRAM_BOT_TOKEN"
+        }), 503
+
+    telegram_user = verify_telegram_init_data(init_data)
+    if not telegram_user:
+        return jsonify({
+            "status": "error",
+            "verified": False,
+            "message": "Telegram initData не прошёл проверку"
+        }), 401
+
+    telegram_id = str(telegram_user["id"])
+    username = telegram_user.get("username") or ""
+    first_name = telegram_user.get("first_name") or ""
+    last_name = telegram_user.get("last_name") or ""
+    photo_url = telegram_user.get("photo_url") or ""
+
+    conn = get_db()
+    cleanup_expired_sessions(conn)
+
+    row = conn.execute(
+        "SELECT id FROM users WHERE telegram_id = ? LIMIT 1",
+        (telegram_id,)
+    ).fetchone()
+
+    is_new = row is None
+
+    if row:
+        account_id = int(row["id"])
+        conn.execute(
+            """
+            UPDATE users
+            SET telegram_username = ?,
+                first_name = ?,
+                last_name = ?,
+                photo_url = ?,
+                last_login_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (username, first_name, last_name, photo_url, account_id)
+        )
+    else:
+        cursor = conn.execute(
+            """
+            INSERT INTO users (
+                telegram_id, telegram_username, first_name, last_name, photo_url
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (telegram_id, username, first_name, last_name, photo_url)
+        )
+        account_id = int(cursor.lastrowid)
+
+    token = create_styleflow_session(conn, account_id)
+    conn.commit()
+
+    account_row = conn.execute(
+        """
+        SELECT id AS account_id, telegram_id, telegram_username, first_name,
+               last_name, photo_url, created_at, last_login_at,
+               recommendations_reset_at
+        FROM users WHERE id = ?
+        """,
+        (account_id,)
+    ).fetchone()
+    conn.close()
+
+    response = jsonify({
+        "status": "ok",
+        "verified": True,
+        "new_account": is_new,
+        "account": account_public(dict(account_row)),
+        # Оставляем user_id для совместимости со старым frontend/history.
+        "user_id": telegram_id,
+        "account_id": account_id
+    })
+
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=request.is_secure,
+        samesite="Lax",
+        path="/"
+    )
+    return response
+
+
+@app.route("/api/me", methods=["GET"])
+def api_me():
+    account = get_current_account()
+    if not account:
+        return jsonify({"status": "unauthorized", "authenticated": False}), 401
+
+    return jsonify({
+        "status": "ok",
+        "authenticated": True,
+        "account": account_public(account)
+    })
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_logout():
+    token = request.cookies.get(SESSION_COOKIE_NAME, "").strip()
+    if token:
+        conn = get_db()
+        conn.execute(
+            "DELETE FROM sessions WHERE token_hash = ?",
+            (hash_session_token(token),)
+        )
+        conn.commit()
+        conn.close()
+
+    response = jsonify({"status": "ok"})
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return response
 
 
 # =========================
