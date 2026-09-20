@@ -5,7 +5,6 @@ import sqlite3
 import requests
 import re
 import time
-import shutil
 from datetime import datetime, timezone
 
 
@@ -18,250 +17,31 @@ app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Railway Volume подключён к /data.
-#
-# Все постоянные данные храним именно здесь:
-#
-# /data/products.db
-# /data/feed.json
-# /data/settings.json
-#
-# Если /data по какой-то причине недоступен,
-# используем BASE_DIR как запасной вариант.
-PERSISTENT_DIR = "/data"
-
-try:
-    os.makedirs(PERSISTENT_DIR, exist_ok=True)
-
-    # Проверяем, что каталог действительно доступен для записи.
-    test_file = os.path.join(
-        PERSISTENT_DIR,
-        ".write_test"
-    )
-
-    with open(test_file, "w", encoding="utf-8") as f:
-        f.write("ok")
-
-    os.remove(test_file)
-
-    print("========================================")
-    print("Railway Volume найден")
-    print(f"Persistent directory: {PERSISTENT_DIR}")
-    print("========================================")
-
-except Exception as e:
-
-    print("========================================")
-    print("ВНИМАНИЕ: /data недоступен!")
-    print(f"Ошибка: {e}")
-    print("Используем локальную директорию приложения.")
-    print("========================================")
-
-    PERSISTENT_DIR = BASE_DIR
-
-
 DB_PATH = os.path.join(
-    PERSISTENT_DIR,
+    BASE_DIR,
     "products.db"
 )
 
 FEED_PATH = os.path.join(
-    PERSISTENT_DIR,
+    BASE_DIR,
     "feed.json"
 )
 
 SETTINGS_PATH = os.path.join(
-    PERSISTENT_DIR,
-    "settings.json"
-)
-
-
-# Старые пути — нужны только для одноразовой миграции.
-OLD_DB_PATH = os.path.join(
-    BASE_DIR,
-    "products.db"
-)
-
-OLD_FEED_PATH = os.path.join(
-    BASE_DIR,
-    "feed.json"
-)
-
-OLD_SETTINGS_PATH = os.path.join(
     BASE_DIR,
     "settings.json"
 )
-
-
-# =========================
-# MIGRATION TO VOLUME
-# =========================
-
-def migrate_old_files():
-    """
-    Одноразово переносит старые файлы из директории приложения
-    в постоянный Railway Volume.
-
-    Важно:
-    - если файл уже существует в /data, ничего не перезаписываем;
-    - старый products.db переносится только если постоянной БД ещё нет;
-    - feed.json и settings.json также переносятся.
-    """
-
-    print("========================================")
-    print("Проверка миграции данных...")
-    print(f"Old DB: {OLD_DB_PATH}")
-    print(f"New DB: {DB_PATH}")
-    print("========================================")
-
-    # ---------------------------------
-    # DATABASE
-    # ---------------------------------
-
-    if (
-        OLD_DB_PATH != DB_PATH
-        and os.path.exists(OLD_DB_PATH)
-        and not os.path.exists(DB_PATH)
-    ):
-
-        try:
-
-            shutil.copy2(
-                OLD_DB_PATH,
-                DB_PATH
-            )
-
-            print(
-                "СТАРАЯ БД СКОПИРОВАНА В VOLUME"
-            )
-
-            print(
-                f"{OLD_DB_PATH}"
-            )
-
-            print(
-                f"-> {DB_PATH}"
-            )
-
-        except Exception as e:
-
-            print(
-                f"Ошибка миграции products.db: {e}"
-            )
-
-    elif os.path.exists(DB_PATH):
-
-        print(
-            "Постоянная БД уже существует."
-        )
-
-    else:
-
-        print(
-            "Старая БД не найдена."
-        )
-
-        print(
-            "Новая БД будет создана автоматически."
-        )
-
-    # ---------------------------------
-    # FEED.JSON
-    # ---------------------------------
-
-    if (
-        OLD_FEED_PATH != FEED_PATH
-        and os.path.exists(OLD_FEED_PATH)
-        and not os.path.exists(FEED_PATH)
-    ):
-
-        try:
-
-            shutil.copy2(
-                OLD_FEED_PATH,
-                FEED_PATH
-            )
-
-            print(
-                "feed.json перенесён в Volume."
-            )
-
-        except Exception as e:
-
-            print(
-                f"Ошибка миграции feed.json: {e}"
-            )
-
-    # ---------------------------------
-    # SETTINGS.JSON
-    # ---------------------------------
-
-    if (
-        OLD_SETTINGS_PATH != SETTINGS_PATH
-        and os.path.exists(OLD_SETTINGS_PATH)
-        and not os.path.exists(SETTINGS_PATH)
-    ):
-
-        try:
-
-            shutil.copy2(
-                OLD_SETTINGS_PATH,
-                SETTINGS_PATH
-            )
-
-            print(
-                "settings.json перенесён в Volume."
-            )
-
-        except Exception as e:
-
-            print(
-                f"Ошибка миграции settings.json: {e}"
-            )
-
-    print("========================================")
-    print("Миграция завершена.")
-    print("========================================")
-
-
-# Выполняем миграцию ДО открытия базы.
-migrate_old_files()
 
 
 # =========================
 # REEFAPI
 # =========================
 # Ключ хранится только на сервере Railway.
-
-REEF_API_KEY = os.getenv(
-    "REEF_KEY",
-    ""
-).strip()
-
-REEF_API_BASE = (
-    "https://api.reefapi.com"
-)
-
-REEF_FETCH_SIZE = int(
-    os.getenv(
-        "REEF_FETCH_SIZE",
-        "100"
-    )
-)
-
-LOCAL_SEARCH_MIN_RESULTS = int(
-    os.getenv(
-        "LOCAL_SEARCH_MIN_RESULTS",
-        "30"
-    )
-)
-
-LOCAL_SEARCH_PAGE_SIZE = int(
-    os.getenv(
-        "LOCAL_SEARCH_PAGE_SIZE",
-        "100"
-    )
-)
+REEF_API_KEY = os.getenv("REEF_KEY", "").strip()
+REEF_API_BASE = "https://api.reefapi.com"
+REEF_FETCH_SIZE = int(os.getenv("REEF_FETCH_SIZE", "100"))
+LOCAL_SEARCH_MIN_RESULTS = int(os.getenv("LOCAL_SEARCH_MIN_RESULTS", "30"))
+LOCAL_SEARCH_PAGE_SIZE = int(os.getenv("LOCAL_SEARCH_PAGE_SIZE", "100"))
 
 
 # =========================
@@ -269,28 +49,14 @@ LOCAL_SEARCH_PAGE_SIZE = int(
 # =========================
 
 def get_db():
-
-    conn = sqlite3.connect(
-        DB_PATH,
-        timeout=30
-    )
+    conn = sqlite3.connect(DB_PATH)
 
     conn.row_factory = sqlite3.Row
-
-    # WAL улучшает работу SQLite.
-    conn.execute(
-        "PRAGMA journal_mode=WAL"
-    )
-
-    conn.execute(
-        "PRAGMA busy_timeout=30000"
-    )
 
     return conn
 
 
 def init_db():
-
     conn = get_db()
 
     # ---------------------------------
@@ -348,11 +114,13 @@ def init_db():
         )
     """)
 
+    # Индекс для быстрого получения истории конкретного пользователя
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_user_history_user
         ON user_history(user_id)
     """)
 
+    # Индекс для поиска конкретного товара пользователя
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_user_history_product
         ON user_history(user_id, product_id)
@@ -361,18 +129,16 @@ def init_db():
     # ---------------------------------
     # SEARCH CACHE
     # ---------------------------------
-
+    # Храним нормализованные поисковые запросы и последнюю страницу,
+    # которую уже получили из внешнего источника.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS search_cache (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-
             query_key TEXT NOT NULL,
             source TEXT NOT NULL,
-
             last_fetched_page INTEGER DEFAULT 0,
             last_fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             result_count INTEGER DEFAULT 0,
-
             UNIQUE(query_key, source)
         )
     """)
@@ -387,15 +153,12 @@ def init_db():
         ON products(source, external_id)
     """)
 
-    # ---------------------------------
-    # SOFT MIGRATION
-    # ---------------------------------
-
+    # Мягкая миграция существующей SQLite базы:
+    # если products.db уже существует со старой схемой,
+    # добавляем новые колонки без удаления старых товаров.
     existing_columns = {
         row["name"]
-        for row in conn.execute(
-            "PRAGMA table_info(products)"
-        ).fetchall()
+        for row in conn.execute("PRAGMA table_info(products)").fetchall()
     }
 
     for column, definition in {
@@ -404,34 +167,17 @@ def init_db():
         "last_seen_at": "TIMESTAMP",
         "last_checked_at": "TIMESTAMP",
     }.items():
-
         if column not in existing_columns:
-
             conn.execute(
-                f"""
-                ALTER TABLE products
-                ADD COLUMN {column} {definition}
-                """
+                f"ALTER TABLE products ADD COLUMN {column} {definition}"
             )
 
     conn.execute("""
         UPDATE products
-        SET
-            availability_status =
-                COALESCE(
-                    availability_status,
-                    'active'
-                ),
-
-            last_seen_at =
-                COALESCE(
-                    last_seen_at,
-                    updated_at
-                )
-
-        WHERE
-            availability_status IS NULL
-            OR last_seen_at IS NULL
+        SET availability_status = COALESCE(availability_status, 'active'),
+            last_seen_at = COALESCE(last_seen_at, updated_at)
+        WHERE availability_status IS NULL
+           OR last_seen_at IS NULL
     """)
 
     conn.commit()
@@ -440,10 +186,8 @@ def init_db():
     print("========================================")
     print("База данных инициализирована")
     print(f"DB: {DB_PATH}")
-    print(f"DB exists: {os.path.exists(DB_PATH)}")
     print("Таблица товаров: OK")
     print("Таблица истории пользователей: OK")
-    print("Таблица search_cache: OK")
     print("========================================")
 
 
@@ -469,10 +213,7 @@ def save_products(products):
             continue
 
         source = str(
-            product.get(
-                "source",
-                "unknown"
-            )
+            product.get("source", "unknown")
         )
 
         external_id = product.get(
@@ -480,7 +221,6 @@ def save_products(products):
         )
 
         if not external_id:
-
             external_id = product.get(
                 "id"
             )
@@ -488,16 +228,11 @@ def save_products(products):
         if not external_id:
             continue
 
-        external_id = str(
-            external_id
-        )
+        external_id = str(external_id)
 
         title = product.get(
             "title",
-            product.get(
-                "name",
-                ""
-            )
+            product.get("name", "")
         )
 
         price = product.get(
@@ -507,9 +242,7 @@ def save_products(products):
 
         old_price = product.get(
             "oldPrice",
-            product.get(
-                "old_price"
-            )
+            product.get("old_price")
         )
 
         currency = product.get(
@@ -529,10 +262,7 @@ def save_products(products):
 
         description = product.get(
             "description",
-            product.get(
-                "desc",
-                ""
-            )
+            product.get("desc", "")
         )
 
         image = product.get(
@@ -541,25 +271,17 @@ def save_products(products):
         )
 
         if not image:
-
             images = product.get(
                 "images",
                 []
             )
 
-            if (
-                isinstance(images, list)
-                and images
-            ):
-
+            if isinstance(images, list) and images:
                 image = images[0]
 
         link = product.get(
             "link",
-            product.get(
-                "url",
-                ""
-            )
+            product.get("url", "")
         )
 
         rating = product.get(
@@ -572,17 +294,10 @@ def save_products(products):
 
         available = product.get(
             "available",
-            product.get(
-                "stock",
-                True
-            )
+            product.get("stock", True)
         )
 
-        is_available = (
-            1
-            if available
-            else 0
-        )
+        is_available = 1 if available else 0
 
         conn.execute("""
             INSERT INTO products (
@@ -605,44 +320,28 @@ def save_products(products):
                 updated_at
             )
 
-            VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 
             ON CONFLICT(source, external_id)
             DO UPDATE SET
-
                 title = excluded.title,
                 price = excluded.price,
                 old_price = excluded.old_price,
                 currency = excluded.currency,
-
                 brand = excluded.brand,
                 category = excluded.category,
                 description = excluded.description,
-
                 image = excluded.image,
                 link = excluded.link,
-
                 rating = excluded.rating,
                 reviews = excluded.reviews,
-
-                is_available =
-                    excluded.is_available,
-
-                availability_status =
-                    CASE
-                        WHEN excluded.is_available = 1
-                        THEN 'active'
-                        ELSE 'unavailable'
-                    END,
-
-                last_seen_at =
-                    CURRENT_TIMESTAMP,
-
-                updated_at =
-                    CURRENT_TIMESTAMP
+                is_available = excluded.is_available,
+                availability_status = CASE
+                    WHEN excluded.is_available = 1 THEN 'active'
+                    ELSE 'unavailable'
+                END,
+                last_seen_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
         """, (
             source,
             external_id,
@@ -658,11 +357,7 @@ def save_products(products):
             rating,
             reviews,
             is_available,
-            (
-                "active"
-                if is_available
-                else "unavailable"
-            ),
+            "active" if is_available else "unavailable",
             None
         ))
 
@@ -706,11 +401,7 @@ def get_all_products():
     for row in rows:
 
         products.append({
-
-            "id": (
-                f"{row['source']}_"
-                f"{row['external_id']}"
-            ),
+            "id": f"{row['source']}_{row['external_id']}",
 
             "source": row["source"],
             "external_id": row["external_id"],
@@ -727,7 +418,6 @@ def get_all_products():
             "description": row["description"],
 
             "image": row["image"],
-
             "images": (
                 [row["image"]]
                 if row["image"]
@@ -811,15 +501,17 @@ def save_user_action(
     }:
         return False
 
-    user_id = str(
-        user_id
-    )
-
-    product_id = str(
-        product_id
-    )
+    user_id = str(user_id)
+    product_id = str(product_id)
 
     conn = get_db()
+
+    # ---------------------------------
+    # VIEW
+    #
+    # Один товар считается просмотренным
+    # только один раз.
+    # ---------------------------------
 
     if action == "view":
 
@@ -840,6 +532,14 @@ def save_user_action(
             conn.close()
 
             return True
+
+    # ---------------------------------
+    # OPEN
+    #
+    # Открытия сохраняем как события.
+    # Это пригодится позже для алгоритма
+    # рекомендаций.
+    # ---------------------------------
 
     conn.execute("""
         INSERT INTO user_history (
@@ -864,17 +564,18 @@ def save_user_action(
 def get_user_history(user_id):
 
     if not user_id:
-
         return {
             "viewed": [],
             "opened": []
         }
 
-    user_id = str(
-        user_id
-    )
+    user_id = str(user_id)
 
     conn = get_db()
+
+    # ---------------------------------
+    # VIEWED
+    # ---------------------------------
 
     viewed_rows = conn.execute("""
         SELECT DISTINCT product_id
@@ -885,6 +586,10 @@ def get_user_history(user_id):
     """, (
         user_id,
     )).fetchall()
+
+    # ---------------------------------
+    # OPENED
+    # ---------------------------------
 
     opened_rows = conn.execute("""
         SELECT product_id
@@ -914,89 +619,40 @@ def get_user_history(user_id):
     }
 
 
+
 # =========================
 # SEARCH / LAZY CATALOG
 # =========================
 
 def normalize_search_text(value):
-
-    value = str(
-        value or ""
-    ).lower().replace(
-        "ё",
-        "е"
-    )
-
-    value = re.sub(
-        r"[^a-zа-я0-9]+",
-        " ",
-        value,
-        flags=re.IGNORECASE
-    )
-
-    return " ".join(
-        value.split()
-    )
+    value = str(value or "").lower().replace("ё", "е")
+    value = re.sub(r"[^a-zа-я0-9]+", " ", value, flags=re.IGNORECASE)
+    return " ".join(value.split())
 
 
 def search_tokens(value):
-
-    return [
-        x
-        for x in normalize_search_text(
-            value
-        ).split()
-        if len(x) >= 2
-    ]
+    return [x for x in normalize_search_text(value).split() if len(x) >= 2]
 
 
-def local_search_products(
-    query,
-    sources=None,
-    min_price=None,
-    max_price=None,
-    limit=100,
-    offset=0
-):
-
-    tokens = search_tokens(
-        query
-    )
-
+def local_search_products(query, sources=None, min_price=None, max_price=None, limit=100, offset=0):
+    """
+    Ищет сначала в нашей собственной БД.
+    Поиск намеренно строгий: все значимые слова запроса должны встретиться
+    хотя бы в одном из title/brand/category/description.
+    """
+    tokens = search_tokens(query)
     if not tokens:
         return []
 
-    sources = [
-        str(x).lower()
-        for x in (
-            sources or []
-        )
-        if x
-    ]
+    sources = [str(x).lower() for x in (sources or []) if x]
 
     conn = get_db()
-
     rows = conn.execute("""
         SELECT
-            source,
-            external_id,
-            title,
-            price,
-            old_price,
-            currency,
-            brand,
-            category,
-            description,
-            image,
-            link,
-            rating,
-            reviews,
-            is_available,
-            availability_status,
-            last_seen_at,
-            last_checked_at,
-            created_at,
-            updated_at
+            source, external_id, title, price, old_price, currency,
+            brand, category, description, image, link, rating, reviews,
+            is_available, availability_status, last_seen_at, last_checked_at,
+            created_at, updated_at
         FROM products
         WHERE is_available = 1
     """).fetchall()
@@ -1004,145 +660,68 @@ def local_search_products(
     result = []
 
     for row in rows:
-
-        if (
-            sources
-            and row["source"].lower()
-            not in sources
-        ):
+        if sources and row["source"].lower() not in sources:
             continue
 
-        if (
-            min_price is not None
-            and (
-                row["price"] is None
-                or float(
-                    row["price"] or 0
-                ) < min_price
-            )
-        ):
+        if min_price is not None and (row["price"] is None or float(row["price"] or 0) < min_price):
+            continue
+        if max_price is not None and (row["price"] is None or float(row["price"] or 0) > max_price):
             continue
 
-        if (
-            max_price is not None
-            and (
-                row["price"] is None
-                or float(
-                    row["price"] or 0
-                ) > max_price
-            )
-        ):
+        haystack = normalize_search_text(" ".join([
+            row["title"] or "",
+            row["brand"] or "",
+            row["category"] or "",
+            row["description"] or "",
+        ]))
+
+        words = set(haystack.split())
+        if not all(token in words or any(
+            len(token) >= 5 and (token in word or word in token)
+            for word in words
+        ) for token in tokens):
             continue
 
-        haystack = normalize_search_text(
-            " ".join([
-                row["title"] or "",
-                row["brand"] or "",
-                row["category"] or "",
-                row["description"] or "",
-            ])
-        )
-
-        words = set(
-            haystack.split()
-        )
-
-        if not all(
-            token in words
-            or any(
-                len(token) >= 5
-                and (
-                    token in word
-                    or word in token
-                )
-                for word in words
-            )
-            for token in tokens
-        ):
-            continue
-
-        exact = sum(
-            1
-            for token in tokens
-            if token in words
-        )
-
+        exact = sum(1 for token in tokens if token in words)
         prefix = sum(
-            1
-            for token in tokens
-            if any(
-                word.startswith(token)
-                for word in words
-            )
+            1 for token in tokens
+            if any(word.startswith(token) for word in words)
         )
 
         item = {
-
-            "id": (
-                f"{row['source']}_"
-                f"{row['external_id']}"
-            ),
-
+            "id": f"{row['source']}_{row['external_id']}",
             "source": row["source"],
             "external_id": row["external_id"],
-
             "title": row["title"],
             "name": row["title"],
-
             "price": row["price"],
             "oldPrice": row["old_price"],
             "currency": row["currency"],
-
             "brand": row["brand"],
             "category": row["category"],
             "description": row["description"],
-
             "image": row["image"],
-
-            "images": (
-                [row["image"]]
-                if row["image"]
-                else []
-            ),
-
+            "images": [row["image"]] if row["image"] else [],
             "link": row["link"],
             "url": row["link"],
-
             "rating": row["rating"],
             "reviews": row["reviews"],
-
-            "available": bool(
-                row["is_available"]
-            ),
-
-            "stock": bool(
-                row["is_available"]
-            ),
-
-            "availability_status":
-                row["availability_status"],
-
-            "last_seen_at":
-                row["last_seen_at"],
-
-            "last_checked_at":
-                row["last_checked_at"],
-
-            "created_at":
-                row["created_at"],
-
-            "updated_at":
-                row["updated_at"],
-
-            "_match_score":
-                exact * 100
-                + prefix * 10
+            "available": bool(row["is_available"]),
+            "stock": bool(row["is_available"]),
+            "availability_status": row["availability_status"],
+            "last_seen_at": row["last_seen_at"],
+            "last_checked_at": row["last_checked_at"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "_match_score": exact * 100 + prefix * 10
         }
-
         result.append(item)
 
     conn.close()
 
+    # updated_at в SQLite хранится как строка timestamp, поэтому
+    # нельзя делать перед ним унарный минус. Сортируем оба поля
+    # по убыванию через reverse=True.
     result.sort(
         key=lambda x: (
             x["_match_score"],
@@ -1152,320 +731,132 @@ def local_search_products(
     )
 
     for item in result:
-        item.pop(
-            "_match_score",
-            None
-        )
+        item.pop("_match_score", None)
 
-    return result[
-        offset:offset + limit
-    ]
+    return result[offset:offset + limit]
 
 
-def count_local_search_products(
-    query,
-    sources=None,
-    min_price=None,
-    max_price=None
-):
-
-    return len(
-        local_search_products(
-            query,
-            sources=sources,
-            min_price=min_price,
-            max_price=max_price,
-            limit=100000,
-            offset=0
-        )
-    )
+def count_local_search_products(query, sources=None, min_price=None, max_price=None):
+    return len(local_search_products(
+        query, sources=sources, min_price=min_price, max_price=max_price,
+        limit=100000, offset=0
+    ))
 
 
-def reef_wildberries_search(
-    query,
-    page=1,
-    country="by",
-    price_min=None,
-    price_max=None
-):
-
+def reef_wildberries_search(query, page=1, country="by", price_min=None, price_max=None):
+    """
+    Первый внешний источник для lazy-catalog: Wildberries через ReefAPI.
+    Ключ берётся из REEF_KEY на Railway.
+    """
     if not REEF_API_KEY:
         return []
 
     payload = {
         "query": query,
         "country": country,
-        "page": max(
-            1,
-            min(
-                int(page),
-                3
-            )
-        ),
+        "page": max(1, min(int(page), 3)),
     }
 
     if price_min is not None:
-        payload[
-            "price_min"
-        ] = price_min
-
+        payload["price_min"] = price_min
     if price_max is not None:
-        payload[
-            "price_max"
-        ] = price_max
+        payload["price_max"] = price_max
 
     try:
-
         response = requests.post(
             f"{REEF_API_BASE}/wildberries/v1/search",
             headers={
-                "x-api-key":
-                    REEF_API_KEY,
-                "content-type":
-                    "application/json",
+                "x-api-key": REEF_API_KEY,
+                "content-type": "application/json",
             },
             json=payload,
             timeout=30,
         )
-
         response.raise_for_status()
-
         body = response.json()
 
         if not body.get("ok"):
-
-            print(
-                "ReefAPI error:",
-                body.get("error")
-            )
-
+            print("ReefAPI error:", body.get("error"))
             return []
 
-        data = (
-            body.get("data")
-            or {}
-        )
-
-        rows = (
-            data.get("results")
-            or []
-        )
+        data = body.get("data") or {}
+        rows = data.get("results") or []
 
         products = []
 
         for item in rows:
-
-            product_id = item.get(
-                "product_id"
-            )
-
+            product_id = item.get("product_id")
             if not product_id:
                 continue
 
-            price = item.get(
-                "price"
-            )
-
-            was_price = item.get(
-                "was_price"
-            )
+            price = item.get("price")
+            was_price = item.get("was_price")
 
             products.append({
-
-                "source":
-                    "wildberries",
-
-                "external_id":
-                    str(product_id),
-
-                "title":
-                    item.get(
-                        "title"
-                    )
-                    or item.get(
-                        "name"
-                    )
-                    or "Без названия",
-
-                "price":
-                    price,
-
-                "old_price":
-                    was_price,
-
-                "currency":
-                    item.get(
-                        "currency"
-                    )
-                    or "BYN",
-
-                "brand":
-                    item.get(
-                        "brand"
-                    )
-                    or "",
-
-                "category":
-                    item.get(
-                        "category"
-                    )
-                    or "",
-
-                "description":
-                    item.get(
-                        "description"
-                    )
-                    or "",
-
-                "image":
-                    item.get(
-                        "image"
-                    )
-                    or "",
-
-                "link":
-                    item.get(
-                        "url"
-                    )
-                    or "",
-
-                "rating":
-                    item.get(
-                        "rating"
-                    ),
-
-                "reviews":
-                    item.get(
-                        "review_count"
-                    )
-                    or item.get(
-                        "reviews"
-                    ),
-
-                "available":
-                    item.get(
-                        "stock_quantity",
-                        1
-                    ) != 0,
+                "source": "wildberries",
+                "external_id": str(product_id),
+                "title": item.get("title") or item.get("name") or "Без названия",
+                "price": price,
+                "old_price": was_price,
+                "currency": item.get("currency") or "BYN",
+                "brand": item.get("brand") or "",
+                "category": item.get("category") or "",
+                "description": item.get("description") or "",
+                "image": item.get("image") or "",
+                "link": item.get("url") or "",
+                "rating": item.get("rating"),
+                "reviews": item.get("review_count") or item.get("reviews"),
+                "available": item.get("stock_quantity", 1) != 0,
             })
 
         return products
 
     except Exception as e:
-
-        print(
-            f"Ошибка ReefAPI/Wildberries: {e}"
-        )
-
+        print(f"Ошибка ReefAPI/Wildberries: {e}")
         return []
 
 
-def get_search_cache(
-    query_key,
-    source
-):
-
+def get_search_cache(query_key, source):
     conn = get_db()
-
     row = conn.execute("""
-        SELECT
-            query_key,
-            source,
-            last_fetched_page,
-            last_fetched_at,
-            result_count
+        SELECT query_key, source, last_fetched_page, last_fetched_at, result_count
         FROM search_cache
-        WHERE query_key = ?
-          AND source = ?
+        WHERE query_key = ? AND source = ?
         LIMIT 1
-    """, (
-        query_key,
-        source
-    )).fetchone()
-
+    """, (query_key, source)).fetchone()
     conn.close()
-
-    return (
-        dict(row)
-        if row
-        else None
-    )
+    return dict(row) if row else None
 
 
-def update_search_cache(
-    query_key,
-    source,
-    page,
-    result_count
-):
-
+def update_search_cache(query_key, source, page, result_count):
     conn = get_db()
-
     conn.execute("""
         INSERT INTO search_cache (
-            query_key,
-            source,
-            last_fetched_page,
-            last_fetched_at,
-            result_count
+            query_key, source, last_fetched_page, last_fetched_at, result_count
         )
-
-        VALUES (
-            ?,
-            ?,
-            ?,
-            CURRENT_TIMESTAMP,
-            ?
-        )
-
-        ON CONFLICT(
-            query_key,
-            source
-        )
-
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)
+        ON CONFLICT(query_key, source)
         DO UPDATE SET
-
-            last_fetched_page =
-                excluded.last_fetched_page,
-
-            last_fetched_at =
-                CURRENT_TIMESTAMP,
-
-            result_count =
-                excluded.result_count
-    """, (
-        query_key,
-        source,
-        page,
-        result_count
-    ))
-
+            last_fetched_page = excluded.last_fetched_page,
+            last_fetched_at = CURRENT_TIMESTAMP,
+            result_count = excluded.result_count
+    """, (query_key, source, page, result_count))
     conn.commit()
     conn.close()
 
 
-def lazy_search(
-    query,
-    sources=None,
-    min_price=None,
-    max_price=None,
-    limit=100
-):
-
-    query = normalize_search_text(
-        query
-    )
-
-    sources = [
-        str(x).lower()
-        for x in (
-            sources or []
-        )
-        if x
-    ]
+def lazy_search(query, sources=None, min_price=None, max_price=None, limit=100):
+    """
+    Главная точка lazy-каталога:
+    1) ищем в своей БД;
+    2) если мало — догружаем внешний источник;
+    3) сохраняем новые карточки;
+    4) повторно читаем БД и отдаём уже общий накопленный каталог.
+    """
+    query = normalize_search_text(query)
+    sources = [str(x).lower() for x in (sources or []) if x]
 
     if not query:
-
         return {
             "products": [],
             "local_count": 0,
@@ -1481,11 +872,7 @@ def lazy_search(
         limit=limit
     )
 
-    if len(local) >= min(
-        LOCAL_SEARCH_MIN_RESULTS,
-        limit
-    ):
-
+    if len(local) >= min(LOCAL_SEARCH_MIN_RESULTS, limit):
         return {
             "products": local,
             "local_count": len(local),
@@ -1495,44 +882,27 @@ def lazy_search(
 
     fetched_total = 0
 
-    wanted_sources = (
-        sources
-        or ["wildberries"]
-    )
+    # Сейчас ReefAPI подключён к WB. Остальные источники добавим
+    # отдельными адаптерами, не ломая общий механизм.
+    wanted_sources = sources or ["wildberries"]
 
     if "wildberries" in wanted_sources:
+        cache = get_search_cache(query, "wildberries")
+        next_page = (cache["last_fetched_page"] + 1) if cache else 1
 
-        cache = get_search_cache(
-            query,
-            "wildberries"
-        )
-
-        next_page = (
-            cache[
-                "last_fetched_page"
-            ] + 1
-            if cache
-            else 1
-        )
-
+        # Wildberries keyword search у ReefAPI имеет 3 страницы по 100.
         while next_page <= 3:
-
-            new_products = (
-                reef_wildberries_search(
-                    query,
-                    page=next_page,
-                    price_min=min_price,
-                    price_max=max_price
-                )
+            new_products = reef_wildberries_search(
+                query,
+                page=next_page,
+                price_min=min_price,
+                price_max=max_price
             )
 
             if not new_products:
                 break
 
-            fetched_total += save_products(
-                new_products
-            )
-
+            fetched_total += save_products(new_products)
             update_search_cache(
                 query,
                 "wildberries",
@@ -1548,10 +918,7 @@ def lazy_search(
                 limit=limit
             )
 
-            if len(local) >= min(
-                LOCAL_SEARCH_MIN_RESULTS,
-                limit
-            ):
+            if len(local) >= min(LOCAL_SEARCH_MIN_RESULTS, limit):
                 break
 
             next_page += 1
@@ -1560,11 +927,7 @@ def lazy_search(
         "products": local,
         "local_count": len(local),
         "fetched": fetched_total,
-        "source": (
-            "local+reefapi"
-            if fetched_total
-            else "local"
-        )
+        "source": "local+reefapi" if fetched_total else "local"
     }
 
 
@@ -1587,29 +950,25 @@ def update_feed():
 
     data = request.json
 
-    if not isinstance(
-        data,
-        list
-    ):
+    if not isinstance(data, list):
 
         return jsonify({
             "status": "error",
-            "message":
-                "Ожидался список товаров"
+            "message": "Ожидался список товаров"
         }), 400
 
     try:
 
-        saved = save_products(
-            data
-        )
+        saved = save_products(data)
 
         products = get_all_products()
 
         stats = get_database_stats()
 
-        # Последняя загрузка теперь
-        # тоже сохраняется на Volume.
+        # ---------------------------------
+        # Сохраняем последнюю загрузку
+        # только для совместимости
+        # ---------------------------------
 
         with open(
             FEED_PATH,
@@ -1653,15 +1012,10 @@ def update_feed():
         )
 
         print(
-            f"DB: {DB_PATH}"
-        )
-
-        print(
             "========================================"
         )
 
         return jsonify({
-
             "status": "ok",
 
             "received": len(data),
@@ -1670,17 +1024,13 @@ def update_feed():
 
             "total": stats["total"],
 
-            "available":
-                stats["available"],
+            "available": stats["available"],
 
-            "kufar":
-                stats["kufar"],
+            "kufar": stats["kufar"],
 
-            "wildberries":
-                stats["wildberries"],
+            "wildberries": stats["wildberries"],
 
-            "products":
-                products
+            "products": products
         })
 
     except Exception as e:
@@ -1695,23 +1045,16 @@ def update_feed():
         }), 500
 
 
+
 # =========================
 # LAZY SEARCH API
 # =========================
 
 @app.route("/api/search")
 def api_search():
+    query = request.args.get("query", "").strip()
 
-    query = request.args.get(
-        "query",
-        ""
-    ).strip()
-
-    sources_raw = request.args.get(
-        "sources",
-        ""
-    ).strip()
-
+    sources_raw = request.args.get("sources", "").strip()
     sources = [
         x.strip().lower()
         for x in sources_raw.split(",")
@@ -1719,48 +1062,24 @@ def api_search():
     ]
 
     def parse_float(name):
-
-        value = request.args.get(
-            name,
-            ""
-        ).strip()
-
+        value = request.args.get(name, "").strip()
         if not value:
             return None
-
         try:
             return float(value)
-
         except ValueError:
             return None
 
-    min_price = parse_float(
-        "min_price"
-    )
-
-    max_price = parse_float(
-        "max_price"
-    )
+    min_price = parse_float("min_price")
+    max_price = parse_float("max_price")
 
     try:
-
         result = lazy_search(
             query,
             sources=sources,
             min_price=min_price,
             max_price=max_price,
-            limit=max(
-                1,
-                min(
-                    int(
-                        request.args.get(
-                            "limit",
-                            LOCAL_SEARCH_PAGE_SIZE
-                        )
-                    ),
-                    200
-                )
-            )
+            limit=max(1, min(int(request.args.get("limit", LOCAL_SEARCH_PAGE_SIZE)), 200))
         )
 
         return jsonify({
@@ -1770,11 +1089,7 @@ def api_search():
         })
 
     except Exception as e:
-
-        print(
-            f"Ошибка /api/search: {e}"
-        )
-
+        print(f"Ошибка /api/search: {e}")
         return jsonify({
             "status": "error",
             "message": str(e),
@@ -1782,28 +1097,18 @@ def api_search():
         }), 500
 
 
-def lazy_search_more(
-    query,
-    sources=None,
-    min_price=None,
-    max_price=None,
-    limit=100
-):
+def lazy_search_more(query, sources=None, min_price=None, max_price=None, limit=100):
+    """
+    Принудительно догружает следующую страницу внешнего источника.
 
-    query = normalize_search_text(
-        query
-    )
-
-    sources = [
-        str(x).lower()
-        for x in (
-            sources or []
-        )
-        if x
-    ]
+    В отличие от lazy_search() этот метод НЕ останавливается только потому,
+    что в локальной БД уже есть 30+ совпадений. Это нужно для бесконечной
+    ленты: /api/search/more должен действительно получать следующую пачку.
+    """
+    query = normalize_search_text(query)
+    sources = [str(x).lower() for x in (sources or []) if x]
 
     if not query:
-
         return {
             "products": [],
             "local_count": 0,
@@ -1813,44 +1118,22 @@ def lazy_search_more(
         }
 
     fetched_total = 0
-
-    wanted_sources = (
-        sources
-        or ["wildberries"]
-    )
+    wanted_sources = sources or ["wildberries"]
 
     if "wildberries" in wanted_sources:
-
-        cache = get_search_cache(
-            query,
-            "wildberries"
-        )
-
-        next_page = (
-            cache[
-                "last_fetched_page"
-            ] + 1
-            if cache
-            else 1
-        )
+        cache = get_search_cache(query, "wildberries")
+        next_page = (cache["last_fetched_page"] + 1) if cache else 1
 
         if next_page <= 3:
-
-            new_products = (
-                reef_wildberries_search(
-                    query,
-                    page=next_page,
-                    price_min=min_price,
-                    price_max=max_price
-                )
+            new_products = reef_wildberries_search(
+                query,
+                page=next_page,
+                price_min=min_price,
+                price_max=max_price
             )
 
             if new_products:
-
-                fetched_total = save_products(
-                    new_products
-                )
-
+                fetched_total = save_products(new_products)
                 update_search_cache(
                     query,
                     "wildberries",
@@ -1867,51 +1150,25 @@ def lazy_search_more(
     )
 
     has_more = False
-
     if "wildberries" in wanted_sources:
-
-        cache = get_search_cache(
-            query,
-            "wildberries"
-        )
-
-        has_more = bool(
-            cache
-            and cache[
-                "last_fetched_page"
-            ] < 3
-        )
+        cache = get_search_cache(query, "wildberries")
+        has_more = bool(cache and cache["last_fetched_page"] < 3)
 
     return {
         "products": local,
         "local_count": len(local),
         "fetched": fetched_total,
-        "source": (
-            "local+reefapi"
-            if fetched_total
-            else "local"
-        ),
+        "source": "local+reefapi" if fetched_total else "local",
         "has_more": has_more
     }
 
 
-@app.route(
-    "/api/search/more"
-)
+@app.route("/api/search/more")
 def api_search_more():
-
     try:
+        query = request.args.get("query", "").strip()
 
-        query = request.args.get(
-            "query",
-            ""
-        ).strip()
-
-        sources_raw = request.args.get(
-            "sources",
-            ""
-        ).strip()
-
+        sources_raw = request.args.get("sources", "").strip()
         sources = [
             x.strip().lower()
             for x in sources_raw.split(",")
@@ -1919,41 +1176,17 @@ def api_search_more():
         ]
 
         def parse_float(name):
-
-            value = request.args.get(
-                name,
-                ""
-            ).strip()
-
+            value = request.args.get(name, "").strip()
             if not value:
                 return None
-
             try:
                 return float(value)
-
             except ValueError:
                 return None
 
-        min_price = parse_float(
-            "min_price"
-        )
-
-        max_price = parse_float(
-            "max_price"
-        )
-
-        limit = max(
-            1,
-            min(
-                int(
-                    request.args.get(
-                        "limit",
-                        LOCAL_SEARCH_PAGE_SIZE
-                    )
-                ),
-                200
-            )
-        )
+        min_price = parse_float("min_price")
+        max_price = parse_float("max_price")
+        limit = max(1, min(int(request.args.get("limit", LOCAL_SEARCH_PAGE_SIZE)), 200))
 
         result = lazy_search_more(
             query,
@@ -1970,11 +1203,7 @@ def api_search_more():
         })
 
     except Exception as e:
-
-        print(
-            f"Ошибка /api/search/more: {e}"
-        )
-
+        print(f"Ошибка /api/search/more: {e}")
         return jsonify({
             "status": "error",
             "message": str(e),
@@ -1994,13 +1223,10 @@ def api_feed():
         products = get_all_products()
 
         print(
-            f"Отдаю из базы: "
-            f"{len(products)} товаров"
+            f"Отдаю из базы: {len(products)} товаров"
         )
 
-        return jsonify(
-            products
-        )
+        return jsonify(products)
 
     except Exception as e:
 
@@ -2030,8 +1256,7 @@ def api_user_history():
 
         return jsonify({
             "status": "error",
-            "message":
-                "Не указан user_id"
+            "message": "Не указан user_id"
         }), 400
 
     try:
@@ -2043,31 +1268,22 @@ def api_user_history():
         print(
             "История пользователя "
             f"{user_id}: "
-            f"viewed="
-            f"{len(history['viewed'])}, "
-            f"opened="
-            f"{len(history['opened'])}"
+            f"viewed={len(history['viewed'])}, "
+            f"opened={len(history['opened'])}"
         )
 
         return jsonify({
-
             "status": "ok",
+            "user_id": str(user_id),
 
-            "user_id":
-                str(user_id),
-
-            "viewed":
-                history["viewed"],
-
-            "opened":
-                history["opened"]
+            "viewed": history["viewed"],
+            "opened": history["opened"]
         })
 
     except Exception as e:
 
         print(
-            "Ошибка получения "
-            f"истории пользователя: {e}"
+            f"Ошибка получения истории пользователя: {e}"
         )
 
         return jsonify({
@@ -2102,8 +1318,7 @@ def api_user_view():
 
         return jsonify({
             "status": "error",
-            "message":
-                "Нужны user_id и product_id"
+            "message": "Нужны user_id и product_id"
         }), 400
 
     try:
@@ -2118,26 +1333,18 @@ def api_user_view():
 
             return jsonify({
                 "status": "error",
-                "message":
-                    "Не удалось сохранить просмотр"
+                "message": "Не удалось сохранить просмотр"
             }), 400
 
         print(
-            f"VIEW | user={user_id} "
-            f"| product={product_id}"
+            f"VIEW | user={user_id} | product={product_id}"
         )
 
         return jsonify({
-
             "status": "ok",
-
             "action": "view",
-
-            "user_id":
-                str(user_id),
-
-            "product_id":
-                str(product_id)
+            "user_id": str(user_id),
+            "product_id": str(product_id)
         })
 
     except Exception as e:
@@ -2178,8 +1385,7 @@ def api_user_open():
 
         return jsonify({
             "status": "error",
-            "message":
-                "Нужны user_id и product_id"
+            "message": "Нужны user_id и product_id"
         }), 400
 
     try:
@@ -2194,26 +1400,18 @@ def api_user_open():
 
             return jsonify({
                 "status": "error",
-                "message":
-                    "Не удалось сохранить открытие"
+                "message": "Не удалось сохранить открытие"
             }), 400
 
         print(
-            f"OPEN | user={user_id} "
-            f"| product={product_id}"
+            f"OPEN | user={user_id} | product={product_id}"
         )
 
         return jsonify({
-
             "status": "ok",
-
             "action": "open",
-
-            "user_id":
-                str(user_id),
-
-            "product_id":
-                str(product_id)
+            "user_id": str(user_id),
+            "product_id": str(product_id)
         })
 
     except Exception as e:
@@ -2232,9 +1430,7 @@ def api_user_open():
 # DATABASE INFO
 # =========================
 
-@app.route(
-    "/api/database"
-)
+@app.route("/api/database")
 def api_database():
 
     try:
@@ -2244,9 +1440,7 @@ def api_database():
         conn = get_db()
 
         users = conn.execute("""
-            SELECT COUNT(
-                DISTINCT user_id
-            )
+            SELECT COUNT(DISTINCT user_id)
             FROM user_history
         """).fetchone()[0]
 
@@ -2258,32 +1452,15 @@ def api_database():
         conn.close()
 
         return jsonify({
-
             "status": "ok",
 
-            "total":
-                stats["total"],
+            "total": stats["total"],
+            "available": stats["available"],
+            "kufar": stats["kufar"],
+            "wildberries": stats["wildberries"],
 
-            "available":
-                stats["available"],
-
-            "kufar":
-                stats["kufar"],
-
-            "wildberries":
-                stats["wildberries"],
-
-            "users":
-                users,
-
-            "history_events":
-                history_events,
-
-            "database_path":
-                DB_PATH,
-
-            "persistent_directory":
-                PERSISTENT_DIR
+            "users": users,
+            "history_events": history_events
         })
 
     except Exception as e:
@@ -2298,9 +1475,7 @@ def api_database():
 # SETTINGS
 # =========================
 
-@app.route(
-    "/api/settings"
-)
+@app.route("/api/settings")
 def api_settings():
 
     if not os.path.exists(
@@ -2327,8 +1502,7 @@ def api_settings():
     except Exception as e:
 
         print(
-            "Ошибка чтения "
-            f"settings.json: {e}"
+            f"Ошибка чтения settings.json: {e}"
         )
 
         return jsonify({
@@ -2376,9 +1550,7 @@ def api_settings_save():
 # WILDBERRIES PARSER
 # =========================
 
-@app.route(
-    "/api/parse_wb"
-)
+@app.route("/api/parse_wb")
 def parse_wb_server():
 
     query = request.args.get(
@@ -2400,11 +1572,8 @@ def parse_wb_server():
         limit = 50
 
     proxy = {
-        "http":
-            "http://USERNAME:PASSWORD@IP:PORT",
-
-        "https":
-            "http://USERNAME:PASSWORD@IP:PORT"
+        "http": "http://USERNAME:PASSWORD@IP:PORT",
+        "https": "http://USERNAME:PASSWORD@IP:PORT"
     }
 
     products = []
@@ -2414,8 +1583,7 @@ def parse_wb_server():
     while len(products) < limit:
 
         url = (
-            "https://search.wb.ru/"
-            "catalog/ru/search/v2/search"
+            "https://search.wb.ru/catalog/ru/search/v2/search"
             f"?query={query}"
             "&spp=30"
             "&regions=80,64,38,4,33,70,1,22,31,66,68,40,48,71"
@@ -2473,48 +1641,43 @@ def parse_wb_server():
 
             products.append({
 
-                "id":
-                    str(product_id),
+                "id": str(product_id),
 
-                "source":
-                    "wildberries",
+                "source": "wildberries",
 
-                "external_id":
-                    str(product_id),
+                "external_id": str(
+                    product_id
+                ),
 
-                "title":
-                    item.get(
-                        "name",
-                        "Без названия"
-                    ),
+                "title": item.get(
+                    "name",
+                    "Без названия"
+                ),
 
-                "price":
-                    sale_price / 100,
+                "price": (
+                    sale_price / 100
+                ),
 
-                "brand":
-                    item.get(
-                        "brand",
-                        ""
-                    ),
+                "brand": item.get(
+                    "brand",
+                    ""
+                ),
 
-                "image":
-                    (
-                        "https://images.wbstatic.net/"
-                        "c516x688/new/"
-                        f"{product_id}-1.jpg"
-                    ),
+                "image": (
+                    f"https://images.wbstatic.net/"
+                    f"c516x688/new/"
+                    f"{product_id}-1.jpg"
+                ),
 
-                "link":
-                    (
-                        "https://www.wildberries.ru/"
-                        f"catalog/{product_id}/detail.aspx"
-                    ),
+                "link": (
+                    "https://www.wildberries.ru/"
+                    f"catalog/{product_id}/detail.aspx"
+                ),
 
-                "currency":
-                    "RUB",
+                "currency": "RUB",
 
-                "available":
-                    True
+                "available": True
+
             })
 
             if len(products) >= limit:
@@ -2523,13 +1686,10 @@ def parse_wb_server():
         page += 1
 
     print(
-        f"Wildberries: найдено "
-        f"{len(products)} товаров"
+        f"Wildberries: найдено {len(products)} товаров"
     )
 
-    return jsonify(
-        products
-    )
+    return jsonify(products)
 
 
 # =========================
@@ -2549,9 +1709,7 @@ def index():
 # JAVASCRIPT
 # =========================
 
-@app.route(
-    "/script.js"
-)
+@app.route("/script.js")
 def script():
 
     return send_from_directory(
@@ -2564,9 +1722,7 @@ def script():
 # ADMIN
 # =========================
 
-@app.route(
-    "/admin"
-)
+@app.route("/admin")
 def admin():
 
     return send_from_directory(
@@ -2600,4 +1756,3 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000
     )
-    
