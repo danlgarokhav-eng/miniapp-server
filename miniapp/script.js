@@ -1,10 +1,8 @@
-
-
 /* =========================================================
 STYLEFLOW
 Personalized marketplace feed
 
-ЭТАП 5:
+ЭТАП 4:
 
 1. Новая лента сначала максимально случайная.
 2. Не показываем уже просмотренные товары.
@@ -23,27 +21,11 @@ Personalized marketplace feed
     * открытия товаров
     * просмотры
 
-10. Фильтры:
-    * свободный текстовый запрос
+10. Добавлены фильтры:
     * минимальная цена
     * максимальная цена
+    * категория
     * маркетплейс
-    * сортировка
-
-ВАЖНО:
-
-Фильтр НЕ содержит фиксированных категорий.
-
-Пользователь сам пишет, что ищет:
-
-    машина
-    BMW
-    ноутбук
-    iPhone
-    ремонт телефона
-    квартира
-    кроссовки
-    и т.д.
 
 Фильтры применяются ДО персонализации.
 
@@ -58,50 +40,50 @@ GLOBAL
 ========================================================= */
 
 let allProducts = [];
-
 let products = [];
-
 let currentIndex = 0;
-
 let currentProduct = null;
 
+// История карточек именно текущей сессии ленты.
+let navigationHistory = [];
+let navigationPosition = -1;
 
 let favorites = loadJSON(
     "styleflow_favorites",
     []
 );
 
-
 let viewedProducts = loadJSON(
     "styleflow_viewed",
     []
 );
-
 
 let openedProducts = loadJSON(
     "styleflow_opened",
     []
 );
 
-
 let currentTab = "feed";
 
-
 let touchStartY = 0;
-
 let touchStartX = 0;
-
 let isDragging = false;
-
 let lastTapTime = 0;
-
 let searchTimer = null;
 
-// История навигации внутри текущей сессии.
-// Нужна, чтобы случайно пропущенную карточку можно было вернуть назад.
-let navigationHistory = [];
-let navigationPosition = -1;
-let infoPanelCollapsed = false;
+// Серверный lazy-поиск.
+// Храним активный запрос, чтобы при свайпе догружать следующие страницы.
+let activeServerSearch = {
+    query: "",
+    sources: [],
+    minPrice: null,
+    maxPrice: null
+};
+
+let serverSearchLoading = false;
+let serverSearchRequestId = 0;
+let serverSearchHasMore = true;
+let serverSearchLastFetchAt = 0;
 
 
 /* =========================================================
@@ -123,6 +105,7 @@ let activeFilters = loadJSON(
         query: "",
         minPrice: null,
         maxPrice: null,
+        categories: [],
         sources: [],
         sort: "relevance"
     }
@@ -131,10 +114,6 @@ let activeFilters = loadJSON(
 
 /*
 Защита от старого/битого localStorage.
-
-Если раньше здесь хранилась старая версия
-фильтров с categories — полностью переходим
-на новую структуру.
 */
 
 if (
@@ -146,6 +125,7 @@ if (
         query: "",
         minPrice: null,
         maxPrice: null,
+        categories: [],
         sources: [],
         sort: "relevance"
     };
@@ -153,11 +133,23 @@ if (
 
 
 if (
-    typeof activeFilters.query !== "string"
+    !Array.isArray(
+        activeFilters.categories
+    )
 ) {
 
-    activeFilters.query = "";
+    activeFilters.categories = [];
 }
+
+activeFilters.categories =
+    activeFilters.categories
+        .map(
+            category =>
+                getFilterCategoryLabel(
+                    category
+                )
+        )
+        .filter(Boolean);
 
 
 if (
@@ -169,27 +161,9 @@ if (
     activeFilters.sources = [];
 }
 
-
-if (
-    activeFilters.sort !== "relevance" &&
-    activeFilters.sort !== "newest" &&
-    activeFilters.sort !== "price_asc" &&
-    activeFilters.sort !== "price_desc"
-) {
-
+if (!activeFilters.sort) {
     activeFilters.sort = "relevance";
 }
-
-
-/*
-Старые категории больше не используются.
-
-Удаляем их из состояния фильтров,
-чтобы старые данные localStorage
-не влияли на новую систему.
-*/
-
-delete activeFilters.categories;
 
 
 /* =========================================================
@@ -197,24 +171,22 @@ RECOMMENDATION SETTINGS
 ========================================================= */
 
 const PERSONALIZATION_START =
-    5;
-
+    3;
 
 const PERSONALIZATION_FULL =
-    50;
+    40;
 
-
+// Новому пользователю оставляем больше исследования каталога.
+// По мере накопления сигналов случайность уменьшается.
 const MIN_RANDOM_RATIO =
-    0.20;
-
+    0.10;
 
 const MAX_RANDOM_RATIO =
-    0.75;
+    0.35;
 
 
 const MAX_SAME_CATEGORY_STREAK =
     2;
-
 
 const MAX_SAME_SOURCE_STREAK =
     3;
@@ -233,10 +205,14 @@ if (
 
     Telegram.WebApp.expand();
 
+    // Telegram иначе может принять вертикальный свайп карточки
+    // за жест закрытия/сворачивания Mini App.
     try {
+
         if (typeof Telegram.WebApp.disableVerticalSwipes === "function") {
             Telegram.WebApp.disableVerticalSwipes();
         }
+
     } catch (e) {}
 
     try {
@@ -298,7 +274,8 @@ document.addEventListener(
     async () => {
 
         setupSearch();
-        setupSearchSuggestions();
+        setupSearchSources();
+        setupSearchSuggestionFocus();
 
         setupSwipe();
 
@@ -332,6 +309,7 @@ document.addEventListener(
         */
 
         updateProfile();
+        updateProfileInterests();
     }
 );
 
@@ -642,6 +620,10 @@ LOAD FEED
 
 async function loadFeed() {
 
+    // Если поиск стартовал во время загрузки общей ленты,
+    // общий /api/feed не имеет права перезаписать результаты поиска.
+    const feedLoadSearchRequestId = serverSearchRequestId;
+
     try {
 
         const response =
@@ -686,16 +668,23 @@ async function loadFeed() {
             rawProducts.length
         );
 
+        // Пользователь уже начал поиск, пока /api/feed отвечал.
+        // Не даём общей ленте затереть активный поисковый запрос.
+        if (
+            feedLoadSearchRequestId !== serverSearchRequestId ||
+            activeServerSearch.query
+        ) {
+            console.log(
+                "[StyleFlow] Общая лента не применена: уже активен поиск."
+            );
+            return;
+        }
+
 
         allProducts =
             rawProducts.map(
                 normalizeProduct
             );
-
-        localStorage.setItem(
-            "styleflow_all_products_cache",
-            JSON.stringify(allProducts)
-        );
 
 
         console.log(
@@ -724,14 +713,12 @@ async function loadFeed() {
 
 
         /*
-        Обновляем только источники.
-
-        Категорий в фильтре больше нет.
+        Обновляем категории
+        фильтров после загрузки каталога.
         */
 
+        populateFilterCategories();
         renderFilterSources();
-
-        syncFilterUI();
 
 
         /*
@@ -751,7 +738,9 @@ async function loadFeed() {
             products.length > 0
         ) {
 
+            resetNavigationHistory();
             showProduct();
+            rememberCurrentProduct();
 
         } else {
 
@@ -765,6 +754,15 @@ async function loadFeed() {
             "[StyleFlow] Feed error:",
             error
         );
+
+        // Даже при ошибке общей ленты не перезаписываем активный поиск
+        // старым кэшем.
+        if (
+            feedLoadSearchRequestId !== serverSearchRequestId ||
+            activeServerSearch.query
+        ) {
+            return;
+        }
 
 
         const cached =
@@ -784,9 +782,8 @@ async function loadFeed() {
                 );
 
 
+            populateFilterCategories();
             renderFilterSources();
-
-            syncFilterUI();
 
 
             buildPersonalizedFeed();
@@ -894,32 +891,17 @@ function normalizeProduct(
         "";
 
 
-    /*
-    Категория больше не подставляется.
-
-    Если источник передал категорию —
-    сохраняем её для алгоритма рекомендаций
-    и свободного поиска.
-
-    Если категории нет —
-    оставляем пустую строку.
-    */
+    const rawCategory =
+        item.category ||
+        item.type ||
+        item.category_name ||
+        item.product_category ||
+        "";
 
     const category =
-        String(
-            item.category ||
-            item.type ||
-            ""
-        ).trim();
-
-
-    const description =
-        String(
-            item.description ||
-            item.short_description ||
-            item.desc ||
-            ""
-        ).trim();
+        getFilterCategoryLabel(
+            rawCategory
+        );
 
 
     const id =
@@ -929,33 +911,6 @@ function normalizeProduct(
             item.external_id ??
             `${source}_${index}_${title}`
         );
-
-
-    /*
-    Сохраняем дату создания/обновления,
-    если источник её передал.
-
-    Это позволит сортировке "Сначала новые"
-    работать уже сейчас для тех товаров,
-    где дата присутствует.
-
-    Если даты нет — используется
-    исходный порядок каталога.
-    */
-
-    const createdAt =
-        item.created_at ||
-        item.createdAt ||
-        item.created ||
-        item.date ||
-        "";
-
-
-    const updatedAt =
-        item.updated_at ||
-        item.updatedAt ||
-        item.updated ||
-        "";
 
 
     return {
@@ -981,7 +936,12 @@ function normalizeProduct(
 
         category,
 
-        description,
+        description:
+            item.description ||
+            item.short_description ||
+            item.subtitle ||
+            item.details ||
+            "",
 
         price,
 
@@ -1001,10 +961,6 @@ function normalizeProduct(
                 : [image],
 
         url,
-
-        createdAt,
-
-        updatedAt,
 
         raw: item
     };
@@ -1112,6 +1068,15 @@ function normalizeSource(
         "marketplace";
 }
 
+
+function sourceIcon(source) {
+    const s = normalizeSearchSource(source);
+    if (s.includes("kufar")) return "🟢";
+    if (s.includes("wildberries") || s === "wb") return "🟣";
+    if (s.includes("ozon")) return "🔵";
+    if (s.includes("ali")) return "🟠";
+    return "🛍️";
+}
 
 function sourceLabel(
     source
@@ -1293,6 +1258,133 @@ FILTERS
 
 
 /*
+Нормализуем категорию для фильтров.
+
+Kufar/WB и другие источники могут отдавать
+числовые ID категорий вместо названия.
+Для интерфейса такие значения показываем как
+"Одежда", чтобы в фильтре не появлялись
+цепочки вроде 10501 / 105011030...
+*/
+function getFilterCategoryKey(value) {
+
+    const text =
+        String(value || "")
+            .trim();
+
+    if (!text) {
+        return "";
+    }
+
+    const normalized =
+        normalizeText(text);
+
+    if (/^\d+$/.test(normalized)) {
+        return "";
+    }
+
+    if (/^[\d\s._-]+$/.test(normalized)) {
+        return "";
+    }
+
+    return normalized;
+}
+
+
+function getFilterCategoryLabel(value) {
+
+    const text =
+        String(value || "")
+            .trim();
+
+    if (!text) {
+        return "";
+    }
+
+    const normalized =
+        normalizeText(text);
+
+    if (/^\d+$/.test(normalized)) {
+        return "";
+    }
+
+    if (/^[\d\s._-]+$/.test(normalized)) {
+        return "";
+    }
+
+    return text;
+}
+
+
+/*
+Создаём кнопки площадок программно,
+поэтому они всегда реально реагируют на клик.
+*/
+function renderFilterSources() {
+
+    const container =
+        document.getElementById(
+            "filterSources"
+        );
+
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = "";
+
+    const sources = [
+        {
+            key: "__all__",
+            label: "Все"
+        },
+        {
+            key: "kufar",
+            label: "🟢 Kufar"
+        },
+        {
+            key: "wildberries",
+            label: "🟣 Wildberries"
+        },
+        {
+            key: "ozon",
+            label: "🔵 Ozon"
+        },
+        {
+            key: "aliexpress",
+            label: "🟠 AliExpress"
+        }
+    ];
+
+    sources.forEach(
+        source => {
+
+            const button =
+                document.createElement(
+                    "button"
+                );
+
+            button.type = "button";
+            button.className = "filter-chip";
+            button.dataset.source = source.key;
+            button.textContent = source.label;
+
+            button.addEventListener(
+                "click",
+                () => {
+                    toggleFilterChip(button);
+                }
+            );
+
+            container.appendChild(button);
+        }
+    );
+
+    syncSourceFilterUI();
+}
+
+
+/*
 Возвращает количество активных фильтров.
 */
 
@@ -1302,10 +1394,8 @@ function getActiveFilterCount() {
 
 
     if (
-        activeFilters.query &&
-        activeFilters.query.trim()
+        String(activeFilters.query || "").trim()
     ) {
-
         count++;
     }
 
@@ -1330,6 +1420,18 @@ function getActiveFilterCount() {
 
     if (
         Array.isArray(
+            activeFilters.categories
+        ) &&
+        activeFilters.categories.length
+    ) {
+
+        count +=
+            activeFilters.categories.length;
+    }
+
+
+    if (
+        Array.isArray(
             activeFilters.sources
         ) &&
         activeFilters.sources.length
@@ -1337,23 +1439,6 @@ function getActiveFilterCount() {
 
         count +=
             activeFilters.sources.length;
-    }
-
-
-    /*
-    Сортировка "релевантность" —
-    состояние по умолчанию.
-
-    Другие варианты считаем
-    дополнительным активным параметром.
-    */
-
-    if (
-        activeFilters.sort &&
-        activeFilters.sort !== "relevance"
-    ) {
-
-        count++;
     }
 
 
@@ -1383,7 +1468,9 @@ function openFilters() {
     }
 
 
+    populateFilterCategories();
     renderFilterSources();
+
 
     syncFilterUI();
 
@@ -1450,6 +1537,12 @@ function applyFilters() {
         );
 
 
+    const query =
+        queryInput
+            ? queryInput.value.trim()
+            : "";
+
+
     const minInput =
         document.getElementById(
             "filterMinPrice"
@@ -1460,18 +1553,6 @@ function applyFilters() {
         document.getElementById(
             "filterMaxPrice"
         );
-
-
-    const sortInput =
-        document.getElementById(
-            "filterSort"
-        );
-
-
-    const query =
-        queryInput
-            ? queryInput.value.trim()
-            : "";
 
 
     let minPrice =
@@ -1513,13 +1594,49 @@ function applyFilters() {
     }
 
 
+    const categoryButtons =
+        document.querySelectorAll(
+            "#filterCategories .filter-chip.active"
+        );
+
+
     const sourceButtons =
         document.querySelectorAll(
             "#filterSources .filter-chip.active"
         );
 
 
+    const categories = [];
+
+
+    categoryButtons.forEach(
+        button => {
+
+            const value =
+                String(
+                    button.dataset.category ||
+                    ""
+                )
+                    .trim();
+
+
+            if (
+                value &&
+                value !== "__all__"
+            ) {
+
+                categories.push(
+                    value
+                );
+            }
+        }
+    );
+
+
     const sources = [];
+
+    const sortSelect = document.getElementById("filterSort");
+    const sort = sortSelect ? (sortSelect.value || "relevance") : "relevance";
 
 
     sourceButtons.forEach(
@@ -1546,23 +1663,6 @@ function applyFilters() {
     );
 
 
-    let sort =
-        sortInput
-            ? sortInput.value
-            : "relevance";
-
-
-    if (
-        sort !== "relevance" &&
-        sort !== "newest" &&
-        sort !== "price_asc" &&
-        sort !== "price_desc"
-    ) {
-
-        sort = "relevance";
-    }
-
-
     activeFilters = {
 
         query,
@@ -1570,6 +1670,11 @@ function applyFilters() {
         minPrice,
 
         maxPrice,
+
+        categories:
+            uniqueStrings(
+                categories
+            ),
 
         sources:
             uniqueStrings(
@@ -1587,28 +1692,29 @@ function applyFilters() {
 
 
     /*
-    После изменения фильтров
-    строим ленту заново.
-
-    Важно:
-
-    фильтр
-        ↓
-    кандидаты
-        ↓
-    просмотренные
-        ↓
-    сортировка
-        ↓
-    персонализация
-        ↓
-    лента
+    После изменения фильтров строим ленту заново.
+    Если указан текстовый запрос — сначала просим серверный lazy-каталог.
     */
 
     currentIndex = 0;
 
+    if (query) {
+        void performSearch(query, {
+            sources: uniqueStrings(sources),
+            minPrice,
+            maxPrice
+        });
+        closeFilters();
+        updateFilterButton();
+        return;
+    }
 
     buildPersonalizedFeed();
+
+
+    // После применения фильтра сразу возвращаем человека в ленту.
+    switchTab("feed");
+    resetNavigationHistory();
 
 
     if (
@@ -1647,15 +1753,11 @@ function applyFilters() {
 function resetFilters() {
 
     activeFilters = {
-
         query: "",
-
         minPrice: null,
-
         maxPrice: null,
-
+        categories: [],
         sources: [],
-
         sort: "relevance"
     };
 
@@ -1672,6 +1774,11 @@ function resetFilters() {
         );
 
 
+    if (queryInput) {
+        queryInput.value = "";
+    }
+
+
     const minInput =
         document.getElementById(
             "filterMinPrice"
@@ -1684,49 +1791,35 @@ function resetFilters() {
         );
 
 
-    const sortInput =
-        document.getElementById(
-            "filterSort"
-        );
-
-
-    if (queryInput) {
-
-        queryInput.value =
-            "";
-    }
-
-
     if (minInput) {
 
-        minInput.value =
-            "";
+        minInput.value = "";
     }
 
 
     if (maxInput) {
 
-        maxInput.value =
-            "";
+        maxInput.value = "";
     }
 
-
-    if (sortInput) {
-
-        sortInput.value =
-            "relevance";
-    }
-
-
-    renderFilterSources();
 
     syncFilterUI();
 
+    activeServerSearch = {
+        query: "",
+        sources: [],
+        minPrice: null,
+        maxPrice: null
+    };
+    serverSearchHasMore = true;
+    serverSearchRequestId++;
 
     currentIndex = 0;
 
 
     buildPersonalizedFeed();
+    switchTab("feed");
+    resetNavigationHistory();
 
 
     if (
@@ -1751,10 +1844,9 @@ function resetFilters() {
 
 
 /*
-Выбор источника.
+Выбор категории/источника.
 
 Можно вызывать из HTML:
-
 toggleFilterChip(this)
 */
 
@@ -1768,8 +1860,10 @@ function toggleFilterChip(
 
 
     const isAll =
+        button.dataset.category ===
+            "__all__" ||
         button.dataset.source ===
-        "__all__";
+            "__all__";
 
 
     /*
@@ -1824,7 +1918,7 @@ function toggleFilterChip(
 
         const allButton =
             container.querySelector(
-                '[data-source="__all__"]'
+                '[data-category="__all__"], [data-source="__all__"]'
             );
 
 
@@ -1860,7 +1954,7 @@ function toggleFilterChip(
 
             const allButton =
                 container.querySelector(
-                    '[data-source="__all__"]'
+                    '[data-category="__all__"], [data-source="__all__"]'
                 );
 
 
@@ -1876,97 +1970,140 @@ function toggleFilterChip(
 
 
 /*
-Источники фильтра.
-
-Создаём кнопки программно.
+Заполняем категории автоматически
+из текущего каталога.
 */
 
-function renderFilterSources() {
+function populateFilterCategories() {
 
     const container =
         document.getElementById(
-            "filterSources"
+            "filterCategories"
         );
-
 
     if (!container) {
         return;
     }
 
+    const categoryMap =
+        new Map();
 
-    const sources = [
-        {
-            value: "__all__",
-            label: "Все"
-        },
-        {
-            value: "kufar",
-            label: "🟢 Kufar"
-        },
-        {
-            value: "wildberries",
-            label: "🟣 Wildberries"
-        },
-        {
-            value: "ozon",
-            label: "🔵 Ozon"
-        },
-        {
-            value: "aliexpress",
-            label: "🟠 AliExpress"
+    allProducts.forEach(
+        product => {
+
+            const label =
+                getFilterCategoryLabel(
+                    product && product.category
+                );
+
+            if (!label) {
+                return;
+            }
+
+            const key =
+                getFilterCategoryKey(label);
+
+            if (!key) {
+                return;
+            }
+
+            if (!categoryMap.has(key)) {
+                categoryMap.set(
+                    key,
+                    label
+                );
+            }
         }
-    ];
+    );
 
+    const categories =
+        Array.from(
+            categoryMap.entries()
+        )
+        .sort(
+            (a, b) =>
+                a[1].localeCompare(
+                    b[1],
+                    "ru"
+                )
+        );
+
+    const availableKeys =
+        new Set(
+            categories.map(
+                item => item[0]
+            )
+        );
+
+    activeFilters.categories =
+        activeFilters.categories
+            .map(
+                category =>
+                    getFilterCategoryLabel(
+                        category
+                    )
+            )
+            .filter(
+                category =>
+                    availableKeys.has(
+                        getFilterCategoryKey(
+                            category
+                        )
+                    )
+            );
+
+    activeFilters.categories =
+        uniqueStrings(
+            activeFilters.categories
+        );
 
     container.innerHTML = "";
 
+    const allButton =
+        document.createElement(
+            "button"
+        );
 
-    sources.forEach(
-        source => {
+    allButton.type = "button";
+    allButton.className = "filter-chip";
+    allButton.dataset.category = "__all__";
+    allButton.textContent = "Все";
+
+    allButton.addEventListener(
+        "click",
+        () => {
+            toggleFilterChip(allButton);
+        }
+    );
+
+    container.appendChild(allButton);
+
+    categories.forEach(
+        ([key, label]) => {
 
             const button =
                 document.createElement(
                     "button"
                 );
 
-
-            button.type =
-                "button";
-
-
-            button.className =
-                "filter-chip";
-
-
-            button.dataset.source =
-                source.value;
-
-
-            button.textContent =
-                source.label;
-
+            button.type = "button";
+            button.className = "filter-chip";
+            button.dataset.category = label;
+            button.textContent = label;
 
             button.addEventListener(
                 "click",
                 () => {
-
-                    toggleFilterChip(
-                        button
-                    );
+                    toggleFilterChip(button);
                 }
             );
 
-
-            container.appendChild(
-                button
-            );
+            container.appendChild(button);
         }
     );
 
-
-    syncSourceFilterUI();
+    syncCategoryFilterUI();
 }
-
 
 /*
 Синхронизация UI фильтров
@@ -1980,6 +2117,12 @@ function syncFilterUI() {
             "filterQuery"
         );
 
+    if (queryInput) {
+        queryInput.value = activeFilters.query || "";
+    }
+
+    const sortSelect = document.getElementById("filterSort");
+    if (sortSelect) sortSelect.value = activeFilters.sort || "relevance";
 
     const minInput =
         document.getElementById(
@@ -1991,19 +2134,6 @@ function syncFilterUI() {
         document.getElementById(
             "filterMaxPrice"
         );
-
-
-    const sortInput =
-        document.getElementById(
-            "filterSort"
-        );
-
-
-    if (queryInput) {
-
-        queryInput.value =
-            activeFilters.query || "";
-    }
 
 
     if (minInput) {
@@ -2024,18 +2154,80 @@ function syncFilterUI() {
     }
 
 
-    if (sortInput) {
-
-        sortInput.value =
-            activeFilters.sort ||
-            "relevance";
-    }
+    syncCategoryFilterUI();
 
 
     syncSourceFilterUI();
 
 
     updateFilterButton();
+}
+
+
+/*
+Категории.
+*/
+
+function syncCategoryFilterUI() {
+
+    const container =
+        document.getElementById(
+            "filterCategories"
+        );
+
+
+    if (!container) {
+        return;
+    }
+
+
+    const buttons =
+        container.querySelectorAll(
+            ".filter-chip"
+        );
+
+
+    const selected =
+        new Set(
+            activeFilters.categories.map(
+                category =>
+                    getFilterCategoryKey(
+                        category
+                    )
+            )
+        );
+
+
+    buttons.forEach(
+        button => {
+
+            const value =
+                button.dataset.category;
+
+
+            if (
+                value === "__all__"
+            ) {
+
+                button.classList.toggle(
+                    "active",
+                    selected.size === 0
+                );
+
+                return;
+            }
+
+
+            button.classList.toggle(
+                "active",
+                selected.has(
+                    getFilterCategoryKey(
+                        value
+                    )
+                )
+            );
+        }
+    );
 }
 
 
@@ -2171,560 +2363,12 @@ function updateFilterButton() {
 }
 
 
-/* =========================================================
-FILTER SEARCH HELPERS
-========================================================= */
-
-
-/*
-Нормализуем текст для поиска.
-
-Например:
-
-"  BMW X5  "
-→
-"bmw x5"
-*/
-
-function normalizeSearchText(value) {
-
-    return String(value || "")
-        .toLowerCase()
-        .replace(/ё/g, "е")
-        .replace(/[–—−]/g, "-")
-        .replace(/[^\p{L}\p{N}]+/gu, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
-
-/*
-Приводим слова к более устойчивой форме.
-Это не полноценный морфологический словарь, но он
-закрывает самые частые русские окончания и множественное
-число, поэтому "ноутбук", "ноутбуки", "ноутбука" и
-"ноутбуком" считаются одним поисковым намерением.
-*/
-function normalizeSearchToken(token) {
-
-    let word = normalizeSearchText(token)
-        .split(" ")
-        .filter(Boolean)[0] || "";
-
-    if (!word) {
-        return "";
-    }
-
-    const aliases = {
-        "ноут": "ноутбук",
-        "ноутбуки": "ноутбук",
-        "ноутбука": "ноутбук",
-        "ноутбуком": "ноутбук",
-        "ноутбуке": "ноутбук",
-        "laptop": "ноутбук",
-        "laptops": "ноутбук",
-        "айфон": "iphone",
-        "айфона": "iphone",
-        "айфоны": "iphone",
-        "айфоном": "iphone",
-        "iphones": "iphone",
-        "смартфон": "телефон",
-        "смартфоны": "телефон",
-        "смартфона": "телефон",
-        "авто": "машина",
-        "автомобиль": "машина",
-        "автомобили": "машина",
-        "машины": "машина"
-    };
-
-    if (aliases[word]) {
-        return aliases[word];
-    }
-
-    // Английское множественное число.
-    if (/^[a-z0-9]+$/i.test(word) && word.length > 4) {
-        if (word.endsWith("ies")) {
-            word = word.slice(0, -3) + "y";
-        } else if (word.endsWith("es")) {
-            word = word.slice(0, -2);
-        } else if (word.endsWith("s")) {
-            word = word.slice(0, -1);
-        }
-    }
-
-    // Частые русские окончания. Не режем короткие слова.
-    if (word.length >= 5) {
-        const endings = [
-            "ами", "ями", "ого", "ему", "ому", "ыми", "ими",
-            "ее", "ие", "ые", "ое", "ей", "ов", "ев", "ам",
-            "ям", "ах", "ях", "ом", "ем", "ым", "им", "ой",
-            "ый", "ий", "ая", "яя", "ое", "ее", "ую", "юю",
-            "ою", "ею", "ию", "ью", "ы", "и", "а", "я", "у", "ю", "е", "о"
-        ];
-
-        for (const ending of endings) {
-            if (word.endsWith(ending) && word.length - ending.length >= 4) {
-                word = word.slice(0, -ending.length);
-                break;
-            }
-        }
-    }
-
-    return word;
-}
-
-
-function levenshteinDistance(a, b) {
-
-    a = String(a || "");
-    b = String(b || "");
-
-    if (a === b) return 0;
-    if (!a) return b.length;
-    if (!b) return a.length;
-
-    if (Math.abs(a.length - b.length) > 2) {
-        return 3;
-    }
-
-    let prev = new Array(b.length + 1);
-    let curr = new Array(b.length + 1);
-
-    for (let j = 0; j <= b.length; j++) prev[j] = j;
-
-    for (let i = 1; i <= a.length; i++) {
-        curr[0] = i;
-
-        for (let j = 1; j <= b.length; j++) {
-            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-            curr[j] = Math.min(
-                curr[j - 1] + 1,
-                prev[j] + 1,
-                prev[j - 1] + cost
-            );
-        }
-
-        [prev, curr] = [curr, prev];
-    }
-
-    return prev[b.length];
-}
-
-
-function getProductSearchText(product) {
-
-    if (!product) {
-        return "";
-    }
-
-    return normalizeSearchText([
-        product.title,
-        product.brand,
-        product.category,
-        product.description,
-        product.source,
-        sourceLabel(product.source)
-    ].filter(Boolean).join(" "));
-}
-
-
-function getSearchWords(product) {
-
-    return getProductSearchText(product)
-        .split(" ")
-        .filter(Boolean);
-}
-
-
-function tokenMatchesSearch(token, words) {
-
-    const normalizedToken = normalizeSearchToken(token);
-
-    if (!normalizedToken) {
-        return true;
-    }
-
-    // Синонимы/разговорные формы.
-    const candidates = [normalizedToken];
-
-    if (normalizedToken === "ноутбук") {
-        candidates.push("ноут", "laptop");
-    }
-
-    if (normalizedToken === "телефон") {
-        candidates.push("смартфон", "iphone");
-    }
-
-    for (const candidate of candidates) {
-        const candidateStem = normalizeSearchToken(candidate);
-
-        for (const rawWord of words) {
-            const word = normalizeSearchToken(rawWord);
-
-            if (!word) continue;
-
-            if (word === candidateStem) return true;
-
-            // Разрешаем естественные формы/дополнительные символы.
-            if (word.startsWith(candidateStem) || candidateStem.startsWith(word)) {
-                if (Math.min(word.length, candidateStem.length) >= 4) {
-                    return true;
-                }
-            }
-
-            // Одна опечатка для длинных слов.
-            if (candidateStem.length >= 5 && word.length >= 5) {
-                if (levenshteinDistance(candidateStem, word) <= 1) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    return false;
-}
-
-
-function getProductSearchScore(product, query) {
-
-    const normalizedQuery = normalizeSearchText(query);
-    if (!normalizedQuery) return 0;
-
-    const queryTokens = normalizedQuery.split(" ").filter(Boolean);
-    const words = getSearchWords(product);
-    const searchable = getProductSearchText(product);
-
-    let score = 0;
-
-    if (searchable === normalizedQuery) score += 100;
-    if (searchable.includes(normalizedQuery)) score += 35;
-
-    for (const token of queryTokens) {
-        const normalizedToken = normalizeSearchToken(token);
-        if (!normalizedToken) continue;
-
-        if (normalizeSearchToken(product.title).includes(normalizedToken)) {
-            score += 20;
-        } else if (normalizeSearchToken(product.brand).includes(normalizedToken)) {
-            score += 16;
-        } else if (tokenMatchesSearch(normalizedToken, words)) {
-            score += 10;
-        }
-    }
-
-    return score;
-}
-
-
-function productMatchesQuery(product, query) {
-
-    const normalizedQuery = normalizeSearchText(query);
-
-    if (!normalizedQuery) {
-        return true;
-    }
-
-    const tokens = normalizedQuery.split(" ").filter(Boolean);
-    const words = getSearchWords(product);
-
-    return tokens.every(token => tokenMatchesSearch(token, words));
-}
-
-
-/* =========================================================
-NEWEST SORT
-========================================================= */
-
-
-/*
-Пытаемся получить timestamp товара.
-
-Если timestamp отсутствует,
-возвращаем 0.
-
-Позже backend можно будет расширить
-created_at — тогда сортировка "Сначала новые"
-станет полноценной.
-*/
-
-function getProductTimestamp(
-    product
-) {
-
-    if (!product) {
-        return 0;
-    }
-
-
-    const value =
-        product.createdAt ||
-        product.updatedAt ||
-        product.raw?.created_at ||
-        product.raw?.createdAt ||
-        product.raw?.updated_at ||
-        product.raw?.updatedAt ||
-        product.raw?.date ||
-        "";
-
-
-    if (!value) {
-        return 0;
-    }
-
-
-    if (
-        typeof value === "number"
-    ) {
-
-        return value;
-    }
-
-
-    const timestamp =
-        Date.parse(
-            String(value)
-        );
-
-
-    return Number.isFinite(
-        timestamp
-    )
-        ? timestamp
-        : 0;
-}
-
-
-/*
-Сортировка "Сначала новые".
-
-Если даты есть —
-используем их.
-
-Если дат нет —
-сохраняем исходный порядок,
-который пришёл с сервера.
-*/
-
-function sortNewest(
-    items
-) {
-
-    return items
-        .map(
-            (
-                product,
-                index
-            ) => ({
-
-                product,
-
-                index,
-
-                timestamp:
-                    getProductTimestamp(
-                        product
-                    )
-            })
-        )
-        .sort(
-            (a, b) => {
-
-                if (
-                    a.timestamp !==
-                    b.timestamp
-                ) {
-
-                    return (
-                        b.timestamp -
-                        a.timestamp
-                    );
-                }
-
-
-                return (
-                    a.index -
-                    b.index
-                );
-            }
-        )
-        .map(
-            item =>
-                item.product
-        );
-}
-
-
-/*
-Сортировка по цене.
-
-Товары без цены отправляем в конец.
-*/
-
-function sortByPrice(
-    items,
-    direction
-) {
-
-    return items
-        .map(
-            (
-                product,
-                index
-            ) => ({
-
-                product,
-
-                index,
-
-                price:
-                    product.price !== null &&
-                    Number.isFinite(
-                        Number(
-                            product.price
-                        )
-                    )
-                        ? Number(
-                            product.price
-                        )
-                        : null
-            })
-        )
-        .sort(
-            (a, b) => {
-
-                if (
-                    a.price === null &&
-                    b.price === null
-                ) {
-
-                    return (
-                        a.index -
-                        b.index
-                    );
-                }
-
-
-                if (
-                    a.price === null
-                ) {
-
-                    return 1;
-                }
-
-
-                if (
-                    b.price === null
-                ) {
-
-                    return -1;
-                }
-
-
-                if (
-                    direction ===
-                    "asc"
-                ) {
-
-                    return (
-                        a.price -
-                        b.price
-                    );
-                }
-
-
-                return (
-                    b.price -
-                    a.price
-                );
-            }
-        )
-        .map(
-            item =>
-                item.product
-        );
-}
-
-
-/* =========================================================
-SORT FILTERED PRODUCTS
-========================================================= */
-
-function sortFilteredProducts(
-    items
-) {
-
-    const source =
-        Array.isArray(items)
-            ? [...items]
-            : [];
-
-
-    switch (
-        activeFilters.sort
-    ) {
-
-        case "newest":
-
-            return sortNewest(
-                source
-            );
-
-
-        case "price_asc":
-
-            return sortByPrice(
-                source,
-                "asc"
-            );
-
-
-        case "price_desc":
-
-            return sortByPrice(
-                source,
-                "desc"
-            );
-
-
-        case "relevance":
-
-        default:
-
-            /*
-            Для "релевантности"
-            здесь ничего не сортируем.
-
-            Если пользователь написал запрос,
-            персонализация позже будет
-            учитывать этот контекст.
-
-            Сохраняем исходный порядок.
-            */
-
-            return source;
-    }
-}
-
-
-/* =========================================================
-MAIN PRODUCT FILTER
-========================================================= */
-
-
 /*
 Главная функция фильтрации.
 
-Порядок:
-
-1. Свободный текст
-2. Цена
-3. Площадка
-4. Сортировка
-
-После этого результат передаётся
-в персонализацию.
-
-Категорий как отдельного фильтра больше нет.
+Сначала фильтруем весь каталог,
+после чего результат передаётся
+в алгоритм рекомендаций.
 */
 
 function applyProductFilters(
@@ -2735,6 +2379,12 @@ function applyProductFilters(
         Array.isArray(source)
             ? source
             : [];
+
+
+    const query =
+        normalizeText(
+            activeFilters.query || ""
+        );
 
 
     const minPrice =
@@ -2753,11 +2403,15 @@ function applyProductFilters(
             : null;
 
 
-    const query =
-        String(
-            activeFilters.query ||
-            ""
-        ).trim();
+    const categories =
+        new Set(
+            activeFilters.categories.map(
+                category =>
+                    normalizeText(
+                        category
+                    )
+            )
+        );
 
 
     const sources =
@@ -2771,30 +2425,75 @@ function applyProductFilters(
         );
 
 
+    const hasCategoryFilter =
+        categories.size > 0;
+
+
     const hasSourceFilter =
         sources.size > 0;
 
 
-    const filtered =
-        input.filter(
-            product => {
+    return input.filter(
+        product => {
 
-                if (!product) {
+            if (!product) {
+                return false;
+            }
+
+
+            /*
+            Ключевой запрос.
+
+            Ищем не только по названию, но и по бренду,
+            категории, описанию и площадке.
+            Для небольших опечаток используем тот же
+            tolerant matching, что и в обычном поиске.
+            */
+
+            if (query) {
+
+                const searchable = normalizeText([
+                    product.title,
+                    product.brand,
+                    product.category,
+                    product.description,
+                    product.source,
+                    product.sourceLabel
+                ].filter(Boolean).join(" "));
+
+                const queryTokens = query.split(/\s+/).filter(Boolean);
+
+                const matches = queryTokens.every(token =>
+                    searchable.includes(token) ||
+                    searchTokenMatches(token, searchable)
+                );
+
+                if (!matches) {
                     return false;
                 }
+            }
 
 
-                /*
-                ================================================
-                СВОБОДНЫЙ ПОИСК
-                ================================================
-                */
+            /*
+            Цена.
+
+            Товары без цены при активном
+            ценовом фильтре не показываем,
+            потому что невозможно понять,
+            подходят они или нет.
+            */
+
+            if (
+                minPrice !== null ||
+                maxPrice !== null
+            ) {
 
                 if (
-                    query &&
-                    !productMatchesQuery(
-                        product,
-                        query
+                    product.price === null ||
+                    !Number.isFinite(
+                        Number(
+                            product.price
+                        )
                     )
                 ) {
 
@@ -2802,101 +2501,121 @@ function applyProductFilters(
                 }
 
 
-                /*
-                ================================================
-                ЦЕНА
-                ================================================
-                */
+                const price =
+                    Number(
+                        product.price
+                    );
+
 
                 if (
-                    minPrice !== null ||
-                    maxPrice !== null
+                    minPrice !== null &&
+                    price < minPrice
                 ) {
 
-                    /*
-                    Товары без цены при активном
-                    ценовом фильтре не показываем.
-                    */
-
-                    if (
-                        product.price === null ||
-                        !Number.isFinite(
-                            Number(
-                                product.price
-                            )
-                        )
-                    ) {
-
-                        return false;
-                    }
-
-
-                    const price =
-                        Number(
-                            product.price
-                        );
-
-
-                    if (
-                        minPrice !== null &&
-                        price < minPrice
-                    ) {
-
-                        return false;
-                    }
-
-
-                    if (
-                        maxPrice !== null &&
-                        price > maxPrice
-                    ) {
-
-                        return false;
-                    }
+                    return false;
                 }
 
 
-                /*
-                ================================================
-                ПЛОЩАДКА
-                ================================================
-                */
-
                 if (
-                    hasSourceFilter
+                    maxPrice !== null &&
+                    price > maxPrice
                 ) {
 
-                    const sourceName =
-                        normalizeSource(
-                            product.source
-                        );
-
-
-                    if (
-                        !sources.has(
-                            sourceName
-                        )
-                    ) {
-
-                        return false;
-                    }
+                    return false;
                 }
-
-
-                return true;
             }
-        );
 
 
-    /*
-    Сортировка выполняется после фильтрации.
-    */
+            /*
+            Категория.
+            */
 
-    return sortFilteredProducts(
-        filtered
+            if (
+                hasCategoryFilter
+            ) {
+
+                const category =
+                    getFilterCategoryKey(
+                        product.category
+                    );
+
+
+                if (
+                    !categories.has(
+                        category
+                    )
+                ) {
+
+                    return false;
+                }
+            }
+
+
+            /*
+            Площадка.
+            */
+
+            if (
+                hasSourceFilter
+            ) {
+
+                const sourceName =
+                    normalizeSource(
+                        product.source
+                    );
+
+
+                if (
+                    !sources.has(
+                        sourceName
+                    )
+                ) {
+
+                    return false;
+                }
+            }
+
+
+            return true;
+        }
     );
 }
 
+
+/* =========================================================
+FILTER SORTING
+========================================================= */
+
+function applyFeedSort(list, sortMode) {
+
+    if (!Array.isArray(list)) return list;
+
+    if (sortMode === "price_asc") {
+        list.sort((a, b) => {
+            const pa = parsePrice(a && a.price);
+            const pb = parsePrice(b && b.price);
+            const va = pa === null || !Number.isFinite(pa) ? Infinity : pa;
+            const vb = pb === null || !Number.isFinite(pb) ? Infinity : pb;
+            return va - vb;
+        });
+    } else if (sortMode === "price_desc") {
+        list.sort((a, b) => {
+            const pa = parsePrice(a && a.price);
+            const pb = parsePrice(b && b.price);
+            const va = pa === null || !Number.isFinite(pa) ? -Infinity : pa;
+            const vb = pb === null || !Number.isFinite(pb) ? -Infinity : pb;
+            return vb - va;
+        });
+    } else if (sortMode === "newest") {
+        list.sort((a, b) => {
+            const da = new Date((a && (a.created_at || a.updated_at)) || 0).getTime();
+            const db = new Date((b && (b.created_at || b.updated_at)) || 0).getTime();
+            return db - da;
+        });
+    }
+
+    return list;
+}
 
 /* =========================================================
 PERSONALIZED FEED
@@ -2904,310 +2623,82 @@ PERSONALIZED FEED
 
 function buildPersonalizedFeed() {
 
-    if (
-        !allProducts.length
-    ) {
-
+    if (!Array.isArray(allProducts) || !allProducts.length) {
         products = [];
-
         return;
     }
 
-
     /*
-    ========================================================
-    ЭТАП 1
-
-    Сначала применяем пользовательские фильтры.
-
-    Только после этого запускаем
-    персонализацию.
-    ========================================================
+    Персональная лента работает только для общей ленты.
+    Явный серверный поиск имеет отдельный режим и сюда не попадает.
     */
-
-    const filteredProducts =
-        applyProductFilters(
-            allProducts
-        );
-
-
-    console.log(
-        "[StyleFlow] После фильтров:",
-        filteredProducts.length
-    );
-
-
-    if (
-        !filteredProducts.length
-    ) {
-
-        products = [];
-
-
-        console.log(
-            "[StyleFlow] Фильтры не дали результатов."
-        );
-
-
+    if (activeServerSearch && String(activeServerSearch.query || '').trim()) {
         return;
     }
 
+    const filteredProducts = applyProductFilters(allProducts);
 
-    /*
-    ========================================================
-    ЭТАП 2
-
-    Убираем просмотренные товары.
-    ========================================================
-    */
-
-    const viewedSet =
-        new Set(
-            viewedProducts.map(
-                String
-            )
-        );
-
-
-    const unviewed =
-        filteredProducts.filter(
-            product =>
-                !viewedSet.has(
-                    String(product.id)
-                )
-        );
-
-
-    console.log(
-        "[StyleFlow] Всего товаров:",
-        allProducts.length
-    );
-
-
-    console.log(
-        "[StyleFlow] После фильтров:",
-        filteredProducts.length
-    );
-
-
-    console.log(
-        "[StyleFlow] Просмотрено:",
-        viewedSet.size
-    );
-
-
-    console.log(
-        "[StyleFlow] Непросмотренных:",
-        unviewed.length
-    );
-
-
-    /*
-    Уже просмотренные товары
-    никогда не возвращаем автоматически.
-    */
-
-    const candidates =
-        unviewed;
-
-
-    if (
-        !candidates.length
-    ) {
-
+    if (!filteredProducts.length) {
         products = [];
-
-
-        console.log(
-            "[StyleFlow] Все доступные товары уже просмотрены."
-        );
-
-
         return;
     }
 
+    /*
+    КЛЮЧЕВОЕ ПРАВИЛО:
+    просмотренные товары никогда не попадают обратно
+    в автоматические рекомендации.
+
+    Исключение существует только для явного поиска, который
+    обрабатывается через performSearch()/prepareServerSearchFeed().
+    */
+    const viewedSet = new Set(
+        viewedProducts.map(id => String(id))
+    );
+
+    const candidates = filteredProducts.filter(product =>
+        product && !viewedSet.has(String(product.id))
+    );
+
+    if (!candidates.length) {
+        products = [];
+        console.log('[StyleFlow] Все подходящие товары уже просмотрены.');
+        return;
+    }
+
+    const profile = buildUserProfile();
+    const personalization = getPersonalizationStrength(profile.totalSignals);
+
+    console.log('[StyleFlow] Персональная лента:', {
+        totalProducts: allProducts.length,
+        candidates: candidates.length,
+        viewed: viewedSet.size,
+        signals: profile.totalSignals,
+        personalization
+    });
 
     /*
-    ========================================================
-    ЭТАП 3
-
-    Существующий алгоритм
-    персонализации.
-    ========================================================
+    До накопления истории не притворяемся, что знаем интересы пользователя.
+    Делаем исследовательскую ленту, но уже без повторов.
     */
+    if (personalization <= 0) {
+        products = buildDiverseRandomFeed(shuffleArray(candidates));
+        applyFeedSort(products, activeFilters.sort || 'relevance');
+        return;
+    }
 
-    const profile =
-        buildUserProfile();
+    const scored = candidates.map(product => ({
+        product,
+        score: calculateRecommendationScore(product, profile)
+    }));
 
-
-    const personalization =
-        getPersonalizationStrength(
-            profile.totalSignals
-        );
-
-
-    console.log(
-        "[StyleFlow] Сила персонализации:",
+    products = buildWeightedDiverseFeed(
+        scored,
         personalization
     );
 
+    applyFeedSort(products, activeFilters.sort || 'relevance');
 
-    const shuffled =
-        shuffleArray(
-            candidates
-        );
-
-
-    if (
-        personalization <= 0
-    ) {
-
-        products =
-            buildDiverseRandomFeed(
-                shuffled
-            );
-
-
-        /*
-        Если выбрана сортировка по цене
-        или по новизне, она должна иметь
-        приоритет над случайной лентой.
-
-        Поэтому специальные сортировки
-        применяем после исключения просмотренных,
-        но до персонализации.
-        */
-
-        if (
-            activeFilters.sort ===
-            "price_asc"
-        ) {
-
-            products =
-                sortByPrice(
-                    candidates,
-                    "asc"
-                );
-
-        } else if (
-            activeFilters.sort ===
-            "price_desc"
-        ) {
-
-            products =
-                sortByPrice(
-                    candidates,
-                    "desc"
-                );
-
-        } else if (
-            activeFilters.sort ===
-            "newest"
-        ) {
-
-            products =
-                sortNewest(
-                    candidates
-                );
-        }
-
-
-        console.log(
-            "[StyleFlow] Новая лента — случайная"
-        );
-
-
-        return;
-    }
-
-
-    /*
-    При активной персонализации
-    сначала строим оценки.
-    */
-
-    const scored =
-        candidates.map(
-            product => ({
-
-                product,
-
-                score:
-                    calculateRecommendationScore(
-                        product,
-                        profile
-                    )
-            })
-        );
-
-
-    /*
-    Явная сортировка пользователя
-    имеет приоритет над алгоритмом
-    персонализации.
-
-    "Дешевле" и "Дороже" должны
-    действительно показывать товары
-    в выбранном порядке.
-
-    "Новое" тоже должно быть
-    предсказуемым.
-
-    "Релевантность" использует
-    персонализацию.
-    */
-
-    if (
-        activeFilters.sort ===
-        "price_asc"
-    ) {
-
-        products =
-            sortByPrice(
-                candidates,
-                "asc"
-            );
-
-    } else if (
-        activeFilters.sort ===
-        "price_desc"
-    ) {
-
-        products =
-            sortByPrice(
-                candidates,
-                "desc"
-            );
-
-    } else if (
-        activeFilters.sort ===
-        "newest"
-    ) {
-
-        products =
-            sortNewest(
-                candidates
-            );
-
-    } else {
-
-        products =
-            buildWeightedDiverseFeed(
-                scored,
-                personalization
-            );
-    }
-
-
-    console.log(
-        "[StyleFlow] Персональная лента построена"
-    );
-
-
-    console.log(
-        "[StyleFlow] Профиль:",
-        profile
-    );
+    console.log('[StyleFlow] Рекомендации построены.');
 }
 
 
@@ -3272,14 +2763,11 @@ function buildDiverseRandomFeed(
     let lastCategory =
         null;
 
-
     let lastSource =
         null;
 
-
     let categoryStreak =
         0;
-
 
     let sourceStreak =
         0;
@@ -3445,14 +2933,11 @@ function buildWeightedDiverseFeed(
     let lastCategory =
         null;
 
-
     let lastSource =
         null;
 
-
     let categoryStreak =
         0;
-
 
     let sourceStreak =
         0;
@@ -3464,7 +2949,7 @@ function buildWeightedDiverseFeed(
             MAX_RANDOM_RATIO -
             MIN_RANDOM_RATIO
         ) *
-        personalization;
+        Math.max(0, Math.min(1, personalization));
 
 
     while (
@@ -3736,82 +3221,96 @@ USER PROFILE
 function buildUserProfile() {
 
     const profile = {
-
         categories: {},
-
         brands: {},
-
         sources: {},
-
+        keywords: {},
         prices: [],
-
         totalSignals: 0
     };
 
+    /*
+    Просмотр — слабый сигнал.
+    Более свежие действия имеют больший вес.
+    */
+    const viewed = Array.isArray(viewedProducts)
+        ? viewedProducts.slice(-200)
+        : [];
 
-    viewedProducts.forEach(
-        id => {
+    viewed.forEach((id, index) => {
+        const product = findProductById(id);
+        if (!product) return;
 
-            const product =
-                findProductById(id);
+        const recency = 0.55 + (index + 1) / viewed.length * 0.45;
+        addProfileSignal(profile, product, 0.8 * recency);
+    });
 
+    /*
+    Открытие карточки — значительно более сильный сигнал.
+    */
+    const opened = Array.isArray(openedProducts)
+        ? openedProducts.slice(-120)
+        : [];
 
-            if (!product) {
-                return;
-            }
+    opened.forEach((id, index) => {
+        const product = findProductById(id);
+        if (!product) return;
 
+        const recency = 0.60 + (index + 1) / opened.length * 0.40;
+        addProfileSignal(profile, product, 4.0 * recency);
+    });
 
-            addProfileSignal(
-                profile,
-                product,
-                1
-            );
-        }
+    /*
+    Избранное — самый сильный явный сигнал интереса.
+    */
+    favorites.forEach(item => {
+        const product = normalizeProduct(item);
+        addProfileSignal(profile, product, 8);
+    });
+
+    /*
+    Поиск — сильный сигнал намерения.
+    Последние запросы важнее старых.
+    */
+    const searchHistory = loadJSON(
+        'styleflow_search_history',
+        []
     );
 
+    if (Array.isArray(searchHistory)) {
+        const recentSearches = searchHistory.slice(-40);
 
-    openedProducts.forEach(
-        id => {
+        recentSearches.forEach((entry, index) => {
+            const query = typeof entry === 'string'
+                ? entry
+                : entry && entry.query;
 
-            const product =
-                findProductById(id);
+            if (!query) return;
 
+            const recency = 0.60 + (index + 1) / recentSearches.length * 0.40;
 
-            if (!product) {
-                return;
-            }
+            tokenizeForRecommendations(query).forEach(token => {
+                profile.keywords[token] =
+                    (profile.keywords[token] || 0) + 5 * recency;
 
-
-            addProfileSignal(
-                profile,
-                product,
-                3
-            );
-        }
-    );
-
-
-    favorites.forEach(
-        product => {
-
-            const normalized =
-                normalizeProduct(
-                    product
-                );
-
-
-            addProfileSignal(
-                profile,
-                normalized,
-                6
-            );
-        }
-    );
-
+                profile.totalSignals += 5 * recency;
+            });
+        });
+    }
 
     return profile;
 }
 
+function tokenizeForRecommendations(value) {
+    return normalizeText(value)
+        .split(/[^a-zа-яё0-9]+/i)
+        .map(word => word.trim())
+        .filter(word => word.length >= 2)
+        .filter(word => ![
+            "для", "это", "как", "или", "и", "на", "по", "до",
+            "из", "в", "с", "купить", "найти", "товар", "товары"
+        ].includes(word));
+}
 
 /* =========================================================
 PROFILE SIGNAL
@@ -3868,6 +3367,19 @@ function addProfileSignal(
     }
 
 
+    const searchableText = [
+        product.title,
+        product.brand,
+        product.category,
+        product.description
+    ].filter(Boolean).join(" ");
+
+    tokenizeForRecommendations(searchableText).forEach(token => {
+        profile.keywords[token] =
+            (profile.keywords[token] || 0) + Math.max(1, Math.round(weight / 2));
+    });
+
+
     const source =
         normalizeText(
             product.source
@@ -3921,167 +3433,93 @@ function calculateRecommendationScore(
     profile
 ) {
 
+    if (!product || !profile) {
+        return 0;
+    }
+
     let score = 0;
 
+    const searchable = normalizeText([
+        product.title,
+        product.brand,
+        product.category,
+        product.description
+    ].filter(Boolean).join(' '));
 
-    /*
-    ================================================
-    КАТЕГОРИЯ
-    ================================================
-    */
+    /* Совпадение с тем, что пользователь реально ищет. */
+    tokenizeForRecommendations(searchable).forEach(token => {
+        const weight = profile.keywords[token];
+        if (weight) {
+            score += weight * 2.4;
+        }
+    });
 
-    const category =
-        normalizeText(
-            product.category
-        );
-
-
-    if (
-        category &&
-        profile.categories[
-            category
-        ]
-    ) {
-
-        score +=
-            profile.categories[
-                category
-            ] *
-            5;
+    const category = normalizeText(product.category);
+    if (category && profile.categories[category]) {
+        score += profile.categories[category] * 6;
     }
 
-
-    /*
-    ================================================
-    БРЕНД
-    ================================================
-    */
-
-    const brand =
-        normalizeText(
-            product.brand
-        );
-
-
-    if (
-        brand &&
-        profile.brands[
-            brand
-        ]
-    ) {
-
-        score +=
-            profile.brands[
-                brand
-            ] *
-            7;
+    const brand = normalizeText(product.brand);
+    if (brand && profile.brands[brand]) {
+        score += profile.brands[brand] * 9;
     }
 
-
-    /*
-    ================================================
-    ПЛОЩАДКА
-    ================================================
-    */
-
-    const source =
-        normalizeText(
-            product.source
-        );
-
-
-    if (
-        source &&
-        profile.sources[
-            source
-        ]
-    ) {
-
-        score +=
-            profile.sources[
-                source
-            ] *
-            2;
+    const source = normalizeText(product.source);
+    if (source && profile.sources[source]) {
+        score += profile.sources[source] * 1.5;
     }
 
-
-    /*
-    ================================================
-    ЦЕНА
-    ================================================
-    */
-
+    /* Близость цены к привычному диапазону пользователя. */
     if (
         product.price !== null &&
-        profile.prices.length > 0
+        Number.isFinite(Number(product.price)) &&
+        profile.prices.length
     ) {
+        const averagePrice = getWeightedAveragePrice(profile.prices);
 
-        const averagePrice =
-            getWeightedAveragePrice(
-                profile.prices
+        if (averagePrice > 0) {
+            const difference = Math.abs(
+                Number(product.price) - averagePrice
             );
 
+            const percentage = difference / averagePrice;
 
-        if (
-            averagePrice > 0
-        ) {
-
-            const difference =
-                Math.abs(
-                    Number(
-                        product.price
-                    ) -
-                    averagePrice
-                );
-
-
-            const percentage =
-                difference /
-                averagePrice;
-
-
-            if (
-                percentage <= 0.10
-            ) {
-
-                score += 12;
-
-            } else if (
-                percentage <= 0.25
-            ) {
-
-                score += 7;
-
-            } else if (
-                percentage <= 0.50
-            ) {
-
+            if (percentage <= 0.10) {
+                score += 14;
+            } else if (percentage <= 0.25) {
+                score += 8;
+            } else if (percentage <= 0.50) {
                 score += 3;
             }
         }
     }
 
+    /* Небольшой бонус новым карточкам, чтобы лента не застывала. */
+    const dateValue = new Date(
+        product.updated_at || product.created_at || 0
+    ).getTime();
+
+    if (Number.isFinite(dateValue) && dateValue > 0) {
+        const ageDays = Math.max(
+            0,
+            (Date.now() - dateValue) / 86400000
+        );
+
+        if (ageDays <= 1) {
+            score += 2;
+        } else if (ageDays <= 7) {
+            score += 1;
+        }
+    }
 
     /*
-    ================================================
-    СЛУЧАЙНОСТЬ
-    ================================================
-
-    Сохраняем немного случайности,
-    чтобы лента не превращалась
-    в полностью предсказуемый список.
+    Очень маленькая случайность только для равных/похожих кандидатов.
+    Она не способна перебить сильный интерес пользователя.
     */
+    score += Math.random() * 0.8;
 
-    score +=
-        Math.random() * 4;
-
-
-    return Math.max(
-        0,
-        score
-    );
+    return Math.max(0, score);
 }
-
 
 /* =========================================================
 WEIGHTED PRICE
@@ -4093,7 +3531,6 @@ function getWeightedAveragePrice(
 
     let total =
         0;
-
 
     let weight =
         0;
@@ -4205,10 +3642,9 @@ function uniqueStrings(
         new Set();
 
 
-    (
-        Array.isArray(values)
-            ? values
-            : []
+    (Array.isArray(values)
+        ? values
+        : []
     ).forEach(
         value => {
 
@@ -4345,7 +3781,7 @@ function findNextUnviewedIndex(
 SHOW PRODUCT
 ========================================================= */
 
-function showProduct() {
+function showProduct(allowViewed = false) {
 
     if (
         !products.length
@@ -4407,10 +3843,8 @@ function showProduct() {
         ];
 
 
-    ensureNavigationHistory();
-
-
     if (
+        !allowViewed &&
         isProductViewed(
             currentProduct
         )
@@ -4492,104 +3926,74 @@ function showProduct() {
         );
 
 
-    if (image) {
-
-        image.src =
-            currentProduct.image;
+    image.src =
+        currentProduct.image;
 
 
-        image.alt =
-            currentProduct.title;
+    image.alt =
+        currentProduct.title;
+
+
+    title.textContent =
+        currentProduct.title;
+
+
+    brand.textContent =
+        currentProduct.brand ||
+        "StyleFlow";
+
+
+    source.textContent =
+        sourceLabel(
+            currentProduct.source
+        );
+
+
+    price.textContent =
+        formatPrice(
+            currentProduct
+        );
+
+
+    if (
+        currentProduct.oldPrice
+    ) {
+
+        oldPrice.textContent =
+            formatPrice({
+
+                price:
+                    currentProduct.oldPrice,
+
+                currency:
+                    currentProduct.currency
+            });
+
+    } else {
+
+        oldPrice.textContent =
+            "";
     }
 
 
-    if (title) {
+    if (
+        currentProduct.rating !== ""
+    ) {
 
-        title.textContent =
-            currentProduct.title;
+        rating.textContent =
+            "★ " +
+            currentProduct.rating;
+
+    } else {
+
+        rating.textContent =
+            "★ —";
     }
 
 
-    if (brand) {
-
-        brand.textContent =
-            currentProduct.brand ||
-            "StyleFlow";
-    }
-
-
-    if (source) {
-
-        source.textContent =
-            sourceLabel(
-                currentProduct.source
-            );
-    }
-
-
-    if (price) {
-
-        price.textContent =
-            formatPrice(
-                currentProduct
-            );
-    }
-
-
-    if (oldPrice) {
-
-        if (
-            currentProduct.oldPrice
-        ) {
-
-            oldPrice.textContent =
-                formatPrice({
-
-                    price:
-                        currentProduct.oldPrice,
-
-                    currency:
-                        currentProduct.currency
-                });
-
-        } else {
-
-            oldPrice.textContent =
-                "";
-        }
-    }
-
-
-    if (rating) {
-
-        if (
-            currentProduct.rating !== ""
-        ) {
-
-            rating.textContent =
-                "★ " +
-                currentProduct.rating;
-
-        } else {
-
-            rating.textContent =
-                "★ —";
-        }
-    }
-
-
-    /*
-    Если категория отсутствует,
-    показываем нейтральный символ,
-    а не "Одежда".
-    */
-
-    if (category) {
-
-        category.textContent =
-            currentProduct.category ||
-            "—";
-    }
+    category.textContent =
+        currentProduct.category ||
+        "";
 
 
     updateLikeButton();
@@ -4645,6 +4049,9 @@ function switchTab(
     tab
 ) {
 
+    currentTab = tab;
+
+
     const screens = {
 
         feed:
@@ -4659,6 +4066,41 @@ function switchTab(
         profile:
             "profileScreen"
     };
+
+
+    Object.values(
+        screens
+    ).forEach(
+        id => {
+
+            const element =
+                document.getElementById(
+                    id
+                );
+
+
+            if (element) {
+
+                element.classList.remove(
+                    "active"
+                );
+            }
+        }
+    );
+
+
+    const targetScreen =
+        document.getElementById(
+            screens[tab]
+        );
+
+
+    if (targetScreen) {
+
+        targetScreen.classList.add(
+            "active"
+        );
+    }
 
 
     const navs = {
@@ -4677,37 +4119,6 @@ function switchTab(
     };
 
 
-    if (!screens[tab]) {
-        return;
-    }
-
-
-    currentTab =
-        tab;
-
-
-    Object.values(
-        screens
-    ).forEach(
-        id => {
-
-            const element =
-                document.getElementById(
-                    id
-                );
-
-
-            if (element) {
-
-                element.classList.toggle(
-                    "active",
-                    id === screens[tab]
-                );
-            }
-        }
-    );
-
-
     Object.values(
         navs
     ).forEach(
@@ -4721,18 +4132,30 @@ function switchTab(
 
             if (element) {
 
-                element.classList.toggle(
-                    "active",
-                    id === navs[tab]
+                element.classList.remove(
+                    "active"
                 );
             }
         }
     );
 
 
+    const targetNav =
+        document.getElementById(
+            navs[tab]
+        );
+
+
+    if (targetNav) {
+
+        targetNav.classList.add(
+            "active"
+        );
+    }
+
+
     if (
-        tab ===
-        "favorites"
+        tab === "favorites"
     ) {
 
         renderFavorites();
@@ -4740,8 +4163,7 @@ function switchTab(
 
 
     if (
-        tab ===
-        "profile"
+        tab === "profile"
     ) {
 
         updateProfile();
@@ -4749,8 +4171,7 @@ function switchTab(
 
 
     if (
-        tab ===
-        "search"
+        tab === "search"
     ) {
 
         setTimeout(
@@ -4768,7 +4189,7 @@ function switchTab(
                 }
 
             },
-            180
+            100
         );
     }
 }
@@ -4976,11 +4397,7 @@ function renderFavorites() {
         );
 
 
-    if (
-        !grid ||
-        !empty
-    ) {
-
+    if (!grid || !empty) {
         return;
     }
 
@@ -5066,54 +4483,54 @@ function openCurrentProduct() {
         return;
     }
 
-    const url = String(
-        currentProduct.url ||
-        currentProduct.link ||
-        ""
-    ).trim();
 
-    if (!url || url === "#") {
-        showToast("Ссылка на товар пока не подключена");
+    if (
+        !currentProduct.url ||
+        currentProduct.url === "#"
+    ) {
+
+        showToast(
+            "Ссылка на товар пока не подключена"
+        );
+
         return;
     }
 
-    registerOpen(currentProduct);
 
-    /*
-    На ПК Telegram Desktop/обычный браузер может не отработать
-    через WebApp.openLink так, как на телефоне. Поэтому сначала
-    пробуем обычное окно, а если браузер его заблокировал —
-    переходим по ссылке в текущем окне.
-    */
+    registerOpen(
+        currentProduct
+    );
+
+
     try {
-        const telegram = window.Telegram && window.Telegram.WebApp;
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
 
-        if (telegram && typeof telegram.openLink === "function" && isMobile) {
-            telegram.openLink(url);
-            return;
-        }
+        if (
+            window.Telegram &&
+            Telegram.WebApp &&
+            Telegram.WebApp.openLink
+        ) {
 
-        const opened = window.open(url, "_blank", "noopener,noreferrer");
+            Telegram.WebApp.openLink(
+                currentProduct.url
+            );
 
-        if (!opened) {
-            window.location.href = url;
+        } else {
+
+            window.open(
+                currentProduct.url,
+                "_blank"
+            );
         }
 
     } catch (error) {
-        console.warn("[StyleFlow] Не удалось открыть товар через новое окно:", error);
 
-        try {
-            if (window.Telegram && Telegram.WebApp && Telegram.WebApp.openLink) {
-                Telegram.WebApp.openLink(url);
-            } else {
-                window.location.href = url;
-            }
-        } catch (fallbackError) {
-            window.location.href = url;
-        }
+        window.open(
+            currentProduct.url,
+            "_blank"
+        );
     }
 }
+
 
 function openProductFromObject(
     product
@@ -5315,7 +4732,7 @@ function renderSingleProductObject(
 
         category.textContent =
             product.category ||
-            "—";
+            "";
     }
 
 
@@ -5371,10 +4788,7 @@ async function shareCurrentProduct() {
 
     } catch (error) {
 
-        /*
-        Пользователь мог просто закрыть
-        системное окно Share.
-        */
+        // User cancelled share.
     }
 }
 
@@ -5397,11 +4811,7 @@ function openComments() {
         );
 
 
-    if (
-        !overlay ||
-        !list
-    ) {
-
+    if (!overlay || !list) {
         return;
     }
 
@@ -5512,6 +4922,8 @@ function setupSearch() {
             const value =
                 input.value.trim();
 
+            renderSearchSuggestions(value);
+
 
             const clearButton =
                 document.getElementById(
@@ -5528,19 +4940,8 @@ function setupSearch() {
             }
 
 
-            clearTimeout(
-                searchTimer
-            );
-
-
-            searchTimer =
-                setTimeout(
-                    () =>
-                        performSearch(
-                            value
-                        ),
-                    150
-                );
+            // Пока пользователь печатает, только обновляем подсказки.
+            // Поиск товаров запускается только после Enter или выбора подсказки.
         }
     );
 
@@ -5557,149 +4958,14 @@ function setupSearch() {
                 event.preventDefault();
 
 
+                hideSearchSuggestions();
+                const enteredQuery = input.value.trim();
                 performSearch(
-                    input.value.trim()
+                    enteredQuery
                 );
             }
         }
     );
-}
-
-
-function setupSearchSuggestions() {
-
-    const inputs = [
-        document.getElementById("searchInput"),
-        document.getElementById("filterQuery")
-    ].filter(Boolean);
-
-    inputs.forEach(input => {
-
-        let box = input.parentElement
-            ? input.parentElement.querySelector(".styleflow-suggestions")
-            : null;
-
-        if (!box) {
-            box = document.createElement("div");
-            box.className = "styleflow-suggestions";
-
-            Object.assign(box.style, {
-                position: "absolute",
-                left: "0",
-                right: "0",
-                top: "calc(100% + 6px)",
-                zIndex: "1000",
-                display: "none",
-                padding: "6px",
-                borderRadius: "14px",
-                background: "rgba(18,18,24,.96)",
-                border: "1px solid rgba(255,255,255,.08)",
-                boxShadow: "0 14px 40px rgba(0,0,0,.35)",
-                backdropFilter: "blur(16px)",
-                WebkitBackdropFilter: "blur(16px)"
-            });
-
-            const parent = input.parentElement;
-            if (parent) {
-                if (getComputedStyle(parent).position === "static") {
-                    parent.style.position = "relative";
-                }
-                parent.appendChild(box);
-            }
-        }
-
-        const render = () => {
-            const value = input.value.trim();
-
-            if (!value || !allProducts.length) {
-                box.style.display = "none";
-                box.innerHTML = "";
-                return;
-            }
-
-            const normalized = normalizeSearchText(value);
-            const candidates = allProducts
-                .map(product => ({
-                    product,
-                    score: getProductSearchScore(product, value)
-                }))
-                .filter(item => item.score > 0)
-                .sort((a, b) => b.score - a.score)
-                .slice(0, 6);
-
-            const seen = new Set();
-            const suggestions = [];
-
-            // Сначала показываем сам пользовательский запрос,
-            // затем названия/бренды реальных найденных товаров.
-            if (normalized) {
-                seen.add(normalized);
-                suggestions.push(value);
-            }
-
-            candidates.forEach(({product}) => {
-                const text = String(product.title || product.brand || "").trim();
-                if (!text) return;
-
-                const key = normalizeSearchText(text);
-                if (seen.has(key)) return;
-
-                seen.add(key);
-                suggestions.push(text);
-            });
-
-            box.innerHTML = "";
-
-            suggestions.slice(0, 6).forEach(text => {
-                const button = document.createElement("button");
-                button.type = "button";
-                button.textContent = text;
-
-                Object.assign(button.style, {
-                    display: "block",
-                    width: "100%",
-                    padding: "10px 12px",
-                    border: "0",
-                    borderRadius: "10px",
-                    background: "transparent",
-                    color: "#fff",
-                    textAlign: "left",
-                    cursor: "pointer",
-                    fontSize: "14px"
-                });
-
-                button.addEventListener("mouseenter", () => {
-                    button.style.background = "rgba(255,255,255,.08)";
-                });
-
-                button.addEventListener("mouseleave", () => {
-                    button.style.background = "transparent";
-                });
-
-                button.addEventListener("click", () => {
-                    input.value = text;
-                    box.style.display = "none";
-                    input.dispatchEvent(new Event("input", {bubbles: true}));
-
-                    if (input.id === "searchInput") {
-                        performSearch(text);
-                    }
-                });
-
-                box.appendChild(button);
-            });
-
-            box.style.display = suggestions.length ? "block" : "none";
-        };
-
-        input.addEventListener("input", render);
-        input.addEventListener("focus", render);
-        input.addEventListener("blur", () => {
-            setTimeout(() => {
-                box.style.display = "none";
-            }, 180);
-        });
-    });
 }
 
 
@@ -5760,6 +5026,28 @@ function clearSearch() {
 
 
     input.value = "";
+    hideSearchSuggestions();
+
+    /*
+    Полностью завершаем предыдущую поисковую сессию.
+    Иначе после очистки интерфейса старый запрос мог продолжать
+    считаться активным для свайпа/догрузки.
+    */
+    activeServerSearch = {
+        query: "",
+        sources: [],
+        minPrice: null,
+        maxPrice: null
+    };
+
+    serverSearchHasMore = true;
+    serverSearchLoading = false;
+    serverSearchRequestId++;
+
+    products = [];
+    currentIndex = 0;
+    currentProduct = null;
+    resetNavigationHistory();
 
 
     const clearButton =
@@ -5806,205 +5094,954 @@ function clearSearch() {
 }
 
 
-function performSearch(
-    query
-) {
+let activeSearchSources = loadJSON(
+    "styleflow_search_sources",
+    []
+);
 
-    const home =
-        document.getElementById(
-            "searchHome"
-        );
+if (!Array.isArray(activeSearchSources)) {
+    activeSearchSources = [];
+}
 
+function normalizeSearchSource(value) {
+    return String(value || "").trim().toLowerCase();
+}
 
-    const results =
-        document.getElementById(
-            "searchResults"
-        );
+function setupSearchSources() {
+    const container = document.getElementById("searchSources");
+    if (!container) return;
 
+    container.querySelectorAll("[data-source]").forEach(button => {
+        button.addEventListener("click", () => {
+            const source = normalizeSearchSource(button.dataset.source);
 
-    const resultList =
-        document.getElementById(
-            "resultList"
-        );
+            if (source === "__all__") {
+                activeSearchSources = [];
+            } else {
+                const index = activeSearchSources.indexOf(source);
+                if (index >= 0) activeSearchSources.splice(index, 1);
+                else activeSearchSources.push(source);
+            }
 
+            saveJSON("styleflow_search_sources", activeSearchSources);
+            syncSearchSourceUI();
 
-    const resultCount =
-        document.getElementById(
-            "resultCount"
-        );
+            const input = document.getElementById("searchInput");
+            const query = input ? input.value.trim() : "";
+            if (query) performSearch(query);
+        });
+    });
 
+    syncSearchSourceUI();
+}
 
-    if (
-        !home ||
-        !results ||
-        !resultList ||
-        !resultCount
-    ) {
+function syncSearchSourceUI() {
+    const container = document.getElementById("searchSources");
+    if (!container) return;
 
-        return;
-    }
+    container.querySelectorAll("[data-source]").forEach(button => {
+        const raw = normalizeSearchSource(button.dataset.source);
+        const active = raw === "__all__"
+            ? activeSearchSources.length === 0
+            : activeSearchSources.includes(raw);
+        button.classList.toggle("active", active);
+    });
+}
 
-
-    if (!query) {
-
-        home.style.display =
-            "block";
-
-
-        results.classList.remove(
-            "active"
-        );
-
-
-        return;
-    }
-
-
-    home.style.display =
-        "none";
-
-
-    results.classList.add(
-        "active"
-    );
-
-
-    const filtered =
-        allProducts
-            .filter(
-                product =>
-                    productMatchesQuery(
-                        product,
-                        query
-                    )
-            )
-            .sort(
-                (a, b) =>
-                    getProductSearchScore(b, query) -
-                    getProductSearchScore(a, query)
-            );
-
-
-    resultCount.textContent =
-        filtered.length === 1
-            ? "Найден 1 товар"
-            : `Найдено товаров: ${filtered.length}`;
-
-
-    resultList.innerHTML = "";
-
-
-    if (
-        !filtered.length
-    ) {
-
-        resultList.innerHTML = `
-
-            <div
-                class="empty"
-                style="
-                    position:relative;
-                    min-height:300px;
-                "
-            >
-
-                <div class="empty-inner">
-
-                    <div class="empty-icon">
-                        🔎
-                    </div>
-
-                    <h2>
-                        Ничего не нашли
-                    </h2>
-
-                    <p>
-                        Попробуй другое название,
-                        бренд или описание.
-                    </p>
-
-                </div>
-
-            </div>
-
-        `;
-
-
-        return;
-    }
-
-
-    filtered.forEach(
-        product => {
-
-            const card =
-                document.createElement(
-                    "div"
-                );
-
-
-            card.className =
-                "result-card";
-
-
-            card.innerHTML = `
-
-                <img
-                    class="result-image"
-                    src="${escapeAttribute(product.image)}"
-                    alt="${escapeAttribute(product.title)}"
-                >
-
-                <div class="result-info">
-
-                    <div class="result-brand">
-                        ${escapeHTML(
-                            product.brand ||
-                            sourceLabel(
-                                product.source
-                            )
-                        )}
-                    </div>
-
-                    <div class="result-title">
-                        ${escapeHTML(
-                            product.title
-                        )}
-                    </div>
-
-                    <div class="result-price">
-                        ${escapeHTML(
-                            formatPrice(
-                                product
-                            )
-                        )}
-                    </div>
-
-                </div>
-
-            `;
-
-
-            card.onclick =
-                () => {
-
-                    openProductFromObject(
-                        product
-                    );
-                };
-
-
-            resultList.appendChild(
-                card
-            );
+function levenshteinDistance(a, b) {
+    a = String(a || "");
+    b = String(b || "");
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+    const row = Array.from({length: b.length + 1}, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        let prev = row[0];
+        row[0] = i;
+        for (let j = 1; j <= b.length; j++) {
+            const temp = row[j];
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + cost);
+            prev = temp;
         }
+    }
+    return row[b.length];
+}
+
+function searchWordMatches(queryWord, textWord) {
+    const query = normalizeText(queryWord);
+    const text = normalizeText(textWord);
+
+    if (!query || !text) return false;
+    if (query === text) return true;
+
+    // Прямое вхождение — главное правило поиска.
+    if (text.includes(query) || query.includes(text)) return true;
+
+    // Нечёткое совпадение используем только для достаточно длинных слов.
+    // Это не позволяет коротким/случайным словам давать ложные совпадения.
+    if (query.length < 4 || text.length < 4) return false;
+
+    const lengthDiff = Math.abs(query.length - text.length);
+    if (lengthDiff > 2) return false;
+
+    const distance = levenshteinDistance(query, text);
+    const maxLen = Math.max(query.length, text.length);
+
+    let allowed = 1;
+    if (maxLen >= 8) allowed = 2;
+    if (maxLen >= 12) allowed = 2;
+
+    // Для длинного слова две ошибки допустимы только если
+    // совпадает хотя бы половина символов.
+    return distance <= allowed && (1 - distance / maxLen) >= 0.55;
+}
+
+function searchTokenMatches(token, searchable) {
+    const query = normalizeText(token);
+    const text = normalizeText(searchable);
+    if (!query || !text) return false;
+
+    const words = text.split(/[^a-zа-яё0-9]+/i).filter(Boolean);
+
+    // Сначала ищем точное слово/фрагмент.
+    if (words.some(word => word === query || word.includes(query) || query.includes(word))) {
+        return true;
+    }
+
+    // И только потом допускаем небольшую опечатку.
+    if (words.some(word => searchWordMatches(query, word))) return true;
+
+    const aliases = {
+        "айфон": ["iphone"],
+        "iphone": ["айфон"],
+        "самсунг": ["samsung"],
+        "samsung": ["самсунг"],
+        "ксяоми": ["xiaomi"],
+        "сяоми": ["xiaomi"],
+        "ноут": ["ноутбук"],
+        "смартфон": ["телефон"],
+        "телефон": ["смартфон"],
+        "авто": ["автомобиль", "машина"],
+        "машина": ["авто", "автомобиль"],
+        "тачка": ["авто", "машина"]
+    };
+
+    return (aliases[query] || []).some(alias =>
+        words.some(word => word === alias || word.includes(alias) || alias.includes(word))
     );
 }
 
 
-/* =========================================================
-PROFILE
-========================================================= */
+const UNIVERSAL_SEARCH_SUGGESTIONS = [
+    ["🚗", "машина", "автомобили"],
+    ["🚗", "автомобиль", "автомобили"],
+    ["🚗", "bmw", "автомобили"],
+    ["🚗", "mercedes", "автомобили"],
+    ["🚗", "audi", "автомобили"],
+    ["🏠", "квартира", "недвижимость"],
+    ["🏠", "дом", "недвижимость"],
+    ["🏠", "недвижимость", "недвижимость"],
+    ["💻", "ноутбук", "электроника"],
+    ["💻", "компьютер", "электроника"],
+    ["💻", "пк", "электроника"],
+    ["📱", "телефон", "электроника"],
+    ["📱", "iphone", "электроника"],
+    ["📱", "айфон", "электроника"],
+    ["📱", "samsung", "электроника"],
+    ["🔧", "ремонт", "услуги"],
+    ["🔧", "ремонт телефона", "услуги"],
+    ["🔧", "ремонт ноутбука", "услуги"],
+    ["🔧", "ремонт автомобиля", "услуги"],
+    ["🛠️", "строительство", "услуги"],
+    ["🪑", "мебель", "товары"],
+    ["🎮", "игровой компьютер", "электроника"],
+    ["🎧", "наушники", "электроника"],
+    ["📷", "камера", "электроника"],
+    ["⚙️", "запчасти", "автомобили"]
+];
+
+function rememberSearchQuery(query) {
+    const normalized = normalizeText(query);
+    if (!normalized || normalized.length < 2) return;
+
+    let history = loadJSON("styleflow_search_history", []);
+    if (!Array.isArray(history)) history = [];
+
+    history.push({
+        query: normalized,
+        created_at: Date.now()
+    });
+
+    if (history.length > 100) {
+        history = history.slice(-100);
+    }
+
+    saveJSON("styleflow_search_history", history);
+}
+
+function buildDynamicSearchSuggestions(query) {
+    const normalized = normalizeText(query);
+    if (!normalized) return [];
+
+    const result = [];
+    const used = new Set();
+
+    function add(icon, text, meta, score) {
+        const key = normalizeText(text);
+        if (!key || used.has(key)) return;
+        used.add(key);
+        result.push({ icon, text, meta, score });
+    }
+
+    UNIVERSAL_SEARCH_SUGGESTIONS.forEach(([icon, text, meta]) => {
+        const n = normalizeText(text);
+        let score = 0;
+
+        if (n === normalized) score = 100;
+        else if (n.startsWith(normalized)) score = 85;
+        else if (n.includes(normalized)) score = 70;
+        else if (searchTokenMatches(normalized, n)) score = 55;
+
+        if (score) add(icon, text, meta, score);
+    });
+
+    const queryTokens = normalized.split(/\s+/).filter(Boolean);
+
+    allProducts.forEach(product => {
+        const candidates = [
+            product.title,
+            product.brand,
+            product.category
+        ].filter(Boolean);
+
+        candidates.forEach(candidate => {
+            const clean = String(candidate).trim();
+            const candidateNormalized = normalizeText(clean);
+
+            if (!candidateNormalized || candidateNormalized.length < 2) return;
+
+            let score = 0;
+            if (candidateNormalized.startsWith(normalized)) score = 80;
+            else if (candidateNormalized.includes(normalized)) score = 65;
+            else if (queryTokens.some(token =>
+                searchTokenMatches(token, candidateNormalized)
+            )) score = 50;
+
+            if (score) {
+                add(
+                    sourceIcon(product.source),
+                    clean,
+                    sourceLabel(product.source),
+                    score
+                );
+            }
+        });
+    });
+
+    const history = loadJSON("styleflow_search_history", []);
+    if (Array.isArray(history)) {
+        history.slice().reverse().forEach(entry => {
+            const text = typeof entry === "string" ? entry : entry.query;
+            if (!text) return;
+
+            const n = normalizeText(text);
+            let score = 0;
+
+            if (n.startsWith(normalized)) score = 90;
+            else if (n.includes(normalized)) score = 72;
+            else if (searchTokenMatches(normalized, n)) score = 55;
+
+            if (score) add("🕘", text, "твой прошлый поиск", score);
+        });
+    }
+
+    return result
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 7);
+}
+
+function renderSearchSuggestions(query) {
+    const box = document.getElementById("searchSuggestions");
+    if (!box) return;
+
+    const normalized = normalizeText(query);
+
+    if (!normalized) {
+        box.classList.remove("active");
+        box.innerHTML = "";
+        return;
+    }
+
+    const suggestions = buildDynamicSearchSuggestions(query);
+
+    if (!suggestions.length) {
+        box.classList.remove("active");
+        box.innerHTML = "";
+        return;
+    }
+
+    box.innerHTML = suggestions.map((item, index) => `
+        <button type="button" class="search-suggestion" onclick="selectSearchSuggestion(${index})">
+            <span class="search-suggestion-icon">${escapeHTML(item.icon)}</span>
+            <span class="search-suggestion-main">
+                <span class="search-suggestion-title">${escapeHTML(item.text)}</span>
+                <span class="search-suggestion-meta">${escapeHTML(item.meta)}</span>
+            </span>
+            <span class="search-suggestion-hint">›</span>
+        </button>
+    `).join("");
+
+    box._suggestions = suggestions;
+    box.classList.add("active");
+}
+
+async function selectSearchSuggestion(index) {
+    const box = document.getElementById("searchSuggestions");
+    const input = document.getElementById("searchInput");
+    if (!box || !input || !box._suggestions) return;
+
+    const item = box._suggestions[index];
+    if (!item) return;
+
+    // Подсказка должна стать именно поисковым запросом.
+    // Раньше здесь запускался поиск без явной фиксации выбранного
+    // значения, из-за чего в некоторых сценариях в ленту попадал
+    // предыдущий каталог.
+    const selectedQuery = String(item.text || "").trim();
+    if (!selectedQuery) return;
+
+    input.value = selectedQuery;
+
+    const clearButton = document.getElementById("searchClear");
+    if (clearButton) clearButton.style.display = "flex";
+
+    box.classList.remove("active");
+    box.innerHTML = "";
+    box._suggestions = [];
+
+    // Сохраняем именно выбранную подсказку как запрос пользователя.
+    rememberSearchQuery(selectedQuery);
+
+    // Передаём запрос напрямую в серверный поиск и не используем
+    // старое значение фильтра/предыдущего поиска.
+    await performSearch(selectedQuery, {
+        sources: Array.isArray(activeSearchSources)
+            ? activeSearchSources.slice()
+            : [],
+        minPrice: null,
+        maxPrice: null
+    });
+}
+
+
+let searchSuggestionsFocusFix = false;
+
+function setupSearchSuggestionFocus() {
+    const input = document.getElementById("searchInput");
+    const box = document.getElementById("searchSuggestions");
+    if (!input || !box || searchSuggestionsFocusFix) return;
+
+    searchSuggestionsFocusFix = true;
+
+    input.addEventListener("focus", () => {
+        const value = input.value.trim();
+        if (value) renderSearchSuggestions(value);
+    });
+
+    input.addEventListener("blur", () => {
+        setTimeout(() => {
+            if (!box.matches(":hover") &&
+                document.activeElement !== input) {
+                box.classList.remove("active");
+            }
+        }, 180);
+    });
+
+    box.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+    });
+}
+
+function hideSearchSuggestions() {
+    const box = document.getElementById("searchSuggestions");
+    if (box) box.classList.remove("active");
+}
+
+async function performSearch(query, searchOptions = null) {
+    const home = document.getElementById("searchHome");
+    const results = document.getElementById("searchResults");
+    const resultList = document.getElementById("resultList");
+    const resultCount = document.getElementById("resultCount");
+
+    if (!home || !results || !resultList || !resultCount) {
+        return;
+    }
+
+    query = String(query || "").trim();
+
+    if (!query) {
+        /*
+        Пустой запрос полностью выключает режим серверного поиска.
+        */
+        activeServerSearch = {
+            query: "",
+            sources: [],
+            minPrice: null,
+            maxPrice: null
+        };
+
+        serverSearchHasMore = true;
+        serverSearchRequestId++;
+
+        products = [];
+        currentIndex = 0;
+        currentProduct = null;
+        resetNavigationHistory();
+
+        home.style.display = "block";
+        results.classList.remove("active");
+        hideSearchSuggestions();
+
+        return;
+    }
+
+    /*
+    Новый запрос = новая сессия поиска.
+
+    Сначала полностью убираем старую поисковую ленту.
+    Это принципиально важно: пока сервер ищет "колодки",
+    старые "наушники" больше не должны оставаться видимыми.
+    */
+    const requestId = ++serverSearchRequestId;
+
+    const searchSources =
+        searchOptions && Array.isArray(searchOptions.sources)
+            ? searchOptions.sources.slice()
+            : (
+                Array.isArray(activeSearchSources)
+                    ? activeSearchSources.slice()
+                    : []
+            );
+
+    activeServerSearch = {
+        query,
+        sources: searchSources,
+        minPrice:
+            searchOptions && searchOptions.minPrice !== undefined
+                ? searchOptions.minPrice
+                : null,
+        maxPrice:
+            searchOptions && searchOptions.maxPrice !== undefined
+                ? searchOptions.maxPrice
+                : null
+    };
+
+    serverSearchHasMore = true;
+    serverSearchLoading = true;
+
+    /*
+    Очищаем текущую карточку ДО fetch().
+    Поэтому пользователь никогда не увидит старую ленту
+    в качестве "загрузки" нового поиска.
+    */
+    products = [];
+    currentIndex = 0;
+    currentProduct = null;
+    resetNavigationHistory();
+
+    /*
+    Во время ожидания остаёмся на экране поиска.
+    В ленту переключаемся только после получения актуальных
+    результатов именно этого запроса.
+    */
+    switchTab("search");
+
+    home.style.display = "none";
+    results.classList.add("active");
+    hideSearchSuggestions();
+
+    rememberSearchQuery(query.toLowerCase());
+
+    if (typeof updateProfileInterests === "function") {
+        updateProfileInterests();
+    }
+
+    resultCount.textContent = "Ищем товары...";
+    resultList.innerHTML = `
+        <div class="search-no-results">
+            🔎 Ищем <b>${escapeHTML(query)}</b>...<br>
+            <span>Проверяем нашу базу и при необходимости запрашиваем площадку.</span>
+        </div>
+    `;
+
+    try {
+        const data = await fetchServerSearch(false);
+
+        /*
+        Пока запрос выполнялся, пользователь мог ввести другой запрос.
+        Старый ответ в таком случае полностью игнорируем.
+        */
+        if (requestId !== serverSearchRequestId) {
+            return;
+        }
+
+        const incoming = Array.isArray(data.products)
+            ? data.products.map(normalizeProduct)
+            : [];
+
+        /*
+        Добавляем найденные товары в общий каталог для будущих запросов,
+        но текущую ленту строим НЕ из allProducts, а только из incoming.
+        */
+        mergeProductsIntoCatalog(incoming);
+
+        renderServerSearchResults(incoming, data);
+
+        if (!incoming.length) {
+            /*
+            Ничего не нашли — остаёмся на экране поиска.
+            В пустую/рандомную общую ленту не переходим.
+            */
+            products = [];
+            currentIndex = 0;
+            currentProduct = null;
+            showEmptyFeed();
+            return;
+        }
+
+        const prepared = prepareServerSearchFeed(incoming);
+
+        if (!prepared) {
+            products = [];
+            currentIndex = 0;
+            currentProduct = null;
+            return;
+        }
+
+    } catch (error) {
+        console.error("[StyleFlow] Server search error:", error);
+
+        /*
+        Если это уже неактуальный запрос, его ошибка тоже ничего
+        не должна менять на экране.
+        */
+        if (requestId !== serverSearchRequestId) {
+            return;
+        }
+
+        /*
+        Локальный fallback тоже строит отдельную поисковую ленту,
+        а не запускает общую персональную ленту.
+        */
+        const localResults = localSearchFallback(query);
+
+        renderSearchResultList(
+            localResults,
+            localResults.length,
+            true
+        );
+
+        if (localResults.length) {
+            const prepared = prepareServerSearchFeed(localResults);
+
+            if (!prepared) {
+                products = [];
+                currentIndex = 0;
+                currentProduct = null;
+            }
+        } else {
+            resultList.innerHTML = `
+                <div class="search-no-results">
+                    Не удалось найти <b>${escapeHTML(query)}</b>.<br>
+                    <span>Проверь соединение с сервером и попробуй ещё раз.</span>
+                </div>
+            `;
+        }
+
+    } finally {
+        if (requestId === serverSearchRequestId) {
+            serverSearchLoading = false;
+            serverSearchLastFetchAt = Date.now();
+        }
+    }
+}
+
+
+function buildServerSearchUrl(more = false) {
+    const endpoint = more ? "/api/search/more" : "/api/search";
+    const params = new URLSearchParams();
+
+    params.set("query", activeServerSearch.query || "");
+    params.set("limit", "100");
+
+    if (activeServerSearch.sources && activeServerSearch.sources.length) {
+        params.set("sources", activeServerSearch.sources.join(","));
+    }
+
+    if (activeServerSearch.minPrice !== null && activeServerSearch.minPrice !== undefined) {
+        params.set("min_price", String(activeServerSearch.minPrice));
+    }
+
+    if (activeServerSearch.maxPrice !== null && activeServerSearch.maxPrice !== undefined) {
+        params.set("max_price", String(activeServerSearch.maxPrice));
+    }
+
+    return `${endpoint}?${params.toString()}`;
+}
+
+
+async function fetchServerSearch(more = false) {
+    const response = await fetch(
+        buildServerSearchUrl(more),
+        { cache: "no-store" }
+    );
+
+    if (!response.ok) {
+        throw new Error(`Search request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (data.status === "error") {
+        throw new Error(data.message || "Server search error");
+    }
+
+    return data;
+}
+
+
+function mergeProductsIntoCatalog(incoming) {
+    if (!Array.isArray(incoming) || !incoming.length) return;
+
+    const map = new Map();
+
+    allProducts.forEach(product => {
+        if (product) map.set(String(product.id), product);
+    });
+
+    incoming.forEach(product => {
+        if (product) map.set(String(product.id), product);
+    });
+
+    allProducts = Array.from(map.values());
+
+    localStorage.setItem(
+        "styleflow_main_feed",
+        JSON.stringify(allProducts)
+    );
+
+    populateFilterCategories();
+    renderFilterSources();
+}
+
+
+function renderServerSearchResults(incoming, data) {
+    const resultList = document.getElementById("resultList");
+    const resultCount = document.getElementById("resultCount");
+    if (!resultList || !resultCount) return;
+
+    const items = Array.isArray(incoming) ? incoming : [];
+
+    if (!items.length) {
+        resultCount.textContent = "Ничего не найдено";
+        resultList.innerHTML = `
+            <div class="search-no-results">
+                Ничего точного не нашли.<br>
+                <span>Попробуй изменить запрос или выбрать другую площадку.</span>
+            </div>
+        `;
+        return;
+    }
+
+    const fetched = Number(data && data.fetched || 0);
+    resultCount.textContent = fetched > 0
+        ? `Найдено: ${items.length} · добавлено в общую базу`
+        : `Найдено в базе: ${items.length}`;
+
+    renderSearchResultList(items, items.length, false);
+}
+
+
+function renderSearchResultList(items, count, fallback = false) {
+    const resultList = document.getElementById("resultList");
+    const resultCount = document.getElementById("resultCount");
+    if (!resultList || !resultCount) return;
+
+    const list = Array.isArray(items) ? items : [];
+
+    resultCount.textContent = fallback
+        ? `Найдено локально: ${count}`
+        : (count === 1 ? "Найден 1 товар" : `Найдено товаров: ${count}`);
+
+    resultList.innerHTML = "";
+
+    list.forEach(product => {
+        const card = document.createElement("div");
+        card.className = "search-result-card";
+        card.innerHTML = `
+            <img
+                src="${escapeAttribute(product.image)}"
+                alt="${escapeAttribute(product.title)}"
+            >
+            <div class="search-result-info">
+                <div class="search-result-source">
+                    ${escapeHTML(sourceLabel(product.source))}
+                </div>
+                <div class="search-result-title">
+                    ${escapeHTML(product.title)}
+                </div>
+                <div class="search-result-price">
+                    ${escapeHTML(formatPrice(product))}
+                </div>
+            </div>
+        `;
+
+        card.onclick = () => openProductFromObject(product);
+        resultList.appendChild(card);
+    });
+
+    if (!list.length) {
+        resultList.innerHTML = `
+            <div class="search-no-results">
+                Ничего не найдено.<br>
+                <span>Попробуй другой запрос.</span>
+            </div>
+        `;
+    }
+}
+
+
+function localSearchFallback(query) {
+    const tokens = normalizeText(query).split(/\s+/).filter(Boolean);
+
+    return allProducts.filter(product => {
+        const searchable = [
+            product.title,
+            product.brand,
+            product.category,
+            product.description,
+            product.source,
+            sourceLabel(product.source)
+        ].join(" ").toLowerCase();
+
+        if (!tokens.every(token => searchTokenMatches(token, searchable))) {
+            return false;
+        }
+
+        if (activeSearchSources.length) {
+            return activeSearchSources.includes(
+                normalizeSearchSource(product.source)
+            );
+        }
+
+        return true;
+    });
+}
+
+
+function prepareServerSearchFeed(incomingProducts = []) {
+    /*
+    ВАЖНО:
+    Явный поиск должен строить ленту ТОЛЬКО из ответа текущего
+    поискового запроса.
+
+    Раньше здесь использовался весь allProducts. Из-за этого при
+    переключении запроса/гонках загрузки в ленту могли попадать
+    старые или вообще нерелевантные карточки.
+    */
+
+    const query = String(activeServerSearch.query || "").trim();
+
+    if (!query) {
+        return false;
+    }
+
+    const queryTokens = normalizeText(query)
+        .split(/\s+/)
+        .filter(Boolean);
+
+    const sourceProducts = Array.isArray(incomingProducts)
+        ? incomingProducts
+        : [];
+
+    const candidates = sourceProducts.filter(product => {
+        if (!product) {
+            return false;
+        }
+
+        const searchable = [
+            product.title,
+            product.brand,
+            product.category,
+            product.description,
+            product.source,
+            sourceLabel(product.source)
+        ].join(" ").toLowerCase();
+
+        if (!queryTokens.every(token => searchTokenMatches(token, searchable))) {
+            return false;
+        }
+
+        if (
+            activeServerSearch.sources &&
+            activeServerSearch.sources.length
+        ) {
+            if (
+                !activeServerSearch.sources.includes(
+                    normalizeSearchSource(product.source)
+                )
+            ) {
+                return false;
+            }
+        }
+
+        if (
+            activeServerSearch.minPrice !== null &&
+            activeServerSearch.minPrice !== undefined
+        ) {
+            if (
+                product.price === null ||
+                Number(product.price) < Number(activeServerSearch.minPrice)
+            ) {
+                return false;
+            }
+        }
+
+        if (
+            activeServerSearch.maxPrice !== null &&
+            activeServerSearch.maxPrice !== undefined
+        ) {
+            if (
+                product.price === null ||
+                Number(product.price) > Number(activeServerSearch.maxPrice)
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    });
+
+    if (!candidates.length) {
+        return false;
+    }
+
+    /*
+    Сервер уже вернул правильный порядок.
+    Сохраняем его, но просмотренные карточки переносим в конец.
+    */
+    const unviewed = candidates.filter(
+        product => !isProductViewed(product)
+    );
+
+    products = unviewed.length
+        ? unviewed.concat(
+            candidates.filter(product => isProductViewed(product))
+        )
+        : candidates.slice();
+
+    currentIndex = 0;
+    resetNavigationHistory();
+    currentProduct = null;
+
+    rememberProductInNavigation(products[0]);
+
+    /*
+    Только после того, как реальные результаты готовы,
+    переключаемся из поиска в ленту.
+    */
+    switchTab("feed");
+    showProduct();
+
+    return true;
+}
+
+
+async function loadMoreServerProducts() {
+    if (
+        serverSearchLoading ||
+        !activeServerSearch.query ||
+        !serverSearchHasMore
+    ) {
+        return false;
+    }
+
+    serverSearchLoading = true;
+
+    try {
+        const data = await fetchServerSearch(true);
+        const incoming = Array.isArray(data.products)
+            ? data.products.map(normalizeProduct)
+            : [];
+
+        const beforeIds = new Set(allProducts.map(product => String(product.id)));
+        const fresh = incoming.filter(product => !beforeIds.has(String(product.id)));
+
+        mergeProductsIntoCatalog(fresh);
+
+        if (fresh.length) {
+            // Если пользователь находится в серверной ленте, просто добавляем
+            // новые карточки в конец, не сбрасывая текущую позицию.
+            const existingIds = new Set(products.map(product => String(product.id)));
+            fresh.forEach(product => {
+                if (!existingIds.has(String(product.id))) {
+                    products.push(product);
+                }
+            });
+        }
+
+        // Сервер сообщает fetched=0, когда следующей страницы больше нет.
+        // Также останавливаемся, если новая выдача совсем не изменилась.
+        if (!fresh.length || Number(data && data.fetched || 0) === 0) {
+            serverSearchHasMore = false;
+        }
+
+        return fresh.length > 0;
+
+    } catch (error) {
+        console.error("[StyleFlow] Ошибка догрузки:", error);
+        return false;
+    } finally {
+        serverSearchLoading = false;
+        serverSearchLastFetchAt = Date.now();
+    }
+}
+
+
+async function maybeLoadMoreServerProducts() {
+    if (!activeServerSearch.query || serverSearchLoading || !serverSearchHasMore) {
+        return;
+    }
+
+    // Догружаем заранее, когда до конца текущей серверной ленты осталось мало карточек.
+    const remaining = products.length - currentIndex - 1;
+
+    if (remaining <= 12) {
+        await loadMoreServerProducts();
+    }
+}
+
+
+
+function getTopUserInterests(limit = 8) {
+    const profile = buildUserProfile();
+    const combined = [];
+
+    Object.entries(profile.keywords || {}).forEach(([word, score]) => {
+        if (word.length < 2) return;
+        combined.push({ text: word, score });
+    });
+
+    return combined
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+}
+
+function updateProfileInterests() {
+    // Interests remain internal to the recommendation algorithm.
+    // They are intentionally not displayed in the profile UI.
+}
 
 function updateProfile() {
 
@@ -6068,6 +6105,7 @@ function updateProfile() {
 
 
     renderRecentProducts();
+    updateProfileInterests();
 }
 
 
@@ -6098,17 +6136,19 @@ function renderRecentProducts() {
             );
 
 
-    const cachedAll = loadJSON("styleflow_all_products_cache", []);
-    const historyCatalog = [
-        ...allProducts,
-        ...(Array.isArray(cachedAll) ? cachedAll.map(normalizeProduct) : [])
-    ];
-
     const recent =
         recentIds
-            .map(id => historyCatalog.find(product => String(product.id) === String(id)))
-            .filter(Boolean)
-            .filter((product, index, arr) => arr.findIndex(x => String(x.id) === String(product.id)) === index);
+            .map(
+                id =>
+                    allProducts.find(
+                        product =>
+                            String(
+                                product.id
+                            ) ===
+                            String(id)
+                    )
+            )
+            .filter(Boolean);
 
 
     recent.forEach(
@@ -6635,9 +6675,15 @@ function findProductById(id) {
 }
 
 
-function nextProduct() {
+async function nextProduct() {
+
+    if (activeServerSearch.query && products.length) {
+        // Догружаем следующую пачку ещё до того, как пользователь упрётся в конец.
+        void maybeLoadMoreServerProducts();
+    }
 
     if (!products.length) {
+
         buildPersonalizedFeed();
         currentIndex = 0;
 
@@ -6648,33 +6694,103 @@ function nextProduct() {
 
         resetNavigationHistory();
         showProduct();
+        rememberCurrentProduct();
         return;
     }
 
-    const nextIndex = findNextUnviewedIndex(currentIndex, 1);
+    // Если мы до этого нажали "назад", сначала возвращаемся
+    // вперёд по уже просмотренной истории, а не создаём новую карточку.
+    if (
+        navigationPosition >= 0 &&
+        navigationPosition < navigationHistory.length - 1
+    ) {
+        navigationPosition++;
+
+        const id = navigationHistory[navigationPosition];
+        const product = findProductById(id);
+
+        if (product) {
+            const index = products.findIndex(
+                item => String(item.id) === String(id)
+            );
+
+            if (index >= 0) {
+                currentIndex = index;
+            } else {
+                products = [product, ...products];
+                currentIndex = 0;
+            }
+
+            animateCardChange("next", true);
+            return;
+        }
+    }
+
+    const nextIndex =
+        findNextUnviewedIndex(
+            currentIndex,
+            1
+        );
 
     if (nextIndex >= 0) {
-        if (currentProduct) {
-            rememberNextNavigation(currentProduct);
-        }
+
+        rememberProductInNavigation(
+            products[nextIndex]
+        );
 
         currentIndex = nextIndex;
+
         animateCardChange("next");
         return;
     }
 
-    const filteredProducts = applyProductFilters(allProducts);
-    const unviewed = filteredProducts.filter(product => !isProductViewed(product));
+    // Пока активен явный серверный поиск, НИКОГДА не переключаемся
+    // на общую персональную ленту. Сначала пытаемся получить следующую
+    // страницу именно этого запроса. Это предотвращает появление
+    // нерелевантных товаров (например, жвачки вместо наушников).
+    if (activeServerSearch.query) {
+
+        if (serverSearchHasMore) {
+            const loaded = await loadMoreServerProducts();
+
+            if (loaded) {
+                const nextIndex = findNextUnviewedIndex(currentIndex, 1);
+
+                if (nextIndex >= 0) {
+                    rememberProductInNavigation(products[nextIndex]);
+                    currentIndex = nextIndex;
+                    animateCardChange("next");
+                    return;
+                }
+            }
+        }
+
+        console.log(
+            "[StyleFlow] Поисковая выдача закончилась."
+        );
+
+        showEmptyFeed();
+        showToast("По этому запросу больше товаров нет");
+        return;
+    }
+
+    // Только без активного поиска разрешаем переход к общей
+    // персонализированной ленте.
+    const filteredProducts =
+        applyProductFilters(allProducts);
+
+    const unviewed =
+        filteredProducts.filter(
+            product => !isProductViewed(product)
+        );
 
     if (unviewed.length > 0) {
-        if (currentProduct) {
-            rememberNextNavigation(currentProduct);
-        }
 
         buildPersonalizedFeed();
         currentIndex = 0;
 
         if (products.length > 0) {
+            rememberProductInNavigation(products[0]);
             animateCardChange("next");
         } else {
             showEmptyFeed();
@@ -6683,6 +6799,10 @@ function nextProduct() {
         return;
     }
 
+    console.log(
+        "[StyleFlow] Все доступные товары просмотрены."
+    );
+
     showEmptyFeed();
     showToast("Ты просмотрел все доступные товары");
 }
@@ -6690,39 +6810,39 @@ function nextProduct() {
 
 function previousProduct() {
 
-    ensureNavigationHistory();
-
-    if (navigationPosition <= 0) {
-        showToast("Это первая карточка в этой сессии");
+    if (!products.length) {
         return;
     }
 
-    const previousId = navigationHistory[navigationPosition - 1];
-    const previous = findProductById(previousId);
+    // Главное: назад идём НЕ через findNextUnviewedIndex.
+    // Просмотренный товар как раз и должен вернуться.
+    if (navigationPosition > 0) {
 
-    if (!previous) {
         navigationPosition--;
-        previousProduct();
-        return;
-    }
 
-    navigationPosition--;
+        const id = navigationHistory[navigationPosition];
+        const product = findProductById(id);
 
-    const index = products.findIndex(
-        product => String(product.id) === String(previous.id)
-    );
+        if (!product) {
+            return;
+        }
 
-    if (index >= 0) {
+        let index = products.findIndex(
+            item => String(item.id) === String(id)
+        );
+
+        if (index < 0) {
+            products = [product, ...products];
+            index = 0;
+        }
+
         currentIndex = index;
-        animateCardChange("previous");
+
+        animateCardChange("previous", true);
         return;
     }
 
-    // Если текущая персонализация уже перестроила массив,
-    // возвращаем конкретный товар в начало текущей ленты.
-    products.unshift(previous);
-    currentIndex = 0;
-    animateCardChange("previous");
+    showToast("Это начало просмотренной ленты");
 }
 
 
@@ -6731,7 +6851,8 @@ CARD ANIMATION
 ========================================================= */
 
 function animateCardChange(
-    direction
+    direction,
+    allowViewed = false
 ) {
 
     const card =
@@ -6739,37 +6860,27 @@ function animateCardChange(
             "productCard"
         );
 
-
     if (!card) {
         return;
     }
 
-
-    card.style.opacity =
-        "0";
-
+    card.style.opacity = "0";
 
     card.style.transform =
         direction === "next"
-            ? "translateX(-28px)"
-            : "translateX(28px)";
-
+            ? "translateY(-20px)"
+            : "translateY(20px)";
 
     setTimeout(
         () => {
 
-            showProduct();
-
+            showProduct(allowViewed);
 
             requestAnimationFrame(
                 () => {
 
-                    card.style.opacity =
-                        "1";
-
-
-                    card.style.transform =
-                        "";
+                    card.style.opacity = "1";
+                    card.style.transform = "";
                 }
             );
 
@@ -6777,7 +6888,6 @@ function animateCardChange(
         100
     );
 }
-
 
 function resetCardPosition() {
 
@@ -7053,3 +7163,1547 @@ function getRussianPlural(
     return many;
 }
 
+/* =========================================================
+STYLEFLOW — UNIVERSAL RECOMMENDATION ENGINE V3
+=========================================================
+
+Главный принцип:
+STYLEFLOW не предполагает заранее, что пользователь интересуется
+одеждой. Профиль строится из реальных действий пользователя и
+содержимого товаров/объявлений.
+
+Сигналы:
+- просмотр — слабый сигнал экспозиции;
+- открытие — сильный сигнал намерения;
+- избранное — очень сильный явный сигнал;
+- поисковые запросы — сильный сигнал текущего намерения;
+- свежесть действий — важнее старых;
+- совпадение слов/фраз — дополнительный сигнал;
+- категория/бренд/источник — структурные сигналы;
+- цена — мягкое предпочтение, а не жёсткое правило.
+
+Лента:
+- никогда намеренно не возвращает просмотренное;
+- ранжирует по релевантности;
+- смешивает близкие интересы с небольшим exploration;
+- ограничивает повторение одной темы/источника;
+- постепенно меняет профиль по новым действиям.
+========================================================= */
+
+const SF_V3_VERSION = "3.0-universal";
+
+const SF_V3_STOPWORDS = new Set([
+    "и","или","но","а","в","во","на","по","из","за","для","с","со",
+    "к","ко","у","от","до","о","об","про","как","что","это","так",
+    "же","ли","бы","не","да","нет","все","всё","мой","моя","мои",
+    "мое","твой","твоя","твои","этот","эта","эти","того","там","тут",
+    "есть","был","была","были","будет","можно","нужно","хочу","ищу",
+    "купить","найти","показать","покажи","товар","товары","объявление",
+    "объявления","цена","новый","новая","новое","новые","шт","шт.",
+    "руб","руб.","byn","бел","бел.р","рб"
+]);
+
+function sfV3NormalizeToken(value) {
+    let word = String(value || "")
+        .toLowerCase()
+        .replace(/ё/g, "е")
+        .replace(/[^a-zа-я0-9]+/gi, "")
+        .trim();
+
+    if (word.length < 2 || SF_V3_STOPWORDS.has(word)) {
+        return "";
+    }
+
+    /*
+    Лёгкая нормализация окончаний.
+    Это намеренно не полноценный морфологический анализатор:
+    для браузерного Mini App он должен быть быстрым.
+    */
+    const endings = [
+        "иями","ами","ого","ему","ому","ыми","ими","ая","яя",
+        "ое","ее","ый","ий","ой","ые","ие","ов","ев","ам","ям",
+        "ах","ях","ом","ем","ым","им","ую","юю","ою","ею",
+        "а","я","ы","и","о","е","у","ю"
+    ];
+
+    for (const ending of endings) {
+        if (word.length > ending.length + 3 &&
+            word.endsWith(ending)) {
+            word = word.slice(0, -ending.length);
+            break;
+        }
+    }
+
+    return word;
+}
+
+function sfV3Tokens(value) {
+    return Array.from(
+        new Set(
+            String(value || "")
+                .toLowerCase()
+                .replace(/ё/g, "е")
+                .split(/[^a-zа-я0-9]+/gi)
+                .map(sfV3NormalizeToken)
+                .filter(Boolean)
+        )
+    );
+}
+
+function sfV3ProductText(product) {
+    if (!product) return "";
+
+    return [
+        product.title,
+        product.brand,
+        product.category,
+        product.description,
+        product.type,
+        product.subtitle,
+        product.raw && product.raw.name,
+        product.raw && product.raw.product_name,
+        product.raw && product.raw.description
+    ]
+        .filter(Boolean)
+        .join(" ");
+}
+
+function sfV3CanonicalProductId(productOrId) {
+    if (productOrId === null || productOrId === undefined) {
+        return "";
+    }
+
+    if (typeof productOrId === "object") {
+        const p = productOrId;
+
+        const source = normalizeSource(
+            p.source ||
+            p.marketplace ||
+            p.platform ||
+            ""
+        );
+
+        const external = String(
+            p.external_id ??
+            p.externalId ??
+            p.product_id ??
+            p.productId ??
+            ""
+        ).trim();
+
+        if (source && external) {
+            return `${source}:${external}`;
+        }
+
+        return String(
+            p.id ??
+            external ??
+            ""
+        ).trim();
+    }
+
+    return String(productOrId).trim();
+}
+
+function sfV3ProductIdVariants(productOrId) {
+    if (
+        productOrId === null ||
+        productOrId === undefined
+    ) {
+        return [];
+    }
+
+    if (typeof productOrId !== "object") {
+        const raw = String(productOrId).trim();
+        return raw ? [raw] : [];
+    }
+
+    const p = productOrId;
+    const source = normalizeSource(
+        p.source ||
+        p.marketplace ||
+        p.platform ||
+        ""
+    );
+
+    const values = [
+        p.id,
+        p.external_id,
+        p.externalId,
+        p.product_id,
+        p.productId
+    ];
+
+    if (source) {
+        values.push(
+            `${source}:${p.external_id || p.product_id || p.id || ""}`,
+            `${source}_${p.external_id || p.product_id || p.id || ""}`
+        );
+    }
+
+    return Array.from(
+        new Set(
+            values
+                .filter(v => v !== null && v !== undefined)
+                .map(v => String(v).trim())
+                .filter(Boolean)
+        )
+    );
+}
+
+function sfV3SameProduct(a, b) {
+    const left = new Set(
+        sfV3ProductIdVariants(a)
+    );
+
+    return sfV3ProductIdVariants(b)
+        .some(id => left.has(id));
+}
+
+function sfV3IsViewed(product) {
+    if (!product) return true;
+
+    return Array.isArray(viewedProducts) &&
+        viewedProducts.some(
+            id => sfV3SameProduct(id, product)
+        );
+}
+
+function sfV3ActionRecency(index, total) {
+    if (!total) return 1;
+
+    /*
+    Последнее действие ≈ 1.0.
+    Старые действия постепенно ослабевают, но не исчезают мгновенно.
+    */
+    const position = (index + 1) / total;
+
+    return 0.35 + Math.pow(position, 0.65) * 0.65;
+}
+
+function sfV3AddMap(map, key, amount) {
+    if (!key) return;
+
+    map[key] =
+        (Number(map[key]) || 0) +
+        amount;
+}
+
+function sfV3AddTokens(profile, text, weight) {
+    sfV3Tokens(text).forEach(token => {
+        sfV3AddMap(
+            profile.keywords,
+            token,
+            weight
+        );
+    });
+}
+
+function sfV3AddProductSignal(
+    profile,
+    product,
+    weight,
+    options = {}
+) {
+    if (!product || !Number.isFinite(weight)) {
+        return;
+    }
+
+    const category = normalizeText(
+        product.category
+    );
+
+    const brand = normalizeText(
+        product.brand
+    );
+
+    const source = normalizeText(
+        product.source
+    );
+
+    sfV3AddMap(
+        profile.categories,
+        category,
+        weight
+    );
+
+    sfV3AddMap(
+        profile.brands,
+        brand,
+        weight
+    );
+
+    sfV3AddMap(
+        profile.sources,
+        source,
+        weight
+    );
+
+    sfV3AddTokens(
+        profile,
+        sfV3ProductText(product),
+        weight * 0.72
+    );
+
+    if (
+        product.price !== null &&
+        Number.isFinite(Number(product.price))
+    ) {
+        profile.prices.push({
+            price: Number(product.price),
+            weight
+        });
+    }
+
+    if (options.countSignal !== false) {
+        profile.totalSignals += weight;
+    }
+}
+
+function sfV3FindHistoryProduct(id) {
+    /*
+    Сначала обычный поиск проекта.
+    Затем расширенный поиск по всем ID-вариантам.
+    */
+    const direct = findProductById(id);
+
+    if (direct) {
+        return direct;
+    }
+
+    const catalog = [
+        ...(Array.isArray(allProducts) ? allProducts : []),
+        ...(Array.isArray(products) ? products : [])
+    ];
+
+    return catalog.find(
+        product => sfV3SameProduct(id, product)
+    ) || null;
+}
+
+function sfV3GetSearchHistory() {
+    const raw = loadJSON(
+        "styleflow_search_history",
+        []
+    );
+
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+
+    return raw
+        .map(entry => {
+            if (typeof entry === "string") {
+                return {
+                    query: entry,
+                    weight: 1
+                };
+            }
+
+            return {
+                query: entry && entry.query
+                    ? entry.query
+                    : "",
+                weight:
+                    Number(entry && entry.weight) || 1
+            };
+        })
+        .filter(entry => entry.query);
+}
+
+/* =========================================================
+UNIVERSAL USER PROFILE
+========================================================= */
+
+function buildUserProfile() {
+    const profile = {
+        categories: {},
+        brands: {},
+        sources: {},
+        keywords: {},
+        prices: [],
+        totalSignals: 0,
+        explicitSignals: 0,
+        viewedOnlySignals: 0,
+        searchIntent: {},
+        generatedAt: Date.now()
+    };
+
+    const viewed = Array.isArray(viewedProducts)
+        ? viewedProducts.slice(-250)
+        : [];
+
+    viewed.forEach((id, index) => {
+        const product = sfV3FindHistoryProduct(id);
+        if (!product) return;
+
+        const recency =
+            sfV3ActionRecency(
+                index,
+                viewed.length
+            );
+
+        /*
+        Сам просмотр — не считаем доказательством любви.
+        Это только слабый сигнал того, что направление было показано.
+        */
+        sfV3AddProductSignal(
+            profile,
+            product,
+            0.35 * recency
+        );
+
+        profile.viewedOnlySignals += 1;
+    });
+
+    const opened = Array.isArray(openedProducts)
+        ? openedProducts.slice(-180)
+        : [];
+
+    opened.forEach((id, index) => {
+        const product = sfV3FindHistoryProduct(id);
+        if (!product) return;
+
+        const recency =
+            sfV3ActionRecency(
+                index,
+                opened.length
+            );
+
+        sfV3AddProductSignal(
+            profile,
+            product,
+            4.5 * recency
+        );
+
+        profile.explicitSignals += 1;
+    });
+
+    (Array.isArray(favorites) ? favorites : [])
+        .forEach(productRaw => {
+            const product =
+                normalizeProduct(
+                    productRaw
+                );
+
+            if (!product) return;
+
+            sfV3AddProductSignal(
+                profile,
+                product,
+                9.5
+            );
+
+            profile.explicitSignals += 1;
+        });
+
+    const searches =
+        sfV3GetSearchHistory()
+            .slice(-50);
+
+    searches.forEach((entry, index) => {
+        const recency =
+            sfV3ActionRecency(
+                index,
+                searches.length
+            );
+
+        const queryWeight =
+            5.5 *
+            recency *
+            Math.max(
+                0.5,
+                Number(entry.weight) || 1
+            );
+
+        const tokens =
+            sfV3Tokens(
+                entry.query
+            );
+
+        tokens.forEach(token => {
+            sfV3AddMap(
+                profile.keywords,
+                token,
+                queryWeight
+            );
+
+            sfV3AddMap(
+                profile.searchIntent,
+                token,
+                queryWeight
+            );
+        });
+
+        profile.totalSignals +=
+            queryWeight;
+
+        profile.explicitSignals += 1;
+    });
+
+    return profile;
+}
+
+/* =========================================================
+SIMILARITY
+========================================================= */
+
+function sfV3TokenSimilarity(
+    productTokens,
+    profileKeywords
+) {
+    if (!productTokens.length) {
+        return 0;
+    }
+
+    let matched = 0;
+    let totalImportance = 0;
+
+    productTokens.forEach(token => {
+        const value =
+            Number(
+                profileKeywords[token]
+            ) || 0;
+
+        if (value > 0) {
+            matched += Math.min(
+                1,
+                value / 10
+            );
+
+            totalImportance +=
+                Math.min(
+                    2.5,
+                    value / 8
+                );
+        }
+    });
+
+    return Math.min(
+        1,
+        (matched / productTokens.length) * 0.65 +
+        (totalImportance /
+            Math.max(1, productTokens.length * 1.4)
+        ) * 0.35
+    );
+}
+
+function sfV3PriceFit(product, profile) {
+    if (
+        !product ||
+        product.price === null ||
+        !Number.isFinite(Number(product.price)) ||
+        !profile.prices.length
+    ) {
+        return 0;
+    }
+
+    const price =
+        Number(product.price);
+
+    let totalWeight = 0;
+    let weightedFit = 0;
+
+    profile.prices.forEach(item => {
+        const p = Number(item.price);
+        const w = Number(item.weight) || 0;
+
+        if (
+            !Number.isFinite(p) ||
+            p <= 0 ||
+            w <= 0
+        ) {
+            return;
+        }
+
+        /*
+        Относительное расстояние лучше абсолютного:
+        20 BYN для дешёвого товара и 20 BYN для дорогого товара
+        означают совершенно разное.
+        */
+        const distance =
+            Math.abs(price - p) /
+            Math.max(
+                1,
+                Math.max(price, p)
+            );
+
+        const fit =
+            Math.exp(
+                -Math.pow(distance / 0.28, 2)
+            );
+
+        weightedFit +=
+            fit * w;
+
+        totalWeight += w;
+    });
+
+    if (!totalWeight) {
+        return 0;
+    }
+
+    return Math.max(
+        0,
+        Math.min(
+            1,
+            weightedFit / totalWeight
+        )
+    );
+}
+
+function sfV3Freshness(product) {
+    const rawDate =
+        product &&
+        (
+            product.updated_at ||
+            product.updatedAt ||
+            product.created_at ||
+            product.createdAt
+        );
+
+    const timestamp =
+        new Date(rawDate || 0).getTime();
+
+    if (
+        !Number.isFinite(timestamp) ||
+        timestamp <= 0
+    ) {
+        return 0;
+    }
+
+    const ageDays =
+        Math.max(
+            0,
+            (Date.now() - timestamp) /
+            86400000
+        );
+
+    return Math.exp(
+        -ageDays / 14
+    );
+}
+
+/* =========================================================
+SMART SCORE
+========================================================= */
+
+function calculateRecommendationScore(
+    product,
+    profile
+) {
+    if (!product || !profile) {
+        return 0;
+    }
+
+    const tokens =
+        sfV3Tokens(
+            sfV3ProductText(product)
+        );
+
+    const keywordSimilarity =
+        sfV3TokenSimilarity(
+            tokens,
+            profile.keywords
+        );
+
+    const category =
+        normalizeText(
+            product.category
+        );
+
+    const brand =
+        normalizeText(
+            product.brand
+        );
+
+    const source =
+        normalizeText(
+            product.source
+        );
+
+    const categoryAffinity =
+        category &&
+        profile.categories[category]
+            ? Math.min(
+                1,
+                profile.categories[category] / 24
+            )
+            : 0;
+
+    const brandAffinity =
+        brand &&
+        profile.brands[brand]
+            ? Math.min(
+                1,
+                profile.brands[brand] / 18
+            )
+            : 0;
+
+    const sourceAffinity =
+        source &&
+        profile.sources[source]
+            ? Math.min(
+                1,
+                profile.sources[source] / 35
+            )
+            : 0;
+
+    const priceFit =
+        sfV3PriceFit(
+            product,
+            profile
+        );
+
+    const searchFit =
+        sfV3TokenSimilarity(
+            tokens,
+            profile.searchIntent
+        );
+
+    const freshness =
+        sfV3Freshness(
+            product
+        );
+
+    /*
+    Баланс намерения:
+    - поиск и содержание товара;
+    - точные структурные совпадения;
+    - цена;
+    - источник;
+    - свежесть.
+
+    Никакой отдельный признак не способен один
+    полностью определить результат.
+    */
+    let score =
+        keywordSimilarity * 34 +
+        searchFit * 22 +
+        categoryAffinity * 18 +
+        brandAffinity * 20 +
+        priceFit * 13 +
+        sourceAffinity * 5 +
+        freshness * 3;
+
+    /*
+    Сильный бонус, если товар одновременно совпал
+    по нескольким признакам. Например:
+    "наушники" + Sony + привычный диапазон цены.
+    */
+    const matchedDimensions =
+        [
+            keywordSimilarity >= 0.25,
+            searchFit >= 0.25,
+            categoryAffinity >= 0.25,
+            brandAffinity >= 0.25,
+            priceFit >= 0.55
+        ]
+            .filter(Boolean)
+            .length;
+
+    if (matchedDimensions >= 3) {
+        score += 10;
+    }
+
+    if (matchedDimensions >= 4) {
+        score += 8;
+    }
+
+    /*
+    Очень маленькая случайность нужна только
+    для разведения почти одинаковых карточек.
+    */
+    score += Math.random() * 0.35;
+
+    return Math.max(
+        0,
+        score
+    );
+}
+
+/* =========================================================
+DIVERSIFIED PERSONALIZED FEED
+========================================================= */
+
+function buildPersonalizedFeed() {
+    if (!Array.isArray(allProducts) || !allProducts.length) {
+        products = [];
+        return;
+    }
+
+    const filtered =
+        applyProductFilters(
+            allProducts
+        );
+
+    const candidates =
+        filtered.filter(
+            product =>
+                !sfV3IsViewed(product)
+        );
+
+    if (!candidates.length) {
+        products = [];
+        return;
+    }
+
+    /*
+    Явные сортировки пользователя имеют приоритет.
+    */
+    if (activeFilters.sort === "price_asc") {
+        products = sortByPrice(
+            candidates,
+            "asc"
+        );
+        return;
+    }
+
+    if (activeFilters.sort === "price_desc") {
+        products = sortByPrice(
+            candidates,
+            "desc"
+        );
+        return;
+    }
+
+    if (activeFilters.sort === "newest") {
+        products = sortNewest(
+            candidates
+        );
+        return;
+    }
+
+    const profile =
+        buildUserProfile();
+
+    const signalLevel =
+        Math.min(
+            1,
+            (
+                Number(profile.totalSignals) || 0
+            ) / 42
+        );
+
+    /*
+    Для нового пользователя больше exploration.
+    По мере накопления поведения алгоритм становится точнее.
+    Но exploration никогда не исчезает полностью.
+    */
+    const explorationRatio =
+        0.38 -
+        signalLevel * 0.28;
+
+    const scored =
+        candidates.map(
+            product => ({
+                product,
+                score:
+                    calculateRecommendationScore(
+                        product,
+                        profile
+                    ),
+                tokens:
+                    new Set(
+                        sfV3Tokens(
+                            sfV3ProductText(
+                                product
+                            )
+                        )
+                    )
+            })
+        );
+
+    /*
+    Сначала сортируем по силе интереса.
+    */
+    scored.sort(
+        (a, b) =>
+            b.score - a.score
+    );
+
+    const result = [];
+    const remaining = scored.slice();
+
+    let lastSource = "";
+    let sourceStreak = 0;
+
+    let lastCategory = "";
+    let categoryStreak = 0;
+
+    while (remaining.length) {
+        let available =
+            remaining.filter(
+                entry => {
+                    const category =
+                        normalizeText(
+                            entry.product.category
+                        );
+
+                    const source =
+                        normalizeText(
+                            entry.product.source
+                        );
+
+                    const categoryBlocked =
+                        category &&
+                        category === lastCategory &&
+                        categoryStreak >= 2;
+
+                    const sourceBlocked =
+                        source &&
+                        source === lastSource &&
+                        sourceStreak >= 3;
+
+                    return !(
+                        categoryBlocked ||
+                        sourceBlocked
+                    );
+                }
+            );
+
+        if (!available.length) {
+            available = remaining;
+        }
+
+        /*
+        Exploration:
+        выбираем один из менее очевидных кандидатов,
+        но не полностью случайный товар.
+        */
+        let selected;
+
+        if (
+            Math.random() <
+            explorationRatio
+        ) {
+            const topPoolSize =
+                Math.min(
+                    available.length,
+                    Math.max(
+                        5,
+                        Math.ceil(
+                            available.length * 0.30
+                        )
+                    )
+                );
+
+            const pool =
+                available
+                    .slice()
+                    .sort(
+                        (a, b) =>
+                            b.score - a.score
+                    )
+                    .slice(
+                        0,
+                        topPoolSize
+                    );
+
+            selected =
+                pool[
+                    Math.floor(
+                        Math.random() *
+                        pool.length
+                    )
+                ];
+
+        } else {
+            /*
+            В exploitation используем score с мягким
+            уменьшением разрыва между соседями.
+            */
+            const poolSize =
+                Math.min(
+                    available.length,
+                    12
+                );
+
+            const pool =
+                available
+                    .slice()
+                    .sort(
+                        (a, b) =>
+                            b.score - a.score
+                    )
+                    .slice(
+                        0,
+                        poolSize
+                    );
+
+            const maxScore =
+                Math.max(
+                    1,
+                    ...pool.map(
+                        item => item.score
+                    )
+                );
+
+            const weighted =
+                pool.map(
+                    item => ({
+                        item,
+                        weight:
+                            0.25 +
+                            Math.pow(
+                                Math.max(
+                                    0,
+                                    item.score /
+                                    maxScore
+                                ),
+                                2.2
+                            ) * 8
+                    })
+                );
+
+            const total =
+                weighted.reduce(
+                    (sum, item) =>
+                        sum + item.weight,
+                    0
+                );
+
+            let random =
+                Math.random() *
+                total;
+
+            selected =
+                weighted[
+                    weighted.length - 1
+                ].item;
+
+            for (const item of weighted) {
+                random -= item.weight;
+
+                if (random <= 0) {
+                    selected = item.item;
+                    break;
+                }
+            }
+        }
+
+        const index =
+            remaining.indexOf(
+                selected
+            );
+
+        if (index >= 0) {
+            remaining.splice(
+                index,
+                1
+            );
+        }
+
+        const category =
+            normalizeText(
+                selected.product.category
+            );
+
+        const source =
+            normalizeText(
+                selected.product.source
+            );
+
+        if (category === lastCategory) {
+            categoryStreak += 1;
+        } else {
+            lastCategory = category;
+            categoryStreak = 1;
+        }
+
+        if (source === lastSource) {
+            sourceStreak += 1;
+        } else {
+            lastSource = source;
+            sourceStreak = 1;
+        }
+
+        result.push(
+            selected.product
+        );
+    }
+
+    products = result;
+
+    console.log(
+        "[StyleFlow V3] Универсальная персональная лента:",
+        {
+            candidates: candidates.length,
+            result: products.length,
+            signals: profile.totalSignals,
+            exploration:
+                Math.round(
+                    explorationRatio * 100
+                ) + "%"
+        }
+    );
+}
+
+/* =========================================================
+PROFILE — "ВАМ МОЖЕТ ПОНРАВИТЬСЯ"
+========================================================= */
+
+function sfV3GetRecommendationTopics(limit = 5) {
+    const profile =
+        buildUserProfile();
+
+    const topics = [];
+
+    const addTopic = (
+        text,
+        score,
+        query
+    ) => {
+        const clean =
+            String(text || "")
+                .trim();
+
+        if (
+            !clean ||
+            clean.length < 2 ||
+            !query
+        ) {
+            return;
+        }
+
+        const duplicate =
+            topics.some(
+                item =>
+                    normalizeText(
+                        item.query
+                    ) ===
+                    normalizeText(
+                        query
+                    )
+            );
+
+        if (duplicate) {
+            return;
+        }
+
+        topics.push({
+            text: clean,
+            query: String(query),
+            score:
+                Number(score) || 0
+        });
+    };
+
+    Object.entries(
+        profile.searchIntent || {}
+    ).forEach(
+        ([token, score]) => {
+            addTopic(
+                token,
+                score + 50,
+                token
+            );
+        }
+    );
+
+    Object.entries(
+        profile.brands || {}
+    ).forEach(
+        ([brand, score]) => {
+            addTopic(
+                brand,
+                score + 35,
+                brand
+            );
+        }
+    );
+
+    Object.entries(
+        profile.categories || {}
+    ).forEach(
+        ([category, score]) => {
+            addTopic(
+                category,
+                score + 20,
+                category
+            );
+        }
+    );
+
+    Object.entries(
+        profile.keywords || {}
+    ).forEach(
+        ([keyword, score]) => {
+            addTopic(
+                keyword,
+                score,
+                keyword
+            );
+        }
+    );
+
+    return topics
+        .sort(
+            (a, b) =>
+                b.score - a.score
+        )
+        .slice(
+            0,
+            limit
+        );
+}
+
+function sfV3SearchByTopic(query) {
+    const clean =
+        String(query || "")
+            .trim();
+
+    if (!clean) {
+        return;
+    }
+
+    activeFilters = {
+        ...activeFilters,
+        query: clean,
+        sort: "relevance"
+    };
+
+    saveJSON(
+        "styleflow_filters",
+        activeFilters
+    );
+
+    /*
+    Если в проекте есть существующий search launcher,
+    используем его. Иначе просто перестраиваем локальную ленту.
+    */
+    const input =
+        document.getElementById(
+            "searchInput"
+        );
+
+    if (input) {
+        input.value = clean;
+    }
+
+    switchTab("feed");
+
+    if (typeof renderFilterState === "function") {
+        try {
+            renderFilterState();
+        } catch (e) {}
+    }
+
+    buildPersonalizedFeed();
+
+    currentIndex = 0;
+
+    resetNavigationHistory();
+
+    showProduct();
+
+    showToast(
+        `Подбираем: ${clean}`
+    );
+}
+
+function sfV3OpenFreshDiscovery() {
+    activeFilters = {
+        ...activeFilters,
+        query: "",
+        sort: "relevance"
+    };
+
+    saveJSON(
+        "styleflow_filters",
+        activeFilters
+    );
+
+    switchTab("feed");
+
+    buildPersonalizedFeed();
+
+    currentIndex = 0;
+
+    resetNavigationHistory();
+
+    showProduct();
+
+    showToast(
+        "Показываем что-то новое"
+    );
+}
+
+function renderProfileRecommendations() {
+    const container =
+        document.getElementById(
+            "profileRecommendations"
+        );
+
+    if (!container) {
+        return;
+    }
+
+    const topics =
+        sfV3GetRecommendationTopics(
+            5
+        );
+
+    container.innerHTML = "";
+
+    if (!topics.length) {
+        container.innerHTML = `
+            <button
+                type="button"
+                class="profile-recommendation-button profile-recommendation-main"
+                onclick="sfV3OpenFreshDiscovery()"
+            >
+                <span class="profile-rec-icon">✨</span>
+                <span>
+                    <strong>Попробовать что-то новое</strong>
+                    <small>Алгоритм начнёт изучать твои интересы</small>
+                </span>
+            </button>
+
+            <button
+                type="button"
+                class="profile-recommendation-button"
+                onclick="switchTab('search')"
+            >
+                <span class="profile-rec-icon">🔎</span>
+                <span>
+                    <strong>Найти что угодно</strong>
+                    <small>Товар, техника, авто, услуги и другое</small>
+                </span>
+            </button>
+        `;
+
+        return;
+    }
+
+    const header =
+        document.createElement(
+            "div"
+        );
+
+    header.className =
+        "profile-recommendation-caption";
+
+    header.textContent =
+        "На основе твоих поисков и действий";
+
+    container.appendChild(
+        header
+    );
+
+    topics.forEach(
+        topic => {
+            const button =
+                document.createElement(
+                    "button"
+                );
+
+            button.type = "button";
+
+            button.className =
+                "profile-recommendation-button";
+
+            button.innerHTML = `
+                <span class="profile-rec-icon">✦</span>
+                <span>
+                    <strong>${escapeHTML(
+                        capitalize(
+                            topic.text
+                        )
+                    )}</strong>
+                    <small>Вам может понравиться</small>
+                </span>
+            `;
+
+            button.addEventListener(
+                "click",
+                () => {
+                    sfV3SearchByTopic(
+                        topic.query
+                    );
+                }
+            );
+
+            container.appendChild(
+                button
+            );
+        }
+    );
+
+    const fresh =
+        document.createElement(
+            "button"
+        );
+
+    fresh.type = "button";
+
+    fresh.className =
+        "profile-recommendation-button profile-recommendation-fresh";
+
+    fresh.innerHTML = `
+        <span class="profile-rec-icon">🌐</span>
+        <span>
+            <strong>Что-нибудь новое</strong>
+            <small>Исследовать другие интересы</small>
+        </span>
+    `;
+
+    fresh.addEventListener(
+        "click",
+        sfV3OpenFreshDiscovery
+    );
+
+    container.appendChild(
+        fresh
+    );
+}
+
+function updateProfileInterests() {
+    renderProfileRecommendations();
+}
+
+/*
+Переопределяем профиль, чтобы новый блок
+обновлялся вместе со статистикой.
+*/
+function updateProfile() {
+    const likedCount =
+        document.getElementById(
+            "likedCount"
+        );
+
+    const viewedCount =
+        document.getElementById(
+            "viewedCount"
+        );
+
+    const openedCount =
+        document.getElementById(
+            "openedCount"
+        );
+
+    const collectionCount =
+        document.getElementById(
+            "collectionCount"
+        );
+
+    if (likedCount) {
+        likedCount.textContent =
+            Array.isArray(favorites)
+                ? favorites.length
+                : 0;
+    }
+
+    if (viewedCount) {
+        viewedCount.textContent =
+            Array.isArray(viewedProducts)
+                ? viewedProducts.length
+                : 0;
+    }
+
+    if (openedCount) {
+        openedCount.textContent =
+            Array.isArray(openedProducts)
+                ? openedProducts.length
+                : 0;
+    }
+
+    if (collectionCount) {
+        const count =
+            Array.isArray(favorites)
+                ? favorites.length
+                : 0;
+
+        collectionCount.textContent =
+            `${count} ${getRussianPlural(
+                count,
+                "товар",
+                "товара",
+                "товаров"
+            )}`;
+    }
+
+    renderProfileRecommendations();
+
+    if (
+        typeof renderRecentProducts ===
+        "function"
+    ) {
+        renderRecentProducts();
+    }
+}
+
+/* =========================================================
+UNIVERSAL CATEGORY FALLBACK
+========================================================= */
+
+function sfV3DisplayCategory(product) {
+    if (!product) {
+        return "";
+    }
+
+    const value =
+        String(
+            product.category || ""
+        ).trim();
+
+    if (
+        !value ||
+        /^\\d+$/.test(value)
+    ) {
+        return "";
+    }
+
+    return value;
+}
+
+/*
+Обновляем текст категории карточки без
+автоматического "Одежда".
+*/
+function sfV3PatchProductCategoryLabel() {
+    const category =
+        document.getElementById(
+            "productCategory"
+        );
+
+    if (!category || !currentProduct) {
+        return;
+    }
+
+    category.textContent =
+        sfV3DisplayCategory(
+            currentProduct
+        );
+}
+
+/*
+После каждой карточки можно безопасно обновить
+подпись категории.
+*/
+const sfV3OriginalShowProduct =
+    showProduct;
+
+function sfV3ShowProductWrapper() {
+    sfV3OriginalShowProduct();
+
+    try {
+        sfV3PatchProductCategoryLabel();
+    } catch (e) {}
+}
+
+showProduct =
+    sfV3ShowProductWrapper;
+
+/* =========================================================
+BOOT
+========================================================= */
+
+setTimeout(
+    () => {
+        try {
+            updateProfile();
+        } catch (e) {}
+    },
+    0
+);
