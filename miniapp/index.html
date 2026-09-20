@@ -2502,6 +2502,10 @@ LOAD FEED
 
 async function loadFeed() {
 
+    // Если поиск стартовал во время загрузки общей ленты,
+    // общий /api/feed не имеет права перезаписать результаты поиска.
+    const feedLoadSearchRequestId = serverSearchRequestId;
+
     try {
 
         const response =
@@ -2545,6 +2549,18 @@ async function loadFeed() {
             "[StyleFlow] Получено товаров:",
             rawProducts.length
         );
+
+        // Пользователь уже начал поиск, пока /api/feed отвечал.
+        // Не даём общей ленте затереть активный поисковый запрос.
+        if (
+            feedLoadSearchRequestId !== serverSearchRequestId ||
+            activeServerSearch.query
+        ) {
+            console.log(
+                "[StyleFlow] Общая лента не применена: уже активен поиск."
+            );
+            return;
+        }
 
 
         allProducts =
@@ -2620,6 +2636,15 @@ async function loadFeed() {
             "[StyleFlow] Feed error:",
             error
         );
+
+        // Даже при ошибке общей ленты не перезаписываем активный поиск
+        // старым кэшем.
+        if (
+            feedLoadSearchRequestId !== serverSearchRequestId ||
+            activeServerSearch.query
+        ) {
+            return;
+        }
 
 
         const cached =
@@ -8595,6 +8620,38 @@ async function nextProduct() {
         return;
     }
 
+    // Пока активен явный серверный поиск, НИКОГДА не переключаемся
+    // на общую персональную ленту. Сначала пытаемся получить следующую
+    // страницу именно этого запроса. Это предотвращает появление
+    // нерелевантных товаров (например, жвачки вместо наушников).
+    if (activeServerSearch.query) {
+
+        if (serverSearchHasMore) {
+            const loaded = await loadMoreServerProducts();
+
+            if (loaded) {
+                const nextIndex = findNextUnviewedIndex(currentIndex, 1);
+
+                if (nextIndex >= 0) {
+                    rememberProductInNavigation(products[nextIndex]);
+                    currentIndex = nextIndex;
+                    animateCardChange("next");
+                    return;
+                }
+            }
+        }
+
+        console.log(
+            "[StyleFlow] Поисковая выдача закончилась."
+        );
+
+        showEmptyFeed();
+        showToast("По этому запросу больше товаров нет");
+        return;
+    }
+
+    // Только без активного поиска разрешаем переход к общей
+    // персонализированной ленте.
     const filteredProducts =
         applyProductFilters(allProducts);
 
@@ -8616,21 +8673,6 @@ async function nextProduct() {
         }
 
         return;
-    }
-
-    if (activeServerSearch.query && serverSearchHasMore) {
-        const loaded = await loadMoreServerProducts();
-
-        if (loaded) {
-            const nextIndex = findNextUnviewedIndex(currentIndex, 1);
-
-            if (nextIndex >= 0) {
-                rememberProductInNavigation(products[nextIndex]);
-                currentIndex = nextIndex;
-                animateCardChange("next");
-                return;
-            }
-        }
     }
 
     console.log(
