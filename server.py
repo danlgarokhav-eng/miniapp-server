@@ -1091,15 +1091,118 @@ def api_search():
         }), 500
 
 
+def lazy_search_more(query, sources=None, min_price=None, max_price=None, limit=100):
+    """
+    Принудительно догружает следующую страницу внешнего источника.
+
+    В отличие от lazy_search() этот метод НЕ останавливается только потому,
+    что в локальной БД уже есть 30+ совпадений. Это нужно для бесконечной
+    ленты: /api/search/more должен действительно получать следующую пачку.
+    """
+    query = normalize_search_text(query)
+    sources = [str(x).lower() for x in (sources or []) if x]
+
+    if not query:
+        return {
+            "products": [],
+            "local_count": 0,
+            "fetched": 0,
+            "source": "local",
+            "has_more": False
+        }
+
+    fetched_total = 0
+    wanted_sources = sources or ["wildberries"]
+
+    if "wildberries" in wanted_sources:
+        cache = get_search_cache(query, "wildberries")
+        next_page = (cache["last_fetched_page"] + 1) if cache else 1
+
+        if next_page <= 3:
+            new_products = reef_wildberries_search(
+                query,
+                page=next_page,
+                price_min=min_price,
+                price_max=max_price
+            )
+
+            if new_products:
+                fetched_total = save_products(new_products)
+                update_search_cache(
+                    query,
+                    "wildberries",
+                    next_page,
+                    len(new_products)
+                )
+
+    local = local_search_products(
+        query,
+        sources=sources,
+        min_price=min_price,
+        max_price=max_price,
+        limit=limit
+    )
+
+    has_more = False
+    if "wildberries" in wanted_sources:
+        cache = get_search_cache(query, "wildberries")
+        has_more = bool(cache and cache["last_fetched_page"] < 3)
+
+    return {
+        "products": local,
+        "local_count": len(local),
+        "fetched": fetched_total,
+        "source": "local+reefapi" if fetched_total else "local",
+        "has_more": has_more
+    }
+
+
 @app.route("/api/search/more")
 def api_search_more():
-    """
-    Сейчас endpoint повторно выполняет lazy_search.
-    Если локального каталога мало, он получает следующую страницу ReefAPI.
-    Это специально сделано отдельным endpoint'ом, чтобы фронтенд мог
-    вызывать его, когда в ленте осталось мало карточек.
-    """
-    return api_search()
+    try:
+        query = request.args.get("query", "").strip()
+
+        sources_raw = request.args.get("sources", "").strip()
+        sources = [
+            x.strip().lower()
+            for x in sources_raw.split(",")
+            if x.strip()
+        ]
+
+        def parse_float(name):
+            value = request.args.get(name, "").strip()
+            if not value:
+                return None
+            try:
+                return float(value)
+            except ValueError:
+                return None
+
+        min_price = parse_float("min_price")
+        max_price = parse_float("max_price")
+        limit = max(1, min(int(request.args.get("limit", LOCAL_SEARCH_PAGE_SIZE)), 200))
+
+        result = lazy_search_more(
+            query,
+            sources=sources,
+            min_price=min_price,
+            max_price=max_price,
+            limit=limit
+        )
+
+        return jsonify({
+            "status": "ok",
+            "query": query,
+            **result
+        })
+
+    except Exception as e:
+        print(f"Ошибка /api/search/more: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "products": []
+        }), 500
 
 
 # =========================
