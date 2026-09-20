@@ -195,6 +195,29 @@ def init_db():
     """)
 
     # ---------------------------------
+    # STYLEFLOW FAVORITES
+    # ---------------------------------
+    # Избранное хранится на сервере и привязано к STYLEFLOW account_id,
+    # поэтому один Telegram-аккаунт видит его одинаково на всех устройствах.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            product_id TEXT NOT NULL,
+            product_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, product_id),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_favorites_user
+        ON user_favorites(user_id, updated_at)
+    """)
+
+    # ---------------------------------
     # SEARCH CACHE
     # ---------------------------------
     # Храним нормализованные поисковые запросы и последнюю страницу,
@@ -1669,6 +1692,101 @@ def api_feed():
     except Exception as e:
         print(f"Ошибка /api/feed: {e}")
         return jsonify({"status": "error", "message": str(e), "products": []}), 500
+
+
+# =========================
+# USER FAVORITES API
+# =========================
+
+@app.route("/api/user/favorites", methods=["GET"])
+def api_user_favorites():
+    account = current_account()
+    if not account:
+        return jsonify({"status": "unauthorized", "message": "Требуется авторизация STYLEFLOW"}), 401
+
+    try:
+        conn = get_db()
+        rows = conn.execute("""
+            SELECT product_id, product_json
+            FROM user_favorites
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, id DESC
+        """, (int(account["account_id"]),)).fetchall()
+        conn.close()
+
+        favorites = []
+        for row in rows:
+            try:
+                item = json.loads(row["product_json"]) if row["product_json"] else None
+            except Exception:
+                item = None
+            if not isinstance(item, dict):
+                item = {"id": str(row["product_id"])}
+            item["id"] = str(item.get("id") or row["product_id"])
+            favorites.append(item)
+
+        return jsonify({
+            "status": "ok",
+            "account_id": account["account_id"],
+            "favorites": favorites
+        })
+    except Exception as e:
+        print(f"Ошибка получения избранного: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/user/favorites", methods=["POST"])
+def api_user_favorite_add():
+    account = current_account()
+    if not account:
+        return jsonify({"status": "unauthorized", "message": "Требуется авторизация STYLEFLOW"}), 401
+
+    data = request.get_json(silent=True) or {}
+    product = data.get("product")
+    if not isinstance(product, dict) or not product.get("id"):
+        return jsonify({"status": "error", "message": "Нужен product"}), 400
+
+    product_id = str(product["id"])
+    try:
+        product_json = json.dumps(product, ensure_ascii=False, separators=(",", ":"))
+        conn = get_db()
+        conn.execute("""
+            INSERT INTO user_favorites (user_id, product_id, product_json, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, product_id)
+            DO UPDATE SET product_json = excluded.product_json, updated_at = CURRENT_TIMESTAMP
+        """, (int(account["account_id"]), product_id, product_json))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "ok", "action": "add", "product_id": product_id})
+    except Exception as e:
+        print(f"Ошибка добавления в избранное: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/user/favorites", methods=["DELETE"])
+def api_user_favorite_remove():
+    account = current_account()
+    if not account:
+        return jsonify({"status": "unauthorized", "message": "Требуется авторизация STYLEFLOW"}), 401
+
+    data = request.get_json(silent=True) or {}
+    product_id = str(data.get("product_id") or "").strip()
+    if not product_id:
+        return jsonify({"status": "error", "message": "Нужен product_id"}), 400
+
+    try:
+        conn = get_db()
+        conn.execute(
+            "DELETE FROM user_favorites WHERE user_id = ? AND product_id = ?",
+            (int(account["account_id"]), product_id)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "ok", "action": "remove", "product_id": product_id})
+    except Exception as e:
+        print(f"Ошибка удаления из избранного: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # =========================
