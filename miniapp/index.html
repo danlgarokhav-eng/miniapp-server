@@ -3569,14 +3569,6 @@ function applyFilters() {
     currentIndex = 0;
 
     if (query) {
-        activeServerSearch = {
-            query,
-            sources: uniqueStrings(sources),
-            minPrice,
-            maxPrice
-        };
-        serverSearchHasMore = true;
-        serverSearchRequestId++;
         void performSearch(query, {
             sources: uniqueStrings(sources),
             minPrice,
@@ -7083,6 +7075,27 @@ function clearSearch() {
     input.value = "";
     hideSearchSuggestions();
 
+    /*
+    Полностью завершаем предыдущую поисковую сессию.
+    Иначе после очистки интерфейса старый запрос мог продолжать
+    считаться активным для свайпа/догрузки.
+    */
+    activeServerSearch = {
+        query: "",
+        sources: [],
+        minPrice: null,
+        maxPrice: null
+    };
+
+    serverSearchHasMore = true;
+    serverSearchLoading = false;
+    serverSearchRequestId++;
+
+    products = [];
+    currentIndex = 0;
+    currentProduct = null;
+    resetNavigationHistory();
+
 
     const clearButton =
         document.getElementById(
@@ -7507,88 +7520,192 @@ async function performSearch(query, searchOptions = null) {
     const results = document.getElementById("searchResults");
     const resultList = document.getElementById("resultList");
     const resultCount = document.getElementById("resultCount");
-    if (!home || !results || !resultList || !resultCount) return;
+
+    if (!home || !results || !resultList || !resultCount) {
+        return;
+    }
 
     query = String(query || "").trim();
 
     if (!query) {
+        /*
+        Пустой запрос полностью выключает режим серверного поиска.
+        */
+        activeServerSearch = {
+            query: "",
+            sources: [],
+            minPrice: null,
+            maxPrice: null
+        };
+
+        serverSearchHasMore = true;
+        serverSearchRequestId++;
+
+        products = [];
+        currentIndex = 0;
+        currentProduct = null;
+        resetNavigationHistory();
+
         home.style.display = "block";
         results.classList.remove("active");
         hideSearchSuggestions();
+
         return;
     }
+
+    /*
+    Новый запрос = новая сессия поиска.
+
+    Сначала полностью убираем старую поисковую ленту.
+    Это принципиально важно: пока сервер ищет "колодки",
+    старые "наушники" больше не должны оставаться видимыми.
+    */
+    const requestId = ++serverSearchRequestId;
+
+    const searchSources =
+        searchOptions && Array.isArray(searchOptions.sources)
+            ? searchOptions.sources.slice()
+            : (
+                Array.isArray(activeSearchSources)
+                    ? activeSearchSources.slice()
+                    : []
+            );
+
+    activeServerSearch = {
+        query,
+        sources: searchSources,
+        minPrice:
+            searchOptions && searchOptions.minPrice !== undefined
+                ? searchOptions.minPrice
+                : null,
+        maxPrice:
+            searchOptions && searchOptions.maxPrice !== undefined
+                ? searchOptions.maxPrice
+                : null
+    };
+
+    serverSearchHasMore = true;
+    serverSearchLoading = true;
+
+    /*
+    Очищаем текущую карточку ДО fetch().
+    Поэтому пользователь никогда не увидит старую ленту
+    в качестве "загрузки" нового поиска.
+    */
+    products = [];
+    currentIndex = 0;
+    currentProduct = null;
+    resetNavigationHistory();
+
+    /*
+    Во время ожидания остаёмся на экране поиска.
+    В ленту переключаемся только после получения актуальных
+    результатов именно этого запроса.
+    */
+    switchTab("search");
 
     home.style.display = "none";
     results.classList.add("active");
     hideSearchSuggestions();
+
     rememberSearchQuery(query.toLowerCase());
 
     if (typeof updateProfileInterests === "function") {
         updateProfileInterests();
     }
 
-    const requestId = ++serverSearchRequestId;
-    serverSearchLoading = true;
-
     resultCount.textContent = "Ищем товары...";
     resultList.innerHTML = `
         <div class="search-no-results">
             🔎 Ищем <b>${escapeHTML(query)}</b>...<br>
-            <span>Сначала проверяем нашу базу, затем при необходимости подключаем источник.</span>
+            <span>Проверяем нашу базу и при необходимости запрашиваем площадку.</span>
         </div>
     `;
-
-    const searchSources = searchOptions && Array.isArray(searchOptions.sources)
-        ? searchOptions.sources.slice()
-        : (Array.isArray(activeSearchSources) ? activeSearchSources.slice() : []);
-
-    activeServerSearch = {
-        query,
-        sources: searchSources,
-        minPrice: searchOptions && searchOptions.minPrice !== undefined
-            ? searchOptions.minPrice
-            : null,
-        maxPrice: searchOptions && searchOptions.maxPrice !== undefined
-            ? searchOptions.maxPrice
-            : null
-    };
-
-    serverSearchHasMore = true;
 
     try {
         const data = await fetchServerSearch(false);
 
-        if (requestId !== serverSearchRequestId) return;
+        /*
+        Пока запрос выполнялся, пользователь мог ввести другой запрос.
+        Старый ответ в таком случае полностью игнорируем.
+        */
+        if (requestId !== serverSearchRequestId) {
+            return;
+        }
 
         const incoming = Array.isArray(data.products)
             ? data.products.map(normalizeProduct)
             : [];
 
+        /*
+        Добавляем найденные товары в общий каталог для будущих запросов,
+        но текущую ленту строим НЕ из allProducts, а только из incoming.
+        */
         mergeProductsIntoCatalog(incoming);
 
         renderServerSearchResults(incoming, data);
 
-        // Запоминаем запрос как активную серверную ленту.
-        // Если товары пришли, пользователь может открыть карточку и продолжить свайпать.
-        if (incoming.length) {
-            prepareServerSearchFeed();
+        if (!incoming.length) {
+            /*
+            Ничего не нашли — остаёмся на экране поиска.
+            В пустую/рандомную общую ленту не переходим.
+            */
+            products = [];
+            currentIndex = 0;
+            currentProduct = null;
+            showEmptyFeed();
+            return;
+        }
+
+        const prepared = prepareServerSearchFeed(incoming);
+
+        if (!prepared) {
+            products = [];
+            currentIndex = 0;
+            currentProduct = null;
+            return;
         }
 
     } catch (error) {
         console.error("[StyleFlow] Server search error:", error);
 
-        // Резерв: если сервер временно недоступен, используем локальный каталог.
-        const localResults = localSearchFallback(query);
-        renderSearchResultList(localResults, localResults.length, true);
+        /*
+        Если это уже неактуальный запрос, его ошибка тоже ничего
+        не должна менять на экране.
+        */
+        if (requestId !== serverSearchRequestId) {
+            return;
+        }
 
-        if (!localResults.length) {
+        /*
+        Локальный fallback тоже строит отдельную поисковую ленту,
+        а не запускает общую персональную ленту.
+        */
+        const localResults = localSearchFallback(query);
+
+        renderSearchResultList(
+            localResults,
+            localResults.length,
+            true
+        );
+
+        if (localResults.length) {
+            const prepared = prepareServerSearchFeed(localResults);
+
+            if (!prepared) {
+                products = [];
+                currentIndex = 0;
+                currentProduct = null;
+            }
+        } else {
             resultList.innerHTML = `
                 <div class="search-no-results">
-                    Не удалось выполнить поиск.<br>
+                    Не удалось найти <b>${escapeHTML(query)}</b>.<br>
                     <span>Проверь соединение с сервером и попробуй ещё раз.</span>
                 </div>
             `;
         }
+
     } finally {
         if (requestId === serverSearchRequestId) {
             serverSearchLoading = false;
@@ -7770,14 +7887,36 @@ function localSearchFallback(query) {
 }
 
 
-function prepareServerSearchFeed() {
-    // Серверный поиск становится источником текущей ленты.
-    // Важно: старый текстовый фильтр не должен случайно ограничить новый запрос.
-    const queryTokens = normalizeText(activeServerSearch.query || "")
+function prepareServerSearchFeed(incomingProducts = []) {
+    /*
+    ВАЖНО:
+    Явный поиск должен строить ленту ТОЛЬКО из ответа текущего
+    поискового запроса.
+
+    Раньше здесь использовался весь allProducts. Из-за этого при
+    переключении запроса/гонках загрузки в ленту могли попадать
+    старые или вообще нерелевантные карточки.
+    */
+
+    const query = String(activeServerSearch.query || "").trim();
+
+    if (!query) {
+        return false;
+    }
+
+    const queryTokens = normalizeText(query)
         .split(/\s+/)
         .filter(Boolean);
 
-    const candidates = allProducts.filter(product => {
+    const sourceProducts = Array.isArray(incomingProducts)
+        ? incomingProducts
+        : [];
+
+    const candidates = sourceProducts.filter(product => {
+        if (!product) {
+            return false;
+        }
+
         const searchable = [
             product.title,
             product.brand,
@@ -7791,20 +7930,39 @@ function prepareServerSearchFeed() {
             return false;
         }
 
-        if (activeServerSearch.sources && activeServerSearch.sources.length) {
-            if (!activeServerSearch.sources.includes(normalizeSearchSource(product.source))) {
+        if (
+            activeServerSearch.sources &&
+            activeServerSearch.sources.length
+        ) {
+            if (
+                !activeServerSearch.sources.includes(
+                    normalizeSearchSource(product.source)
+                )
+            ) {
                 return false;
             }
         }
 
-        if (activeServerSearch.minPrice !== null && activeServerSearch.minPrice !== undefined) {
-            if (product.price === null || Number(product.price) < Number(activeServerSearch.minPrice)) {
+        if (
+            activeServerSearch.minPrice !== null &&
+            activeServerSearch.minPrice !== undefined
+        ) {
+            if (
+                product.price === null ||
+                Number(product.price) < Number(activeServerSearch.minPrice)
+            ) {
                 return false;
             }
         }
 
-        if (activeServerSearch.maxPrice !== null && activeServerSearch.maxPrice !== undefined) {
-            if (product.price === null || Number(product.price) > Number(activeServerSearch.maxPrice)) {
+        if (
+            activeServerSearch.maxPrice !== null &&
+            activeServerSearch.maxPrice !== undefined
+        ) {
+            if (
+                product.price === null ||
+                Number(product.price) > Number(activeServerSearch.maxPrice)
+            ) {
                 return false;
             }
         }
@@ -7812,25 +7970,38 @@ function prepareServerSearchFeed() {
         return true;
     });
 
-    if (!candidates.length) return;
-
-    products = candidates.slice();
-
-    // Для явного поискового запроса сохраняем порядок сервера,
-    // а просмотренные карточки исключаем только если есть другие.
-    const unviewed = products.filter(product => !isProductViewed(product));
-    if (unviewed.length) {
-        products = unviewed.concat(
-            products.filter(product => isProductViewed(product))
-        );
+    if (!candidates.length) {
+        return false;
     }
+
+    /*
+    Сервер уже вернул правильный порядок.
+    Сохраняем его, но просмотренные карточки переносим в конец.
+    */
+    const unviewed = candidates.filter(
+        product => !isProductViewed(product)
+    );
+
+    products = unviewed.length
+        ? unviewed.concat(
+            candidates.filter(product => isProductViewed(product))
+        )
+        : candidates.slice();
 
     currentIndex = 0;
     resetNavigationHistory();
+    currentProduct = null;
+
     rememberProductInNavigation(products[0]);
+
+    /*
+    Только после того, как реальные результаты готовы,
+    переключаемся из поиска в ленту.
+    */
+    switchTab("feed");
     showProduct();
 
-    switchTab("feed");
+    return true;
 }
 
 
