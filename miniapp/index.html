@@ -1607,6 +1607,17 @@
             </div>
 
             <div class="filter-section">
+                <div class="filter-section-title">Что ищем</div>
+                <input
+                    id="filterQuery"
+                    class="filter-input"
+                    type="text"
+                    autocomplete="off"
+                    placeholder="Например: BMW, ноутбук, ремонт..."
+                >
+            </div>
+
+            <div class="filter-section">
                 <div class="filter-section-title">Цена</div>
                 <div class="filter-price-row">
                     <input id="filterMinPrice" class="filter-input" type="number" min="0" placeholder="От">
@@ -1960,6 +1971,7 @@ FILTERS
 let activeFilters = loadJSON(
     "styleflow_filters",
     {
+        query: "",
         minPrice: null,
         maxPrice: null,
         categories: [],
@@ -1979,6 +1991,7 @@ if (
 ) {
 
     activeFilters = {
+        query: "",
         minPrice: null,
         maxPrice: null,
         categories: [],
@@ -3212,6 +3225,13 @@ function getActiveFilterCount() {
 
 
     if (
+        String(activeFilters.query || "").trim()
+    ) {
+        count++;
+    }
+
+
+    if (
         activeFilters.minPrice !== null &&
         activeFilters.minPrice !== ""
     ) {
@@ -3342,6 +3362,18 @@ function closeFilters(
 
 function applyFilters() {
 
+    const queryInput =
+        document.getElementById(
+            "filterQuery"
+        );
+
+
+    const query =
+        queryInput
+            ? queryInput.value.trim()
+            : "";
+
+
     const minInput =
         document.getElementById(
             "filterMinPrice"
@@ -3464,6 +3496,8 @@ function applyFilters() {
 
     activeFilters = {
 
+        query,
+
         minPrice,
 
         maxPrice,
@@ -3500,6 +3534,11 @@ function applyFilters() {
 
 
     buildPersonalizedFeed();
+
+
+    // После применения фильтра сразу возвращаем человека в ленту.
+    switchTab("feed");
+    resetNavigationHistory();
 
 
     if (
@@ -3553,6 +3592,17 @@ function resetFilters() {
     );
 
 
+    const queryInput =
+        document.getElementById(
+            "filterQuery"
+        );
+
+
+    if (queryInput) {
+        queryInput.value = "";
+    }
+
+
     const minInput =
         document.getElementById(
             "filterMinPrice"
@@ -3584,6 +3634,8 @@ function resetFilters() {
 
 
     buildPersonalizedFeed();
+    switchTab("feed");
+    resetNavigationHistory();
 
 
     if (
@@ -3876,6 +3928,15 @@ function populateFilterCategories() {
 
 function syncFilterUI() {
 
+    const queryInput =
+        document.getElementById(
+            "filterQuery"
+        );
+
+    if (queryInput) {
+        queryInput.value = activeFilters.query || "";
+    }
+
     const sortSelect = document.getElementById("filterSort");
     if (sortSelect) sortSelect.value = activeFilters.sort || "relevance";
 
@@ -4136,6 +4197,12 @@ function applyProductFilters(
             : [];
 
 
+    const query =
+        normalizeText(
+            activeFilters.query || ""
+        );
+
+
     const minPrice =
         activeFilters.minPrice !== null
             ? Number(
@@ -4187,6 +4254,39 @@ function applyProductFilters(
 
             if (!product) {
                 return false;
+            }
+
+
+            /*
+            Ключевой запрос.
+
+            Ищем не только по названию, но и по бренду,
+            категории, описанию и площадке.
+            Для небольших опечаток используем тот же
+            tolerant matching, что и в обычном поиске.
+            */
+
+            if (query) {
+
+                const searchable = normalizeText([
+                    product.title,
+                    product.brand,
+                    product.category,
+                    product.description,
+                    product.source,
+                    product.sourceLabel
+                ].filter(Boolean).join(" "));
+
+                const queryTokens = query.split(/\s+/).filter(Boolean);
+
+                const matches = queryTokens.every(token =>
+                    searchable.includes(token) ||
+                    searchTokenMatches(token, searchable)
+                );
+
+                if (!matches) {
+                    return false;
+                }
             }
 
 
@@ -4398,6 +4498,18 @@ function buildPersonalizedFeed() {
 
     const sortMode = activeFilters.sort || "relevance";
 
+    const strictFilterMode = Boolean(
+        String(activeFilters.query || "").trim() ||
+        activeFilters.minPrice !== null ||
+        activeFilters.maxPrice !== null ||
+        (Array.isArray(activeFilters.sources) && activeFilters.sources.length) ||
+        (Array.isArray(activeFilters.categories) && activeFilters.categories.length) ||
+        sortMode !== "relevance"
+    );
+
+    // При активном фильтре показываем именно его набор.
+    // Просмотренные товары не выкидываем, иначе фильтр быстро
+    // мог бы закончиться пустой лентой.
     const viewedSet =
         new Set(
             viewedProducts.map(
@@ -4445,7 +4557,9 @@ function buildPersonalizedFeed() {
     */
 
     const candidates =
-        unviewed;
+        strictFilterMode
+            ? filteredProducts
+            : unviewed;
 
 
     if (
@@ -4472,6 +4586,19 @@ function buildPersonalizedFeed() {
     персонализации.
     ========================================================
     */
+
+    if (strictFilterMode) {
+        products = filteredProducts.slice();
+        applyFeedSort(products, sortMode);
+
+        console.log(
+            "[StyleFlow] Строгий режим фильтра: ",
+            activeFilters
+        );
+
+        return;
+    }
+
 
     const profile =
         buildUserProfile();
@@ -7014,21 +7141,51 @@ function levenshteinDistance(a, b) {
 }
 
 function searchWordMatches(queryWord, textWord) {
-    if (!queryWord || !textWord) return false;
-    if (textWord.includes(queryWord) || queryWord.includes(textWord)) return true;
-    const len = Math.max(queryWord.length, textWord.length);
-    if (len <= 3) return false;
-    const distance = levenshteinDistance(queryWord, textWord);
-    const allowed = len <= 5 ? 1 : len <= 8 ? 2 : 3;
-    return distance <= allowed;
+    const query = normalizeText(queryWord);
+    const text = normalizeText(textWord);
+
+    if (!query || !text) return false;
+    if (query === text) return true;
+
+    // Прямое вхождение — главное правило поиска.
+    if (text.includes(query) || query.includes(text)) return true;
+
+    // Нечёткое совпадение используем только для достаточно длинных слов.
+    // Это не позволяет коротким/случайным словам давать ложные совпадения.
+    if (query.length < 4 || text.length < 4) return false;
+
+    const lengthDiff = Math.abs(query.length - text.length);
+    if (lengthDiff > 2) return false;
+
+    const distance = levenshteinDistance(query, text);
+    const maxLen = Math.max(query.length, text.length);
+
+    let allowed = 1;
+    if (maxLen >= 8) allowed = 2;
+    if (maxLen >= 12) allowed = 2;
+
+    // Для длинного слова две ошибки допустимы только если
+    // совпадает хотя бы половина символов.
+    return distance <= allowed && (1 - distance / maxLen) >= 0.55;
 }
 
 function searchTokenMatches(token, searchable) {
-    const words = searchable.split(/[^a-zа-яё0-9]+/i).filter(Boolean);
-    if (words.some(word => searchWordMatches(token, word))) return true;
+    const query = normalizeText(token);
+    const text = normalizeText(searchable);
+    if (!query || !text) return false;
+
+    const words = text.split(/[^a-zа-яё0-9]+/i).filter(Boolean);
+
+    // Сначала ищем точное слово/фрагмент.
+    if (words.some(word => word === query || word.includes(query) || query.includes(word))) {
+        return true;
+    }
+
+    // И только потом допускаем небольшую опечатку.
+    if (words.some(word => searchWordMatches(query, word))) return true;
 
     const aliases = {
-        "айфон": ["iphone", "iphone"],
+        "айфон": ["iphone"],
         "iphone": ["айфон"],
         "самсунг": ["samsung"],
         "samsung": ["самсунг"],
@@ -7041,8 +7198,9 @@ function searchTokenMatches(token, searchable) {
         "машина": ["авто", "автомобиль"],
         "тачка": ["авто", "машина"]
     };
-    return (aliases[token] || []).some(alias =>
-        searchable.includes(alias) || words.some(word => searchWordMatches(alias, word))
+
+    return (aliases[query] || []).some(alias =>
+        words.some(word => word === alias || word.includes(alias) || alias.includes(word))
     );
 }
 
