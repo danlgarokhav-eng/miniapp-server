@@ -719,10 +719,16 @@ def local_search_products(query, sources=None, min_price=None, max_price=None, l
 
     conn.close()
 
-    result.sort(key=lambda x: (
-        -x["_match_score"],
-        -(x["updated_at"] or "")
-    ))
+    # updated_at в SQLite хранится как строка timestamp, поэтому
+    # нельзя делать перед ним унарный минус. Сортируем оба поля
+    # по убыванию через reverse=True.
+    result.sort(
+        key=lambda x: (
+            x["_match_score"],
+            x["updated_at"] or ""
+        ),
+        reverse=True
+    )
 
     for item in result:
         item.pop("_match_score", None)
