@@ -1,134 +1,87 @@
-/* =========================================================
-STYLEFLOW
+/* ========================================================= STYLEFLOW
 Personalized marketplace feed
 
 ЭТАП 4:
 
-1. Новая лента сначала максимально случайная.
-2. Не показываем уже просмотренные товары.
-3. История просмотров хранится на сервере.
-4. История привязана к Telegram user.id.
-5. Постепенно собираем интересы пользователя.
-6. Персонализация усиливается по мере накопления сигналов.
-7. Даже персонализированная лента сохраняет случайные товары.
-8. Не допускаем длинных серий одной категории/площадки.
-9. Учитываем:
-    * категории
-    * бренды
-    * маркетплейсы
-    * цены
-    * лайки
-    * открытия товаров
-    * просмотры
-
+1.  Новая лента сначала максимально случайная.
+2.  Не показываем уже просмотренные товары.
+3.  История просмотров хранится на сервере.
+4.  История привязана к Telegram user.id.
+5.  Постепенно собираем интересы пользователя.
+6.  Персонализация усиливается по мере накопления сигналов.
+7.  Даже персонализированная лента сохраняет случайные товары.
+8.  Не допускаем длинных серий одной категории/площадки.
+9.  Учитываем:
+    -   категории
+    -   бренды
+    -   маркетплейсы
+    -   цены
+    -   лайки
+    -   открытия товаров
+    -   просмотры
 10. Добавлены фильтры:
-    * минимальная цена
-    * максимальная цена
-    * категория
-    * маркетплейс
+    -   минимальная цена
+    -   максимальная цена
+    -   категория
+    -   маркетплейс
 
 Фильтры применяются ДО персонализации.
 
-Локальный localStorage используется как кэш,
-а сервер является источником пользовательской истории.
+Локальный localStorage используется как кэш, а сервер является
+источником пользовательской истории.
 
 ========================================================= */
 
-
-/* =========================================================
-GLOBAL
+/* ========================================================= GLOBAL
 ========================================================= */
 
-let allProducts = [];
-let products = [];
-let currentIndex = 0;
-let currentProduct = null;
+let allProducts = []; let products = []; let currentIndex = 0; let
+currentProduct = null;
 
-// История карточек именно текущей сессии ленты.
-let navigationHistory = [];
-let navigationPosition = -1;
+// История карточек именно текущей сессии ленты. let navigationHistory =
+[]; let navigationPosition = -1;
 
-let favorites = loadJSON(
-    "styleflow_favorites",
-    []
-);
+let favorites = loadJSON( “styleflow_favorites”, [] );
 
-let viewedProducts = loadJSON(
-    "styleflow_viewed",
-    []
-);
+let viewedProducts = loadJSON( “styleflow_viewed”, [] );
 
-let openedProducts = loadJSON(
-    "styleflow_opened",
-    []
-);
+let openedProducts = loadJSON( “styleflow_opened”, [] );
 
-let currentTab = "feed";
+let currentTab = “feed”;
 
-let touchStartY = 0;
-let touchStartX = 0;
-let isDragging = false;
-let lastTapTime = 0;
-let searchTimer = null;
+let touchStartY = 0; let touchStartX = 0; let isDragging = false; let
+lastTapTime = 0; let searchTimer = null;
 
-// Серверный lazy-поиск.
-// Храним активный запрос, чтобы при свайпе догружать следующие страницы.
-let activeServerSearch = {
-    query: "",
-    sources: [],
-    minPrice: null,
-    maxPrice: null
-};
+// Серверный lazy-поиск. // Храним активный запрос, чтобы при свайпе
+догружать следующие страницы. let activeServerSearch = { query: ““,
+sources: [], minPrice: null, maxPrice: null };
 
-let serverSearchLoading = false;
-let serverSearchRequestId = 0;
-let serverSearchHasMore = true;
-let serverSearchLastFetchAt = 0;
+let serverSearchLoading = false; let serverSearchRequestId = 0; let
+serverSearchHasMore = true; let serverSearchLastFetchAt = 0;
 
-let feedOffset = 0;
-let feedHasMore = true;
-let feedLoading = false;
-const FEED_PAGE_SIZE = 120;
-const FEED_PREFETCH_THRESHOLD = 12;
+let feedOffset = 0; let feedHasMore = true; let feedLoading = false;
+const FEED_PAGE_SIZE = 120; const FEED_PREFETCH_THRESHOLD = 12;
 
-const NAVIGATION_HISTORY_LIMIT = 150;
-let productDetailsCollapsed = false;
+const NAVIGATION_HISTORY_LIMIT = 150; let productDetailsCollapsed =
+false;
 
+/* ========================================================= SERVER USER
+HISTORY ========================================================= */
 
-/* =========================================================
-SERVER USER HISTORY
-========================================================= */
-
-let telegramUserId = null;
+let telegramUserId = null; let styleflowAccount = null;
 
 let userHistoryLoaded = false;
 
-
-/* =========================================================
-FILTERS
+/* ========================================================= FILTERS
 ========================================================= */
 
-let activeFilters = loadJSON(
-    "styleflow_filters",
-    {
-        query: "",
-        minPrice: null,
-        maxPrice: null,
-        categories: [],
-        sources: [],
-        sort: "relevance"
-    }
-);
+let activeFilters = loadJSON( “styleflow_filters”, { query: ““,
+minPrice: null, maxPrice: null, categories: [], sources: [],
+sort:”relevance” } );
 
+/ Защита от старого/битого localStorage. /
 
-/*
-Защита от старого/битого localStorage.
-*/
-
-if (
-    !activeFilters ||
-    typeof activeFilters !== "object"
-) {
+if ( !activeFilters || typeof activeFilters !== “object” ) {
 
     activeFilters = {
         query: "",
@@ -138,77 +91,48 @@ if (
         sources: [],
         sort: "relevance"
     };
+
 }
 
-
-if (
-    !Array.isArray(
-        activeFilters.categories
-    )
-) {
+if ( !Array.isArray( activeFilters.categories ) ) {
 
     activeFilters.categories = [];
+
 }
 
-activeFilters.categories =
-    activeFilters.categories
-        .map(
-            category =>
-                getFilterCategoryLabel(
-                    category
-                )
-        )
-        .filter(Boolean);
+activeFilters.categories = activeFilters.categories .map( category =>
+getFilterCategoryLabel( category ) ) .filter(Boolean);
 
-
-if (
-    !Array.isArray(
-        activeFilters.sources
-    )
-) {
+if ( !Array.isArray( activeFilters.sources ) ) {
 
     activeFilters.sources = [];
+
 }
 
-if (!activeFilters.sort) {
-    activeFilters.sort = "relevance";
-}
-
+if (!activeFilters.sort) { activeFilters.sort = “relevance”; }
 
 /* =========================================================
 RECOMMENDATION SETTINGS
 ========================================================= */
 
-const PERSONALIZATION_START =
-    3;
+const PERSONALIZATION_START = 3;
 
-const PERSONALIZATION_FULL =
-    40;
+const PERSONALIZATION_FULL = 40;
 
-// Новому пользователю оставляем больше исследования каталога.
-// По мере накопления сигналов случайность уменьшается.
-const MIN_RANDOM_RATIO =
-    0.10;
+// Новому пользователю оставляем больше исследования каталога. // По
+мере накопления сигналов случайность уменьшается. const MIN_RANDOM_RATIO
+= 0.10;
 
-const MAX_RANDOM_RATIO =
-    0.35;
+const MAX_RANDOM_RATIO = 0.35;
 
+const MAX_SAME_CATEGORY_STREAK = 2;
 
-const MAX_SAME_CATEGORY_STREAK =
-    2;
+const MAX_SAME_SOURCE_STREAK = 3;
 
-const MAX_SAME_SOURCE_STREAK =
-    3;
-
-
-/* =========================================================
-TELEGRAM
+/* ========================================================= TELEGRAM
 ========================================================= */
 
-if (
-    window.Telegram &&
-    Telegram.WebApp
-) {
+if ( window.Telegram && Telegram.WebApp ) {
 
     Telegram.WebApp.ready();
 
@@ -235,11 +159,11 @@ if (
         );
 
     } catch (e) {}
+
 }
 
-
-/* =========================================================
-GET TELEGRAM USER ID
+/* ========================================================= GET
+TELEGRAM USER ID
 ========================================================= */
 
 function getTelegramUserId() {
@@ -258,24 +182,16 @@ function getTelegramUserId() {
     }
 
     return "";
+
 }
 
+function getTelegramInitData() { try { if (window.Telegram &&
+Telegram.WebApp) { return String(Telegram.WebApp.initData || ““); } }
+catch (error) { console.error(”[StyleFlow] Ошибка получения Telegram
+initData:“, error); } return”“; }
 
-function getTelegramInitData() {
-    try {
-        if (window.Telegram && Telegram.WebApp) {
-            return String(Telegram.WebApp.initData || "");
-        }
-    } catch (error) {
-        console.error("[StyleFlow] Ошибка получения Telegram initData:", error);
-    }
-    return "";
-}
-
-
-async function authenticateTelegram() {
-    const initData = getTelegramInitData();
-    if (!initData) return false;
+async function authenticateTelegram() { const initData =
+getTelegramInitData(); if (!initData) return false;
 
     try {
         const response = await fetch("/api/auth/telegram", {
@@ -289,7 +205,14 @@ async function authenticateTelegram() {
 
         if (data && data.verified && data.user_id) {
             telegramUserId = String(data.user_id);
-            console.log("[StyleFlow] Telegram аккаунт подтверждён:", telegramUserId);
+            styleflowAccount = data.account || null;
+            renderStyleflowAccount();
+            console.log(
+                "[StyleFlow] STYLEFLOW аккаунт подтверждён:",
+                styleflowAccount ? styleflowAccount.id : "unknown",
+                "Telegram:",
+                telegramUserId
+            );
             return true;
         }
     } catch (error) {
@@ -297,17 +220,64 @@ async function authenticateTelegram() {
     }
 
     return Boolean(telegramUserId);
+
 }
 
+function renderStyleflowAccount() { const nameElement =
+document.getElementById(“profileName”); const avatarElement =
+document.getElementById(“profileAvatar”); const subtitleElement =
+document.getElementById(“profileAccountSubtitle”); const badgeElement =
+document.getElementById(“profileAccountBadge”);
 
+    if (!styleflowAccount) {
+        if (nameElement) nameElement.textContent = "Style Explorer";
+        if (avatarElement) avatarElement.textContent = "S";
+        if (subtitleElement) subtitleElement.textContent = "Откройте STYLEFLOW из Telegram для регистрации";
+        if (badgeElement) {
+            badgeElement.textContent = "Не авторизован";
+            badgeElement.classList.remove("authenticated");
+        }
+        return;
+    }
 
-/* =========================================================
-START
+    const name = styleflowAccount.name || "Пользователь STYLEFLOW";
+    const username = styleflowAccount.username
+        ? `@${styleflowAccount.username}`
+        : "Аккаунт STYLEFLOW";
+
+    if (nameElement) nameElement.textContent = name;
+    if (subtitleElement) subtitleElement.textContent = username;
+
+    if (avatarElement) {
+        if (styleflowAccount.photo_url) {
+            avatarElement.innerHTML = `<img src="${escapeAttribute(styleflowAccount.photo_url)}" alt="">`;
+            avatarElement.classList.add("has-photo");
+        } else {
+            avatarElement.textContent = String(name).trim().charAt(0).toUpperCase() || "S";
+            avatarElement.classList.remove("has-photo");
+        }
+    }
+
+    if (badgeElement) {
+        badgeElement.textContent = "Аккаунт STYLEFLOW";
+        badgeElement.classList.add("authenticated");
+    }
+
+}
+
+async function logoutStyleflow() { try { await fetch(“/api/auth/logout”,
+{ method: “POST”, credentials: “include” }); } catch (error) {
+console.error(“[StyleFlow] Ошибка выхода:”, error); }
+
+    styleflowAccount = null;
+    renderStyleflowAccount();
+
+}
+
+/* ========================================================= START
 ========================================================= */
 
-document.addEventListener(
-    "DOMContentLoaded",
-    async () => {
+document.addEventListener( “DOMContentLoaded”, async () => {
 
         setupSearch();
         setupSearchSources();
@@ -315,6 +285,7 @@ document.addEventListener(
         setupSwipe();
 
         telegramUserId = getTelegramUserId();
+        renderStyleflowAccount();
 
         console.log(
             "[StyleFlow] Telegram user ID:",
@@ -337,12 +308,11 @@ document.addEventListener(
         updateProfile();
         updateProfileInterests();
     }
+
 );
 
-
-/* =========================================================
-LOAD USER HISTORY
-========================================================= */
+/* ========================================================= LOAD USER
+HISTORY ========================================================= */
 
 async function loadUserHistory() {
 
@@ -475,17 +445,13 @@ async function loadUserHistory() {
 
         userHistoryLoaded = true;
     }
+
 }
 
+/* ========================================================= MERGE
+UNIQUE IDS ========================================================= */
 
-/* =========================================================
-MERGE UNIQUE IDS
-========================================================= */
-
-function mergeUniqueIds(
-    existing,
-    incoming
-) {
+function mergeUniqueIds( existing, incoming ) {
 
     const result = [];
 
@@ -527,17 +493,13 @@ function mergeUniqueIds(
 
 
     return result;
+
 }
 
-
-/* =========================================================
-MERGE IDS
+/* ========================================================= MERGE IDS
 ========================================================= */
 
-function mergeIds(
-    existing,
-    incoming
-) {
+function mergeIds( existing, incoming ) {
 
     const result = [];
 
@@ -561,17 +523,13 @@ function mergeIds(
 
 
     return result;
+
 }
 
+/* ========================================================= SYNC USER
+ACTION ========================================================= */
 
-/* =========================================================
-SYNC USER ACTION
-========================================================= */
-
-async function syncUserAction(
-    action,
-    productId
-) {
+async function syncUserAction( action, productId ) {
 
     if (
         !telegramUserId ||
@@ -637,15 +595,14 @@ async function syncUserAction(
             error
         );
     }
+
 }
 
-
-/* =========================================================
-LOAD FEED
+/* ========================================================= LOAD FEED
 ========================================================= */
 
-function renderCachedFeedImmediately() {
-    if (activeServerSearch.query) return false;
+function renderCachedFeedImmediately() { if (activeServerSearch.query)
+return false;
 
     const cached = loadJSON("styleflow_main_feed", []);
     if (!Array.isArray(cached) || !cached.length) return false;
@@ -668,11 +625,11 @@ function renderCachedFeedImmediately() {
 
     showEmptyFeed();
     return false;
+
 }
 
-
-function rebuildFeedKeepingPosition() {
-    if (activeServerSearch.query) return;
+function rebuildFeedKeepingPosition() { if (activeServerSearch.query)
+return;
 
     const currentId = currentProduct ? String(currentProduct.id) : "";
     buildPersonalizedFeed();
@@ -690,11 +647,11 @@ function rebuildFeedKeepingPosition() {
     currentIndex = Math.max(0, index);
     showProduct(true);
     preloadUpcomingImages();
+
 }
 
-
-async function loadFeed() {
-    const feedLoadSearchRequestId = serverSearchRequestId;
+async function loadFeed() { const feedLoadSearchRequestId =
+serverSearchRequestId;
 
     renderCachedFeedImmediately();
 
@@ -753,11 +710,11 @@ async function loadFeed() {
             renderCachedFeedImmediately();
         }
     }
+
 }
 
-
-async function loadMoreFeedProducts(force = false) {
-    if (feedLoading || !feedHasMore || activeServerSearch.query) return false;
+async function loadMoreFeedProducts(force = false) { if (feedLoading ||
+!feedHasMore || activeServerSearch.query) return false;
 
     if (!force && products.length - currentIndex - 1 > FEED_PREFETCH_THRESHOLD) {
         return false;
@@ -807,18 +764,15 @@ async function loadMoreFeedProducts(force = false) {
     } finally {
         feedLoading = false;
     }
+
 }
 
+async function maybeLoadMoreFeedProducts(force = false) { return
+loadMoreFeedProducts(force); }
 
-async function maybeLoadMoreFeedProducts(force = false) {
-    return loadMoreFeedProducts(force);
-}
-
-
-function appendNewRecommendedProducts(incoming) {
-    if (!Array.isArray(incoming) || !incoming.length || activeServerSearch.query) {
-        return;
-    }
+function appendNewRecommendedProducts(incoming) { if
+(!Array.isArray(incoming) || !incoming.length ||
+activeServerSearch.query) { return; }
 
     const existing = new Set(products.map(product => String(product.id)));
     const viewed = new Set(viewedProducts.map(id => String(id)));
@@ -849,12 +803,11 @@ function appendNewRecommendedProducts(incoming) {
     }
 
     products.push(...additions);
+
 }
 
-
-function preloadUpcomingImages() {
-    const start = Math.max(0, currentIndex + 1);
-    const end = Math.min(products.length, start + 10);
+function preloadUpcomingImages() { const start = Math.max(0,
+currentIndex + 1); const end = Math.min(products.length, start + 10);
 
     for (let i = start; i < end; i++) {
         const product = products[i];
@@ -865,18 +818,13 @@ function preloadUpcomingImages() {
         img.decoding = "async";
         img.src = src;
     }
+
 }
 
+/* ========================================================= NORMALIZE
+PRODUCT ========================================================= */
 
-
-/* =========================================================
-NORMALIZE PRODUCT
-========================================================= */
-
-function normalizeProduct(
-    item,
-    index = 0
-) {
+function normalizeProduct( item, index = 0 ) {
 
     const source =
         item.source ||
@@ -1016,11 +964,10 @@ function normalizeProduct(
 
         raw: item
     };
+
 }
 
-
-/* =========================================================
-SOURCE
+/* ========================================================= SOURCE
 ========================================================= */
 
 function detectSource(url) {
@@ -1067,12 +1014,10 @@ function detectSource(url) {
 
 
     return "marketplace";
+
 }
 
-
-function normalizeSource(
-    source
-) {
+function normalizeSource( source ) {
 
     const value =
         String(
@@ -1118,21 +1063,15 @@ function normalizeSource(
 
     return value ||
         "marketplace";
+
 }
 
+function sourceIcon(source) { const s = normalizeSearchSource(source);
+if (s.includes(“kufar”)) return “🟢”; if (s.includes(“wildberries”) || s
+=== “wb”) return “🟣”; if (s.includes(“ozon”)) return “🔵”; if
+(s.includes(“ali”)) return “🟠”; return “🛍️”; }
 
-function sourceIcon(source) {
-    const s = normalizeSearchSource(source);
-    if (s.includes("kufar")) return "🟢";
-    if (s.includes("wildberries") || s === "wb") return "🟣";
-    if (s.includes("ozon")) return "🔵";
-    if (s.includes("ali")) return "🟠";
-    return "🛍️";
-}
-
-function sourceLabel(
-    source
-) {
+function sourceLabel( source ) {
 
     const labels = {
 
@@ -1158,16 +1097,13 @@ function sourceLabel(
         "🛍 " +
         capitalize(source)
     );
+
 }
 
-
-/* =========================================================
-PRICE
+/* ========================================================= PRICE
 ========================================================= */
 
-function parsePrice(
-    value
-) {
+function parsePrice( value ) {
 
     if (
         value === null ||
@@ -1206,12 +1142,10 @@ function parsePrice(
     return Number.isFinite(number)
         ? number
         : null;
+
 }
 
-
-function detectCurrency(
-    item
-) {
+function detectCurrency( item ) {
 
     const raw =
         String(
@@ -1251,12 +1185,10 @@ function detectCurrency(
 
 
     return "BYN";
+
 }
 
-
-function formatPrice(
-    product
-) {
+function formatPrice( product ) {
 
     if (
         product.price === null
@@ -1301,24 +1233,18 @@ function formatPrice(
         " " +
         symbol
     );
+
 }
 
-
-/* =========================================================
-FILTERS
+/* ========================================================= FILTERS
 ========================================================= */
 
+/* Нормализуем категорию для фильтров.
 
-/*
-Нормализуем категорию для фильтров.
-
-Kufar/WB и другие источники могут отдавать
-числовые ID категорий вместо названия.
-Для интерфейса такие значения показываем как
-"Одежда", чтобы в фильтре не появлялись
-цепочки вроде 10501 / 105011030...
-*/
-function getFilterCategoryKey(value) {
+Kufar/WB и другие источники могут отдавать числовые ID категорий вместо
+названия. Для интерфейса такие значения показываем как “Одежда”, чтобы в
+фильтре не появлялись цепочки вроде 10501 / 105011030… */ function
+getFilterCategoryKey(value) {
 
     const text =
         String(value || "")
@@ -1340,8 +1266,8 @@ function getFilterCategoryKey(value) {
     }
 
     return normalized;
-}
 
+}
 
 function getFilterCategoryLabel(value) {
 
@@ -1365,14 +1291,11 @@ function getFilterCategoryLabel(value) {
     }
 
     return text;
+
 }
 
-
-/*
-Создаём кнопки площадок программно,
-поэтому они всегда реально реагируют на клик.
-*/
-function renderFilterSources() {
+/ Создаём кнопки площадок программно, поэтому они всегда реально
+реагируют на клик. / function renderFilterSources() {
 
     const container =
         document.getElementById(
@@ -1433,12 +1356,10 @@ function renderFilterSources() {
     );
 
     syncSourceFilterUI();
+
 }
 
-
-/*
-Возвращает количество активных фильтров.
-*/
+/ Возвращает количество активных фильтров. /
 
 function getActiveFilterCount() {
 
@@ -1495,12 +1416,10 @@ function getActiveFilterCount() {
 
 
     return count;
+
 }
 
-
-/*
-Открытие панели фильтров.
-*/
+/ Открытие панели фильтров. /
 
 function openFilters() {
 
@@ -1535,16 +1454,12 @@ function openFilters() {
     document.body.classList.add(
         "filters-open"
     );
+
 }
 
+/ Закрытие панели фильтров. /
 
-/*
-Закрытие панели фильтров.
-*/
-
-function closeFilters(
-    event
-) {
+function closeFilters( event ) {
 
     if (
         event &&
@@ -1574,12 +1489,10 @@ function closeFilters(
     document.body.classList.remove(
         "filters-open"
     );
+
 }
 
-
-/*
-Применить фильтры.
-*/
+/ Применить фильтры. /
 
 function applyFilters() {
 
@@ -1795,12 +1708,10 @@ function applyFilters() {
         "[StyleFlow] Фильтры применены:",
         activeFilters
     );
+
 }
 
-
-/*
-Сброс фильтров.
-*/
+/ Сброс фильтров. /
 
 function resetFilters() {
 
@@ -1892,19 +1803,14 @@ function resetFilters() {
     showToast(
         "Фильтры сброшены"
     );
+
 }
 
+/* Выбор категории/источника.
 
-/*
-Выбор категории/источника.
+Можно вызывать из HTML: toggleFilterChip(this) */
 
-Можно вызывать из HTML:
-toggleFilterChip(this)
-*/
-
-function toggleFilterChip(
-    button
-) {
+function toggleFilterChip( button ) {
 
     if (!button) {
         return;
@@ -2018,13 +1924,10 @@ function toggleFilterChip(
             }
         }
     }
+
 }
 
-
-/*
-Заполняем категории автоматически
-из текущего каталога.
-*/
+/ Заполняем категории автоматически из текущего каталога. /
 
 function populateFilterCategories() {
 
@@ -2155,12 +2058,10 @@ function populateFilterCategories() {
     );
 
     syncCategoryFilterUI();
+
 }
 
-/*
-Синхронизация UI фильтров
-с activeFilters.
-*/
+/ Синхронизация UI фильтров с activeFilters. /
 
 function syncFilterUI() {
 
@@ -2213,12 +2114,10 @@ function syncFilterUI() {
 
 
     updateFilterButton();
+
 }
 
-
-/*
-Категории.
-*/
+/ Категории. /
 
 function syncCategoryFilterUI() {
 
@@ -2280,12 +2179,10 @@ function syncCategoryFilterUI() {
             );
         }
     );
+
 }
 
-
-/*
-Источники.
-*/
+/ Источники. /
 
 function syncSourceFilterUI() {
 
@@ -2347,13 +2244,10 @@ function syncSourceFilterUI() {
             );
         }
     );
+
 }
 
-
-/*
-Обновляем маленький индикатор
-на кнопке фильтров, если он есть.
-*/
+/ Обновляем маленький индикатор на кнопке фильтров, если он есть. /
 
 function updateFilterButton() {
 
@@ -2412,20 +2306,15 @@ function updateFilterButton() {
             badge
         );
     }
+
 }
 
+/* Главная функция фильтрации.
 
-/*
-Главная функция фильтрации.
+Сначала фильтруем весь каталог, после чего результат передаётся в
+алгоритм рекомендаций. */
 
-Сначала фильтруем весь каталог,
-после чего результат передаётся
-в алгоритм рекомендаций.
-*/
-
-function applyProductFilters(
-    source
-) {
+function applyProductFilters( source ) {
 
     const input =
         Array.isArray(source)
@@ -2631,12 +2520,11 @@ function applyProductFilters(
             return true;
         }
     );
+
 }
 
-
-/* =========================================================
-FILTER SORTING
-========================================================= */
+/* ========================================================= FILTER
+SORTING ========================================================= */
 
 function applyFeedSort(list, sortMode) {
 
@@ -2667,6 +2555,7 @@ function applyFeedSort(list, sortMode) {
     }
 
     return list;
+
 }
 
 /* =========================================================
@@ -2751,16 +2640,14 @@ function buildPersonalizedFeed() {
     applyFeedSort(products, activeFilters.sort || 'relevance');
 
     console.log('[StyleFlow] Рекомендации построены.');
-}
 
+}
 
 /* =========================================================
 PERSONALIZATION STRENGTH
 ========================================================= */
 
-function getPersonalizationStrength(
-    totalSignals
-) {
+function getPersonalizationStrength( totalSignals ) {
 
     const signals =
         Number(totalSignals) || 0;
@@ -2792,16 +2679,14 @@ function getPersonalizationStrength(
             progress
         )
     );
+
 }
 
+/* ========================================================= RANDOM FEED
+WITH DIVERSITY =========================================================
+*/
 
-/* =========================================================
-RANDOM FEED WITH DIVERSITY
-========================================================= */
-
-function buildDiverseRandomFeed(
-    source
-) {
+function buildDiverseRandomFeed( source ) {
 
     const remaining =
         [
@@ -2959,17 +2844,14 @@ function buildDiverseRandomFeed(
 
 
     return result;
+
 }
 
+/* ========================================================= WEIGHTED
+DIVERSE FEED =========================================================
+*/
 
-/* =========================================================
-WEIGHTED DIVERSE FEED
-========================================================= */
-
-function buildWeightedDiverseFeed(
-    scoredProducts,
-    personalization
-) {
+function buildWeightedDiverseFeed( scoredProducts, personalization ) {
 
     const remaining =
         scoredProducts.map(
@@ -3162,16 +3044,14 @@ function buildWeightedDiverseFeed(
 
 
     return result;
+
 }
 
+/* ========================================================= WEIGHTED
+SCORE CHOICE =========================================================
+*/
 
-/* =========================================================
-WEIGHTED SCORE CHOICE
-========================================================= */
-
-function weightedRandomScoreChoice(
-    items
-) {
+function weightedRandomScoreChoice( items ) {
 
     if (
         !items.length
@@ -3263,12 +3143,11 @@ function weightedRandomScoreChoice(
     return weighted[
         weighted.length - 1
     ].item;
+
 }
 
-
-/* =========================================================
-USER PROFILE
-========================================================= */
+/* ========================================================= USER
+PROFILE ========================================================= */
 
 function buildUserProfile() {
 
@@ -3351,28 +3230,19 @@ function buildUserProfile() {
     }
 
     return profile;
+
 }
 
-function tokenizeForRecommendations(value) {
-    return normalizeText(value)
-        .split(/[^a-zа-яё0-9]+/i)
-        .map(word => word.trim())
-        .filter(word => word.length >= 2)
-        .filter(word => ![
-            "для", "это", "как", "или", "и", "на", "по", "до",
-            "из", "в", "с", "купить", "найти", "товар", "товары"
-        ].includes(word));
-}
+function tokenizeForRecommendations(value) { return normalizeText(value)
+.split(/[^a-zа-яё0-9]+/i) .map(word => word.trim()) .filter(word =>
+word.length >= 2) .filter(word => ![ “для”, “это”, “как”, “или”, “и”,
+“на”, “по”, “до”, “из”, “в”, “с”, “купить”, “найти”, “товар”, “товары”
+].includes(word)); }
 
-/* =========================================================
-PROFILE SIGNAL
-========================================================= */
+/* ========================================================= PROFILE
+SIGNAL ========================================================= */
 
-function addProfileSignal(
-    profile,
-    product,
-    weight
-) {
+function addProfileSignal( profile, product, weight ) {
 
     if (!product) {
         return;
@@ -3473,17 +3343,14 @@ function addProfileSignal(
 
     profile.totalSignals +=
         weight;
-}
 
+}
 
 /* =========================================================
 RECOMMENDATION SCORE
 ========================================================= */
 
-function calculateRecommendationScore(
-    product,
-    profile
-) {
+function calculateRecommendationScore( product, profile ) {
 
     if (!product || !profile) {
         return 0;
@@ -3571,15 +3438,13 @@ function calculateRecommendationScore(
     score += Math.random() * 0.8;
 
     return Math.max(0, score);
+
 }
 
-/* =========================================================
-WEIGHTED PRICE
-========================================================= */
+/* ========================================================= WEIGHTED
+PRICE ========================================================= */
 
-function getWeightedAveragePrice(
-    prices
-) {
+function getWeightedAveragePrice( prices ) {
 
     let total =
         0;
@@ -3608,28 +3473,24 @@ function getWeightedAveragePrice(
 
 
     return total / weight;
+
 }
 
-
-/* =========================================================
-HELPERS FOR RECOMMENDATIONS
+/* ========================================================= HELPERS FOR
+RECOMMENDATIONS
 ========================================================= */
 
-function normalizeText(
-    value
-) {
+function normalizeText( value ) {
 
     return String(
         value || ""
     )
         .toLowerCase()
         .trim();
+
 }
 
-
-function findProductById(
-    id
-) {
+function findProductById( id ) {
 
     const target =
         String(id);
@@ -3642,12 +3503,10 @@ function findProductById(
             ) ===
             target
     );
+
 }
 
-
-function shuffleArray(
-    array
-) {
+function shuffleArray( array ) {
 
     const result =
         [
@@ -3681,12 +3540,10 @@ function shuffleArray(
 
 
     return result;
+
 }
 
-
-function uniqueStrings(
-    values
-) {
+function uniqueStrings( values ) {
 
     const result = [];
 
@@ -3734,16 +3591,13 @@ function uniqueStrings(
 
 
     return result;
+
 }
 
+/* ========================================================= VIEWED
+HELPERS ========================================================= */
 
-/* =========================================================
-VIEWED HELPERS
-========================================================= */
-
-function isProductViewed(
-    product
-) {
+function isProductViewed( product ) {
 
     if (!product) {
         return false;
@@ -3763,13 +3617,10 @@ function isProductViewed(
             ) ===
             id
     );
+
 }
 
-
-function findNextUnviewedIndex(
-    startIndex,
-    direction
-) {
+function findNextUnviewedIndex( startIndex, direction ) {
 
     if (
         !products.length
@@ -3826,12 +3677,11 @@ function findNextUnviewedIndex(
 
 
     return -1;
+
 }
 
-
-/* =========================================================
-SHOW PRODUCT
-========================================================= */
+/* ========================================================= SHOW
+PRODUCT ========================================================= */
 
 function showProduct(allowViewed = false) {
 
@@ -4059,11 +3909,10 @@ function showProduct(allowViewed = false) {
 
 
     resetCardPosition();
+
 }
 
-
-/* =========================================================
-EMPTY FEED
+/* ========================================================= EMPTY FEED
 ========================================================= */
 
 function showEmptyFeed() {
@@ -4092,16 +3941,13 @@ function showEmptyFeed() {
         feedEmpty.style.display =
             "flex";
     }
+
 }
 
-
-/* =========================================================
-TABS
+/* ========================================================= TABS
 ========================================================= */
 
-function switchTab(
-    tab
-) {
+function switchTab( tab ) {
 
     currentTab = tab;
 
@@ -4246,24 +4092,21 @@ function switchTab(
             100
         );
     }
+
 }
 
-
-/* =========================================================
-FAVORITES
+/* ========================================================= FAVORITES
 ========================================================= */
 
-function isFavorite(
-    productId
-) {
+function isFavorite( productId ) {
 
     return favorites.some(
         item =>
             String(item.id) ===
             String(productId)
     );
-}
 
+}
 
 function toggleLike() {
 
@@ -4324,11 +4167,10 @@ function toggleLike() {
     updateLikeButton();
 
     updateProfile();
+
 }
 
-
-/* =========================================================
-LIKE BUTTON
+/* ========================================================= LIKE BUTTON
 ========================================================= */
 
 function updateLikeButton() {
@@ -4384,11 +4226,11 @@ function updateLikeButton() {
                 "♥";
         }
     }
+
 }
 
-
-/* =========================================================
-REBUILD AFTER USER ACTION
+/* ========================================================= REBUILD
+AFTER USER ACTION
 ========================================================= */
 
 function rebuildFeedAfterSignal() {
@@ -4430,12 +4272,11 @@ function rebuildFeedAfterSignal() {
 
         return;
     }
+
 }
 
-
-/* =========================================================
-FAVORITES RENDER
-========================================================= */
+/* ========================================================= FAVORITES
+RENDER ========================================================= */
 
 function renderFavorites() {
 
@@ -4524,12 +4365,11 @@ function renderFavorites() {
             );
         }
     );
+
 }
 
-
-/* =========================================================
-OPEN PRODUCT
-========================================================= */
+/* ========================================================= OPEN
+PRODUCT ========================================================= */
 
 function openCurrentProduct() {
 
@@ -4583,12 +4423,10 @@ function openCurrentProduct() {
             "_blank"
         );
     }
+
 }
 
-
-function openProductFromObject(
-    product
-) {
+function openProductFromObject( product ) {
 
     const index =
         products.findIndex(
@@ -4635,12 +4473,10 @@ function openProductFromObject(
     switchTab(
         "feed"
     );
+
 }
 
-
-function renderSingleProductObject(
-    product
-) {
+function renderSingleProductObject( product ) {
 
     const productCard =
         document.getElementById(
@@ -4793,11 +4629,10 @@ function renderSingleProductObject(
     updateLikeButton();
 
     resetCardPosition();
+
 }
 
-
-/* =========================================================
-SHARE
+/* ========================================================= SHARE
 ========================================================= */
 
 async function shareCurrentProduct() {
@@ -4844,11 +4679,10 @@ async function shareCurrentProduct() {
 
         // User cancelled share.
     }
+
 }
 
-
-/* =========================================================
-COMMENTS
+/* ========================================================= COMMENTS
 ========================================================= */
 
 function openComments() {
@@ -4923,12 +4757,10 @@ function openComments() {
     overlay.classList.add(
         "show"
     );
+
 }
 
-
-function closeComments(
-    event
-) {
+function closeComments( event ) {
 
     if (
         !event ||
@@ -4949,11 +4781,10 @@ function closeComments(
             );
         }
     }
+
 }
 
-
-/* =========================================================
-SEARCH
+/* ========================================================= SEARCH
 ========================================================= */
 
 function setupSearch() {
@@ -5020,12 +4851,10 @@ function setupSearch() {
             }
         }
     );
+
 }
 
-
-function quickSearch(
-    query
-) {
+function quickSearch( query ) {
 
     switchTab(
         "search"
@@ -5063,8 +4892,8 @@ function quickSearch(
     performSearch(
         query
     );
-}
 
+}
 
 function clearSearch() {
 
@@ -5145,25 +4974,18 @@ function clearSearch() {
 
 
     input.focus();
+
 }
 
+let activeSearchSources = loadJSON( “styleflow_search_sources”, [] );
 
-let activeSearchSources = loadJSON(
-    "styleflow_search_sources",
-    []
-);
+if (!Array.isArray(activeSearchSources)) { activeSearchSources = []; }
 
-if (!Array.isArray(activeSearchSources)) {
-    activeSearchSources = [];
-}
+function normalizeSearchSource(value) { return String(value ||
+““).trim().toLowerCase(); }
 
-function normalizeSearchSource(value) {
-    return String(value || "").trim().toLowerCase();
-}
-
-function setupSearchSources() {
-    const container = document.getElementById("searchSources");
-    if (!container) return;
+function setupSearchSources() { const container =
+document.getElementById(“searchSources”); if (!container) return;
 
     container.querySelectorAll("[data-source]").forEach(button => {
         button.addEventListener("click", () => {
@@ -5187,11 +5009,11 @@ function setupSearchSources() {
     });
 
     syncSearchSourceUI();
+
 }
 
-function syncSearchSourceUI() {
-    const container = document.getElementById("searchSources");
-    if (!container) return;
+function syncSearchSourceUI() { const container =
+document.getElementById(“searchSources”); if (!container) return;
 
     container.querySelectorAll("[data-source]").forEach(button => {
         const raw = normalizeSearchSource(button.dataset.source);
@@ -5200,31 +5022,20 @@ function syncSearchSourceUI() {
             : activeSearchSources.includes(raw);
         button.classList.toggle("active", active);
     });
+
 }
 
-function levenshteinDistance(a, b) {
-    a = String(a || "");
-    b = String(b || "");
-    if (a === b) return 0;
-    if (!a.length) return b.length;
-    if (!b.length) return a.length;
-    const row = Array.from({length: b.length + 1}, (_, i) => i);
-    for (let i = 1; i <= a.length; i++) {
-        let prev = row[0];
-        row[0] = i;
-        for (let j = 1; j <= b.length; j++) {
-            const temp = row[j];
-            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-            row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + cost);
-            prev = temp;
-        }
-    }
-    return row[b.length];
-}
+function levenshteinDistance(a, b) { a = String(a || ““); b = String(b
+||”“); if (a === b) return 0; if (!a.length) return b.length; if
+(!b.length) return a.length; const row = Array.from({length: b.length +
+1}, (_, i) => i); for (let i = 1; i <= a.length; i++) { let prev =
+row[0]; row[0] = i; for (let j = 1; j <= b.length; j++) { const temp =
+row[j]; const cost = a[i - 1] === b[j - 1] ? 0 : 1; row[j] =
+Math.min(row[j] + 1, row[j - 1] + 1, prev + cost); prev = temp; } }
+return row[b.length]; }
 
-function searchWordMatches(queryWord, textWord) {
-    const query = normalizeText(queryWord);
-    const text = normalizeText(textWord);
+function searchWordMatches(queryWord, textWord) { const query =
+normalizeText(queryWord); const text = normalizeText(textWord);
 
     if (!query || !text) return false;
     if (query === text) return true;
@@ -5249,12 +5060,12 @@ function searchWordMatches(queryWord, textWord) {
     // Для длинного слова две ошибки допустимы только если
     // совпадает хотя бы половина символов.
     return distance <= allowed && (1 - distance / maxLen) >= 0.55;
+
 }
 
-function searchTokenMatches(token, searchable) {
-    const query = normalizeText(token);
-    const text = normalizeText(searchable);
-    if (!query || !text) return false;
+function searchTokenMatches(token, searchable) { const query =
+normalizeText(token); const text = normalizeText(searchable); if (!query
+|| !text) return false;
 
     const words = text.split(/[^a-zа-яё0-9]+/i).filter(Boolean);
 
@@ -5284,40 +5095,25 @@ function searchTokenMatches(token, searchable) {
     return (aliases[query] || []).some(alias =>
         words.some(word => word === alias || word.includes(alias) || alias.includes(word))
     );
+
 }
 
+const UNIVERSAL_SEARCH_SUGGESTIONS = [ [“🚗”, “машина”, “автомобили”],
+[“🚗”, “автомобиль”, “автомобили”], [“🚗”, “bmw”, “автомобили”], [“🚗”,
+“mercedes”, “автомобили”], [“🚗”, “audi”, “автомобили”], [“🏠”,
+“квартира”, “недвижимость”], [“🏠”, “дом”, “недвижимость”], [“🏠”,
+“недвижимость”, “недвижимость”], [“💻”, “ноутбук”, “электроника”],
+[“💻”, “компьютер”, “электроника”], [“💻”, “пк”, “электроника”], [“📱”,
+“телефон”, “электроника”], [“📱”, “iphone”, “электроника”], [“📱”,
+“айфон”, “электроника”], [“📱”, “samsung”, “электроника”], [“🔧”,
+“ремонт”, “услуги”], [“🔧”, “ремонт телефона”, “услуги”], [“🔧”, “ремонт
+ноутбука”, “услуги”], [“🔧”, “ремонт автомобиля”, “услуги”], [“🛠️”,
+“строительство”, “услуги”], [“🪑”, “мебель”, “товары”], [“🎮”, “игровой
+компьютер”, “электроника”], [“🎧”, “наушники”, “электроника”], [“📷”,
+“камера”, “электроника”], [“⚙️”, “запчасти”, “автомобили”]];
 
-const UNIVERSAL_SEARCH_SUGGESTIONS = [
-    ["🚗", "машина", "автомобили"],
-    ["🚗", "автомобиль", "автомобили"],
-    ["🚗", "bmw", "автомобили"],
-    ["🚗", "mercedes", "автомобили"],
-    ["🚗", "audi", "автомобили"],
-    ["🏠", "квартира", "недвижимость"],
-    ["🏠", "дом", "недвижимость"],
-    ["🏠", "недвижимость", "недвижимость"],
-    ["💻", "ноутбук", "электроника"],
-    ["💻", "компьютер", "электроника"],
-    ["💻", "пк", "электроника"],
-    ["📱", "телефон", "электроника"],
-    ["📱", "iphone", "электроника"],
-    ["📱", "айфон", "электроника"],
-    ["📱", "samsung", "электроника"],
-    ["🔧", "ремонт", "услуги"],
-    ["🔧", "ремонт телефона", "услуги"],
-    ["🔧", "ремонт ноутбука", "услуги"],
-    ["🔧", "ремонт автомобиля", "услуги"],
-    ["🛠️", "строительство", "услуги"],
-    ["🪑", "мебель", "товары"],
-    ["🎮", "игровой компьютер", "электроника"],
-    ["🎧", "наушники", "электроника"],
-    ["📷", "камера", "электроника"],
-    ["⚙️", "запчасти", "автомобили"]
-];
-
-function rememberSearchQuery(query) {
-    const normalized = normalizeText(query);
-    if (!normalized || normalized.length < 2) return;
+function rememberSearchQuery(query) { const normalized =
+normalizeText(query); if (!normalized || normalized.length < 2) return;
 
     let history = loadJSON("styleflow_search_history", []);
     if (!Array.isArray(history)) history = [];
@@ -5332,11 +5128,11 @@ function rememberSearchQuery(query) {
     }
 
     saveJSON("styleflow_search_history", history);
+
 }
 
-function buildDynamicSearchSuggestions(query) {
-    const normalized = normalizeText(query);
-    if (!normalized) return [];
+function buildDynamicSearchSuggestions(query) { const normalized =
+normalizeText(query); if (!normalized) return [];
 
     const result = [];
     const used = new Set();
@@ -5413,11 +5209,11 @@ function buildDynamicSearchSuggestions(query) {
     return result
         .sort((a, b) => b.score - a.score)
         .slice(0, 7);
+
 }
 
-function renderSearchSuggestions(query) {
-    const box = document.getElementById("searchSuggestions");
-    if (!box) return;
+function renderSearchSuggestions(query) { const box =
+document.getElementById(“searchSuggestions”); if (!box) return;
 
     const normalized = normalizeText(query);
 
@@ -5448,12 +5244,13 @@ function renderSearchSuggestions(query) {
 
     box._suggestions = suggestions;
     box.classList.add("active");
+
 }
 
-async function selectSearchSuggestion(index) {
-    const box = document.getElementById("searchSuggestions");
-    const input = document.getElementById("searchInput");
-    if (!box || !input || !box._suggestions) return;
+async function selectSearchSuggestion(index) { const box =
+document.getElementById(“searchSuggestions”); const input =
+document.getElementById(“searchInput”); if (!box || !input ||
+!box._suggestions) return;
 
     const item = box._suggestions[index];
     if (!item) return;
@@ -5486,15 +5283,15 @@ async function selectSearchSuggestion(index) {
         minPrice: null,
         maxPrice: null
     });
-}
 
+}
 
 let searchSuggestionsFocusFix = false;
 
-function setupSearchSuggestionFocus() {
-    const input = document.getElementById("searchInput");
-    const box = document.getElementById("searchSuggestions");
-    if (!input || !box || searchSuggestionsFocusFix) return;
+function setupSearchSuggestionFocus() { const input =
+document.getElementById(“searchInput”); const box =
+document.getElementById(“searchSuggestions”); if (!input || !box ||
+searchSuggestionsFocusFix) return;
 
     searchSuggestionsFocusFix = true;
 
@@ -5515,16 +5312,15 @@ function setupSearchSuggestionFocus() {
     box.addEventListener("mousedown", (event) => {
         event.preventDefault();
     });
+
 }
 
-function hideSearchSuggestions() {
-    const box = document.getElementById("searchSuggestions");
-    if (box) box.classList.remove("active");
-}
+function hideSearchSuggestions() { const box =
+document.getElementById(“searchSuggestions”); if (box)
+box.classList.remove(“active”); }
 
-async function isBlockedSearchQueryLocal(query) {
-    const text = normalizeText(query || "").replace(/\s+/g, "");
-    if (!text) return false;
+async function isBlockedSearchQueryLocal(query) { const text =
+normalizeText(query || ““).replace(/+/g,”“); if (!text) return false;
 
     const blocked = [
         "хуй", "хуя", "хуе", "хуйн", "хует",
@@ -5535,14 +5331,14 @@ async function isBlockedSearchQueryLocal(query) {
     ];
 
     return blocked.some(term => text.includes(term));
+
 }
 
-
-async function performSearch(query, searchOptions = null) {
-    const home = document.getElementById("searchHome");
-    const results = document.getElementById("searchResults");
-    const resultList = document.getElementById("resultList");
-    const resultCount = document.getElementById("resultCount");
+async function performSearch(query, searchOptions = null) { const home =
+document.getElementById(“searchHome”); const results =
+document.getElementById(“searchResults”); const resultList =
+document.getElementById(“resultList”); const resultCount =
+document.getElementById(“resultCount”);
 
     if (!home || !results || !resultList || !resultCount) {
         return;
@@ -5772,12 +5568,12 @@ async function performSearch(query, searchOptions = null) {
             serverSearchLastFetchAt = Date.now();
         }
     }
+
 }
 
-
-function buildServerSearchUrl(more = false) {
-    const endpoint = more ? "/api/search/more" : "/api/search";
-    const params = new URLSearchParams();
+function buildServerSearchUrl(more = false) { const endpoint = more ?
+“/api/search/more” : “/api/search”; const params = new
+URLSearchParams();
 
     params.set("query", activeServerSearch.query || "");
     params.set("limit", "100");
@@ -5798,14 +5594,11 @@ function buildServerSearchUrl(more = false) {
     }
 
     return `${endpoint}?${params.toString()}`;
+
 }
 
-
-async function fetchServerSearch(more = false) {
-    const response = await fetch(
-        buildServerSearchUrl(more),
-        { cache: "no-store" }
-    );
+async function fetchServerSearch(more = false) { const response = await
+fetch( buildServerSearchUrl(more), { cache: “no-store” } );
 
     if (!response.ok) {
         throw new Error(`Search request failed: ${response.status}`);
@@ -5827,11 +5620,11 @@ async function fetchServerSearch(more = false) {
     }
 
     return data;
+
 }
 
-
-function mergeProductsIntoCatalog(incoming) {
-    if (!Array.isArray(incoming) || !incoming.length) return;
+function mergeProductsIntoCatalog(incoming) { if
+(!Array.isArray(incoming) || !incoming.length) return;
 
     const map = new Map();
 
@@ -5852,13 +5645,13 @@ function mergeProductsIntoCatalog(incoming) {
 
     populateFilterCategories();
     renderFilterSources();
+
 }
 
-
-function renderServerSearchResults(incoming, data) {
-    const resultList = document.getElementById("resultList");
-    const resultCount = document.getElementById("resultCount");
-    if (!resultList || !resultCount) return;
+function renderServerSearchResults(incoming, data) { const resultList =
+document.getElementById(“resultList”); const resultCount =
+document.getElementById(“resultCount”); if (!resultList || !resultCount)
+return;
 
     const items = Array.isArray(incoming) ? incoming : [];
 
@@ -5879,13 +5672,13 @@ function renderServerSearchResults(incoming, data) {
         : `Найдено в базе: ${items.length}`;
 
     renderSearchResultList(items, items.length, false);
+
 }
 
-
-function renderSearchResultList(items, count, fallback = false) {
-    const resultList = document.getElementById("resultList");
-    const resultCount = document.getElementById("resultCount");
-    if (!resultList || !resultCount) return;
+function renderSearchResultList(items, count, fallback = false) { const
+resultList = document.getElementById(“resultList”); const resultCount =
+document.getElementById(“resultCount”); if (!resultList || !resultCount)
+return;
 
     const list = Array.isArray(items) ? items : [];
 
@@ -5928,11 +5721,11 @@ function renderSearchResultList(items, count, fallback = false) {
             </div>
         `;
     }
+
 }
 
-
-function localSearchFallback(query) {
-    const tokens = normalizeText(query).split(/\s+/).filter(Boolean);
+function localSearchFallback(query) { const tokens =
+normalizeText(query).split(/+/).filter(Boolean);
 
     return allProducts.filter(product => {
         const searchable = [
@@ -5956,14 +5749,12 @@ function localSearchFallback(query) {
 
         return true;
     });
+
 }
 
-
-function prepareServerSearchFeed(incomingProducts = []) {
-    /*
-    ВАЖНО:
-    Явный поиск должен строить ленту ТОЛЬКО из ответа текущего
-    поискового запроса.
+function prepareServerSearchFeed(incomingProducts = []) { /* ВАЖНО:
+Явный поиск должен строить ленту ТОЛЬКО из ответа текущего поискового
+запроса.
 
     Раньше здесь использовался весь allProducts. Из-за этого при
     переключении запроса/гонках загрузки в ленту могли попадать
@@ -6074,17 +5865,11 @@ function prepareServerSearchFeed(incomingProducts = []) {
     showProduct();
 
     return true;
+
 }
 
-
-async function loadMoreServerProducts() {
-    if (
-        serverSearchLoading ||
-        !activeServerSearch.query ||
-        !serverSearchHasMore
-    ) {
-        return false;
-    }
+async function loadMoreServerProducts() { if ( serverSearchLoading ||
+!activeServerSearch.query || !serverSearchHasMore ) { return false; }
 
     serverSearchLoading = true;
 
@@ -6125,13 +5910,12 @@ async function loadMoreServerProducts() {
         serverSearchLoading = false;
         serverSearchLastFetchAt = Date.now();
     }
+
 }
 
-
-async function maybeLoadMoreServerProducts() {
-    if (!activeServerSearch.query || serverSearchLoading || !serverSearchHasMore) {
-        return;
-    }
+async function maybeLoadMoreServerProducts() { if
+(!activeServerSearch.query || serverSearchLoading ||
+!serverSearchHasMore) { return; }
 
     // Догружаем заранее, когда до конца текущей серверной ленты осталось мало карточек.
     const remaining = products.length - currentIndex - 1;
@@ -6139,13 +5923,11 @@ async function maybeLoadMoreServerProducts() {
     if (remaining <= 12) {
         await loadMoreServerProducts();
     }
+
 }
 
-
-
-function getTopUserInterests(limit = 8) {
-    const profile = buildUserProfile();
-    const combined = [];
+function getTopUserInterests(limit = 8) { const profile =
+buildUserProfile(); const combined = [];
 
     Object.entries(profile.keywords || {}).forEach(([word, score]) => {
         if (word.length < 2) return;
@@ -6155,11 +5937,11 @@ function getTopUserInterests(limit = 8) {
     return combined
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
+
 }
 
-function updateProfileInterests() {
-    const box = document.getElementById("profileRecommendations");
-    if (!box) return;
+function updateProfileInterests() { const box =
+document.getElementById(“profileRecommendations”); if (!box) return;
 
     const profile = buildUserProfile();
     const items = [];
@@ -6236,6 +6018,7 @@ function updateProfileInterests() {
             <span class="profile-interest-arrow">→</span>
         </button>
     `).join("");
+
 }
 
 function updateProfile() {
@@ -6301,8 +6084,8 @@ function updateProfile() {
 
     renderRecentProducts();
     updateProfileInterests();
-}
 
+}
 
 function renderRecentProducts() {
 
@@ -6413,12 +6196,10 @@ function renderRecentProducts() {
 
         `;
     }
+
 }
 
-
-function openCollection(
-    type
-) {
+function openCollection( type ) {
 
     if (
         type === "favorites"
@@ -6428,16 +6209,13 @@ function openCollection(
             "favorites"
         );
     }
+
 }
 
+/* ========================================================= VIEW
+TRACKING ========================================================= */
 
-/* =========================================================
-VIEW TRACKING
-========================================================= */
-
-function registerView(
-    product
-) {
+function registerView( product ) {
 
     if (!product) {
         return;
@@ -6490,16 +6268,13 @@ function registerView(
             id
         );
     }
+
 }
 
+/* ========================================================= OPEN
+TRACKING ========================================================= */
 
-/* =========================================================
-OPEN TRACKING
-========================================================= */
-
-function registerOpen(
-    product
-) {
+function registerOpen( product ) {
 
     if (!product) {
         return;
@@ -6542,16 +6317,14 @@ function registerOpen(
 
 
     updateProfile();
+
 }
 
-
-/* =========================================================
-SWIPE
+/* ========================================================= SWIPE
 ========================================================= */
 
-function toggleProductDetails() {
-    const card = document.getElementById("productCard");
-    if (!card) return;
+function toggleProductDetails() { const card =
+document.getElementById(“productCard”); if (!card) return;
 
     productDetailsCollapsed = !productDetailsCollapsed;
     card.classList.toggle("details-collapsed", productDetailsCollapsed);
@@ -6560,8 +6333,8 @@ function toggleProductDetails() {
     if (button) {
         button.textContent = productDetailsCollapsed ? "⌃ Показать" : "⌄ Свернуть";
     }
-}
 
+}
 
 function setupSwipe() {
 
@@ -6814,19 +6587,18 @@ function setupSwipe() {
             }
         }
     );
+
 }
 
-
-/* =========================================================
-NEXT / PREVIOUS
-========================================================= */
+/* ========================================================= NEXT /
+PREVIOUS ========================================================= */
 
 function resetNavigationHistory() {
 
     navigationHistory = [];
     navigationPosition = -1;
-}
 
+}
 
 function rememberProductInNavigation(product) {
 
@@ -6859,14 +6631,14 @@ function rememberProductInNavigation(product) {
         navigationHistory.shift();
         navigationPosition--;
     }
-}
 
+}
 
 function rememberCurrentProduct() {
 
     rememberProductInNavigation(currentProduct);
-}
 
+}
 
 function findProductById(id) {
 
@@ -6881,8 +6653,8 @@ function findProductById(id) {
         ) ||
         null
     );
-}
 
+}
 
 async function nextProduct() {
 
@@ -7031,8 +6803,8 @@ async function nextProduct() {
 
     showEmptyFeed();
     showToast("Ты просмотрел все доступные товары");
-}
 
+}
 
 function previousProduct() {
 
@@ -7069,17 +6841,13 @@ function previousProduct() {
     }
 
     showToast("Это начало просмотренной ленты");
+
 }
 
+/* ========================================================= CARD
+ANIMATION ========================================================= */
 
-/* =========================================================
-CARD ANIMATION
-========================================================= */
-
-function animateCardChange(
-    direction,
-    allowViewed = false
-) {
+function animateCardChange( direction, allowViewed = false ) {
 
     const card =
         document.getElementById(
@@ -7113,6 +6881,7 @@ function animateCardChange(
         },
         100
     );
+
 }
 
 function resetCardPosition() {
@@ -7134,11 +6903,10 @@ function resetCardPosition() {
 
     card.style.transform =
         "";
+
 }
 
-
-/* =========================================================
-HEART
+/* ========================================================= HEART
 ========================================================= */
 
 function showHeart() {
@@ -7165,20 +6933,15 @@ function showHeart() {
     heart.classList.add(
         "show"
     );
+
 }
 
-
-/* =========================================================
-TOAST
+/* ========================================================= TOAST
 ========================================================= */
 
-let toastTimer =
-    null;
+let toastTimer = null;
 
-
-function showToast(
-    message
-) {
+function showToast( message ) {
 
     const toast =
         document.getElementById(
@@ -7216,17 +6979,13 @@ function showToast(
             },
             1800
         );
+
 }
 
+/* ========================================================= LOCAL
+STORAGE ========================================================= */
 
-/* =========================================================
-LOCAL STORAGE
-========================================================= */
-
-function loadJSON(
-    key,
-    fallback
-) {
+function loadJSON( key, fallback ) {
 
     try {
 
@@ -7252,13 +7011,10 @@ function loadJSON(
 
         return fallback;
     }
+
 }
 
-
-function saveJSON(
-    key,
-    value
-) {
+function saveJSON( key, value ) {
 
     try {
 
@@ -7274,16 +7030,13 @@ function saveJSON(
             error
         );
     }
+
 }
 
-
-/* =========================================================
-ESCAPING
+/* ========================================================= ESCAPING
 ========================================================= */
 
-function escapeHTML(
-    value
-) {
+function escapeHTML( value ) {
 
     return String(
         value ?? ""
@@ -7308,22 +7061,18 @@ function escapeHTML(
             /'/g,
             "&#039;"
         );
+
 }
 
-
-function escapeAttribute(
-    value
-) {
+function escapeAttribute( value ) {
 
     return escapeHTML(
         value
     );
+
 }
 
-
-function capitalize(
-    value
-) {
+function capitalize( value ) {
 
     const text =
         String(
@@ -7341,15 +7090,10 @@ function capitalize(
             .toUpperCase() +
         text.slice(1)
     );
+
 }
 
-
-function getRussianPlural(
-    number,
-    one,
-    few,
-    many
-) {
+function getRussianPlural( number, one, few, many ) {
 
     const n =
         Math.abs(number) %
@@ -7387,54 +7131,45 @@ function getRussianPlural(
 
 
     return many;
+
 }
 
-/* =========================================================
-STYLEFLOW — UNIVERSAL RECOMMENDATION ENGINE V3
+/* ========================================================= STYLEFLOW —
+UNIVERSAL RECOMMENDATION ENGINE V3
 =========================================================
 
-Главный принцип:
-STYLEFLOW не предполагает заранее, что пользователь интересуется
-одеждой. Профиль строится из реальных действий пользователя и
-содержимого товаров/объявлений.
+Главный принцип: STYLEFLOW не предполагает заранее, что пользователь
+интересуется одеждой. Профиль строится из реальных действий пользователя
+и содержимого товаров/объявлений.
 
-Сигналы:
-- просмотр — слабый сигнал экспозиции;
-- открытие — сильный сигнал намерения;
-- избранное — очень сильный явный сигнал;
-- поисковые запросы — сильный сигнал текущего намерения;
-- свежесть действий — важнее старых;
-- совпадение слов/фраз — дополнительный сигнал;
-- категория/бренд/источник — структурные сигналы;
-- цена — мягкое предпочтение, а не жёсткое правило.
+Сигналы: - просмотр — слабый сигнал экспозиции; - открытие — сильный
+сигнал намерения; - избранное — очень сильный явный сигнал; - поисковые
+запросы — сильный сигнал текущего намерения; - свежесть действий —
+важнее старых; - совпадение слов/фраз — дополнительный сигнал; -
+категория/бренд/источник — структурные сигналы; - цена — мягкое
+предпочтение, а не жёсткое правило.
 
-Лента:
-- никогда намеренно не возвращает просмотренное;
-- ранжирует по релевантности;
-- смешивает близкие интересы с небольшим exploration;
-- ограничивает повторение одной темы/источника;
-- постепенно меняет профиль по новым действиям.
+Лента: - никогда намеренно не возвращает просмотренное; - ранжирует по
+релевантности; - смешивает близкие интересы с небольшим exploration; -
+ограничивает повторение одной темы/источника; - постепенно меняет
+профиль по новым действиям.
 ========================================================= */
 
-const SF_V3_VERSION = "3.0-universal";
+const SF_V3_VERSION = “3.0-universal”;
 
 const SF_V3_STOPWORDS = new Set([
-    "и","или","но","а","в","во","на","по","из","за","для","с","со",
-    "к","ко","у","от","до","о","об","про","как","что","это","так",
-    "же","ли","бы","не","да","нет","все","всё","мой","моя","мои",
-    "мое","твой","твоя","твои","этот","эта","эти","того","там","тут",
-    "есть","был","была","были","будет","можно","нужно","хочу","ищу",
-    "купить","найти","показать","покажи","товар","товары","объявление",
-    "объявления","цена","новый","новая","новое","новые","шт","шт.",
-    "руб","руб.","byn","бел","бел.р","рб"
-]);
+“и”,“или”,“но”,“а”,“в”,“во”,“на”,“по”,“из”,“за”,“для”,“с”,“со”,
+“к”,“ко”,“у”,“от”,“до”,“о”,“об”,“про”,“как”,“что”,“это”,“так”,
+“же”,“ли”,“бы”,“не”,“да”,“нет”,“все”,“всё”,“мой”,“моя”,“мои”,
+“мое”,“твой”,“твоя”,“твои”,“этот”,“эта”,“эти”,“того”,“там”,“тут”,
+“есть”,“был”,“была”,“были”,“будет”,“можно”,“нужно”,“хочу”,“ищу”,
+“купить”,“найти”,“показать”,“покажи”,“товар”,“товары”,“объявление”,
+“объявления”,“цена”,“новый”,“новая”,“новое”,“новые”,“шт”,“шт.”,
+“руб”,“руб.”,“byn”,“бел”,“бел.р”,“рб”]);
 
-function sfV3NormalizeToken(value) {
-    let word = String(value || "")
-        .toLowerCase()
-        .replace(/ё/g, "е")
-        .replace(/[^a-zа-я0-9]+/gi, "")
-        .trim();
+function sfV3NormalizeToken(value) { let word = String(value || ““)
+.toLowerCase() .replace(/ё/g,”е”) .replace(/[^a-zа-я0-9]+/gi, ““)
+.trim();
 
     if (word.length < 2 || SF_V3_STOPWORDS.has(word)) {
         return "";
@@ -7461,23 +7196,14 @@ function sfV3NormalizeToken(value) {
     }
 
     return word;
+
 }
 
-function sfV3Tokens(value) {
-    return Array.from(
-        new Set(
-            String(value || "")
-                .toLowerCase()
-                .replace(/ё/g, "е")
-                .split(/[^a-zа-я0-9]+/gi)
-                .map(sfV3NormalizeToken)
-                .filter(Boolean)
-        )
-    );
-}
+function sfV3Tokens(value) { return Array.from( new Set( String(value ||
+““) .toLowerCase() .replace(/ё/g,”е”) .split(/[^a-zа-я0-9]+/gi)
+.map(sfV3NormalizeToken) .filter(Boolean) ) ); }
 
-function sfV3ProductText(product) {
-    if (!product) return "";
+function sfV3ProductText(product) { if (!product) return ““;
 
     return [
         product.title,
@@ -7492,12 +7218,11 @@ function sfV3ProductText(product) {
     ]
         .filter(Boolean)
         .join(" ");
+
 }
 
-function sfV3CanonicalProductId(productOrId) {
-    if (productOrId === null || productOrId === undefined) {
-        return "";
-    }
+function sfV3CanonicalProductId(productOrId) { if (productOrId === null
+|| productOrId === undefined) { return ““; }
 
     if (typeof productOrId === "object") {
         const p = productOrId;
@@ -7529,15 +7254,11 @@ function sfV3CanonicalProductId(productOrId) {
     }
 
     return String(productOrId).trim();
+
 }
 
-function sfV3ProductIdVariants(productOrId) {
-    if (
-        productOrId === null ||
-        productOrId === undefined
-    ) {
-        return [];
-    }
+function sfV3ProductIdVariants(productOrId) { if ( productOrId === null
+|| productOrId === undefined ) { return []; }
 
     if (typeof productOrId !== "object") {
         const raw = String(productOrId).trim();
@@ -7575,28 +7296,27 @@ function sfV3ProductIdVariants(productOrId) {
                 .filter(Boolean)
         )
     );
+
 }
 
-function sfV3SameProduct(a, b) {
-    const left = new Set(
-        sfV3ProductIdVariants(a)
-    );
+function sfV3SameProduct(a, b) { const left = new Set(
+sfV3ProductIdVariants(a) );
 
     return sfV3ProductIdVariants(b)
         .some(id => left.has(id));
+
 }
 
-function sfV3IsViewed(product) {
-    if (!product) return true;
+function sfV3IsViewed(product) { if (!product) return true;
 
     return Array.isArray(viewedProducts) &&
         viewedProducts.some(
             id => sfV3SameProduct(id, product)
         );
+
 }
 
-function sfV3ActionRecency(index, total) {
-    if (!total) return 1;
+function sfV3ActionRecency(index, total) { if (!total) return 1;
 
     /*
     Последнее действие ≈ 1.0.
@@ -7605,35 +7325,23 @@ function sfV3ActionRecency(index, total) {
     const position = (index + 1) / total;
 
     return 0.35 + Math.pow(position, 0.65) * 0.65;
+
 }
 
-function sfV3AddMap(map, key, amount) {
-    if (!key) return;
+function sfV3AddMap(map, key, amount) { if (!key) return;
 
     map[key] =
         (Number(map[key]) || 0) +
         amount;
+
 }
 
 function sfV3AddTokens(profile, text, weight) {
-    sfV3Tokens(text).forEach(token => {
-        sfV3AddMap(
-            profile.keywords,
-            token,
-            weight
-        );
-    });
-}
+sfV3Tokens(text).forEach(token => { sfV3AddMap( profile.keywords, token,
+weight ); }); }
 
-function sfV3AddProductSignal(
-    profile,
-    product,
-    weight,
-    options = {}
-) {
-    if (!product || !Number.isFinite(weight)) {
-        return;
-    }
+function sfV3AddProductSignal( profile, product, weight, options = {} )
+{ if (!product || !Number.isFinite(weight)) { return; }
 
     const category = normalizeText(
         product.category
@@ -7684,14 +7392,12 @@ function sfV3AddProductSignal(
     if (options.countSignal !== false) {
         profile.totalSignals += weight;
     }
+
 }
 
-function sfV3FindHistoryProduct(id) {
-    /*
-    Сначала обычный поиск проекта.
-    Затем расширенный поиск по всем ID-вариантам.
-    */
-    const direct = findProductById(id);
+function sfV3FindHistoryProduct(id) { / Сначала обычный поиск проекта.
+Затем расширенный поиск по всем ID-вариантам. / const direct =
+findProductById(id);
 
     if (direct) {
         return direct;
@@ -7705,13 +7411,11 @@ function sfV3FindHistoryProduct(id) {
     return catalog.find(
         product => sfV3SameProduct(id, product)
     ) || null;
+
 }
 
-function sfV3GetSearchHistory() {
-    const raw = loadJSON(
-        "styleflow_search_history",
-        []
-    );
+function sfV3GetSearchHistory() { const raw = loadJSON(
+“styleflow_search_history”, [] );
 
     if (!Array.isArray(raw)) {
         return [];
@@ -7735,25 +7439,17 @@ function sfV3GetSearchHistory() {
             };
         })
         .filter(entry => entry.query);
+
 }
 
-/* =========================================================
-UNIVERSAL USER PROFILE
-========================================================= */
+/* ========================================================= UNIVERSAL
+USER PROFILE =========================================================
+*/
 
-function buildUserProfile() {
-    const profile = {
-        categories: {},
-        brands: {},
-        sources: {},
-        keywords: {},
-        prices: [],
-        totalSignals: 0,
-        explicitSignals: 0,
-        viewedOnlySignals: 0,
-        searchIntent: {},
-        generatedAt: Date.now()
-    };
+function buildUserProfile() { const profile = { categories: {}, brands:
+{}, sources: {}, keywords: {}, prices: [], totalSignals: 0,
+explicitSignals: 0, viewedOnlySignals: 0, searchIntent: {}, generatedAt:
+Date.now() };
 
     const viewed = Array.isArray(viewedProducts)
         ? viewedProducts.slice(-250)
@@ -7868,19 +7564,14 @@ function buildUserProfile() {
     });
 
     return profile;
+
 }
 
-/* =========================================================
-SIMILARITY
+/* ========================================================= SIMILARITY
 ========================================================= */
 
-function sfV3TokenSimilarity(
-    productTokens,
-    profileKeywords
-) {
-    if (!productTokens.length) {
-        return 0;
-    }
+function sfV3TokenSimilarity( productTokens, profileKeywords ) { if
+(!productTokens.length) { return 0; }
 
     let matched = 0;
     let totalImportance = 0;
@@ -7912,17 +7603,12 @@ function sfV3TokenSimilarity(
             Math.max(1, productTokens.length * 1.4)
         ) * 0.35
     );
+
 }
 
-function sfV3PriceFit(product, profile) {
-    if (
-        !product ||
-        product.price === null ||
-        !Number.isFinite(Number(product.price)) ||
-        !profile.prices.length
-    ) {
-        return 0;
-    }
+function sfV3PriceFit(product, profile) { if ( !product || product.price
+=== null || !Number.isFinite(Number(product.price)) ||
+!profile.prices.length ) { return 0; }
 
     const price =
         Number(product.price);
@@ -7976,17 +7662,12 @@ function sfV3PriceFit(product, profile) {
             weightedFit / totalWeight
         )
     );
+
 }
 
-function sfV3Freshness(product) {
-    const rawDate =
-        product &&
-        (
-            product.updated_at ||
-            product.updatedAt ||
-            product.created_at ||
-            product.createdAt
-        );
+function sfV3Freshness(product) { const rawDate = product && (
+product.updated_at || product.updatedAt || product.created_at ||
+product.createdAt );
 
     const timestamp =
         new Date(rawDate || 0).getTime();
@@ -8008,19 +7689,14 @@ function sfV3Freshness(product) {
     return Math.exp(
         -ageDays / 14
     );
+
 }
 
-/* =========================================================
-SMART SCORE
+/* ========================================================= SMART SCORE
 ========================================================= */
 
-function calculateRecommendationScore(
-    product,
-    profile
-) {
-    if (!product || !profile) {
-        return 0;
-    }
+function calculateRecommendationScore( product, profile ) { if (!product
+|| !profile) { return 0; }
 
     const tokens =
         sfV3Tokens(
@@ -8146,17 +7822,15 @@ function calculateRecommendationScore(
         0,
         score
     );
+
 }
 
-/* =========================================================
-DIVERSIFIED PERSONALIZED FEED
+/* ========================================================= DIVERSIFIED
+PERSONALIZED FEED
 ========================================================= */
 
-function buildPersonalizedFeed() {
-    if (!Array.isArray(allProducts) || !allProducts.length) {
-        products = [];
-        return;
-    }
+function buildPersonalizedFeed() { if (!Array.isArray(allProducts) ||
+!allProducts.length) { products = []; return; }
 
     const filtered =
         applyProductFilters(
@@ -8463,15 +8137,15 @@ function buildPersonalizedFeed() {
                 ) + "%"
         }
     );
+
 }
 
-/* =========================================================
-PROFILE — "ВАМ МОЖЕТ ПОНРАВИТЬСЯ"
+/* ========================================================= PROFILE —
+“ВАМ МОЖЕТ ПОНРАВИТЬСЯ”
 ========================================================= */
 
-function sfV3GetRecommendationTopics(limit = 5) {
-    const profile =
-        buildUserProfile();
+function sfV3GetRecommendationTopics(limit = 5) { const profile =
+buildUserProfile();
 
     const topics = [];
 
@@ -8572,12 +8246,11 @@ function sfV3GetRecommendationTopics(limit = 5) {
             0,
             limit
         );
+
 }
 
-function sfV3SearchByTopic(query) {
-    const clean =
-        String(query || "")
-            .trim();
+function sfV3SearchByTopic(query) { const clean = String(query || ““)
+.trim();
 
     if (!clean) {
         return;
@@ -8626,14 +8299,11 @@ function sfV3SearchByTopic(query) {
     showToast(
         `Подбираем: ${clean}`
     );
+
 }
 
-function sfV3OpenFreshDiscovery() {
-    activeFilters = {
-        ...activeFilters,
-        query: "",
-        sort: "relevance"
-    };
+function sfV3OpenFreshDiscovery() { activeFilters = { …activeFilters,
+query: ““, sort:”relevance” };
 
     saveJSON(
         "styleflow_filters",
@@ -8653,13 +8323,11 @@ function sfV3OpenFreshDiscovery() {
     showToast(
         "Показываем что-то новое"
     );
+
 }
 
-function renderProfileRecommendations() {
-    const container =
-        document.getElementById(
-            "profileRecommendations"
-        );
+function renderProfileRecommendations() { const container =
+document.getElementById( “profileRecommendations” );
 
     if (!container) {
         return;
@@ -8782,21 +8450,14 @@ function renderProfileRecommendations() {
     container.appendChild(
         fresh
     );
+
 }
 
-function updateProfileInterests() {
-    renderProfileRecommendations();
-}
+function updateProfileInterests() { renderProfileRecommendations(); }
 
-/*
-Переопределяем профиль, чтобы новый блок
-обновлялся вместе со статистикой.
-*/
-function updateProfile() {
-    const likedCount =
-        document.getElementById(
-            "likedCount"
-        );
+/ Переопределяем профиль, чтобы новый блок обновлялся вместе со
+статистикой. / function updateProfile() { const likedCount =
+document.getElementById( “likedCount” );
 
     const viewedCount =
         document.getElementById(
@@ -8857,16 +8518,14 @@ function updateProfile() {
     ) {
         renderRecentProducts();
     }
+
 }
 
-/* =========================================================
-UNIVERSAL CATEGORY FALLBACK
+/* ========================================================= UNIVERSAL
+CATEGORY FALLBACK
 ========================================================= */
 
-function sfV3DisplayCategory(product) {
-    if (!product) {
-        return "";
-    }
+function sfV3DisplayCategory(product) { if (!product) { return ““; }
 
     const value =
         String(
@@ -8881,17 +8540,12 @@ function sfV3DisplayCategory(product) {
     }
 
     return value;
+
 }
 
-/*
-Обновляем текст категории карточки без
-автоматического "Одежда".
-*/
-function sfV3PatchProductCategoryLabel() {
-    const category =
-        document.getElementById(
-            "productCategory"
-        );
+/ Обновляем текст категории карточки без автоматического “Одежда”. /
+function sfV3PatchProductCategoryLabel() { const category =
+document.getElementById( “productCategory” );
 
     if (!category || !currentProduct) {
         return;
@@ -8901,35 +8555,23 @@ function sfV3PatchProductCategoryLabel() {
         sfV3DisplayCategory(
             currentProduct
         );
+
 }
 
-/*
-После каждой карточки можно безопасно обновить
-подпись категории.
-*/
-const sfV3OriginalShowProduct =
-    showProduct;
+/ После каждой карточки можно безопасно обновить подпись категории. /
+const sfV3OriginalShowProduct = showProduct;
 
-function sfV3ShowProductWrapper() {
-    sfV3OriginalShowProduct();
+function sfV3ShowProductWrapper() { sfV3OriginalShowProduct();
 
     try {
         sfV3PatchProductCategoryLabel();
     } catch (e) {}
+
 }
 
-showProduct =
-    sfV3ShowProductWrapper;
+showProduct = sfV3ShowProductWrapper;
 
-/* =========================================================
-BOOT
+/* ========================================================= BOOT
 ========================================================= */
 
-setTimeout(
-    () => {
-        try {
-            updateProfile();
-        } catch (e) {}
-    },
-    0
-);
+setTimeout( () => { try { updateProfile(); } catch (e) {} }, 0 );
