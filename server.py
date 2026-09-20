@@ -56,7 +56,7 @@ DB_PATH = migrate_legacy_file("products.db")
 FEED_PATH = migrate_legacy_file("feed.json")
 SETTINGS_PATH = migrate_legacy_file("settings.json")
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", os.getenv("BOT_TOKEN", "")).strip()
 SESSION_COOKIE_NAME = "styleflow_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
 
@@ -689,6 +689,61 @@ def get_user_history(user_id):
 
 
 # =========================
+# CONTENT SAFETY / ADULT PRODUCTS
+# =========================
+
+ADULT_TERMS = (
+    "дилдо", "вибратор", "фаллоимитатор", "секс", "порно", "порнография",
+    "эротика", "эротическое", "интим", "проститут", "секс игруш",
+    "sex", "porn", "dildo", "vibrator", "xxx", "adult"
+)
+
+
+def is_adult_text(*values):
+    text = normalize_search_text(" ".join(str(v or "") for v in values))
+    return any(term in text for term in ADULT_TERMS)
+
+
+def is_adult_product_row(row):
+    return is_adult_text(
+        row["title"] if "title" in row.keys() else "",
+        row["category"] if "category" in row.keys() else "",
+        row["description"] if "description" in row.keys() else "",
+        row["brand"] if "brand" in row.keys() else "",
+    )
+
+
+def is_adult_query(query):
+    return is_adult_text(query)
+
+
+def current_account():
+    token = request.cookies.get(SESSION_COOKIE_NAME, "").strip()
+    if not token:
+        return None
+
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    conn = get_db()
+    cleanup_expired_sessions(conn)
+    row = conn.execute("""
+        SELECT u.id AS account_id, u.telegram_id, u.telegram_username,
+               u.first_name, u.last_name, u.photo_url,
+               u.created_at, u.last_login_at, u.recommendations_reset_at
+        FROM sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP
+        LIMIT 1
+    """, (token_hash,)).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?",
+            (token_hash,)
+        )
+        conn.commit()
+    conn.close()
+    return dict(row) if row else None
+
+# =========================
 # SEARCH / LAZY CATALOG
 # =========================
 
@@ -727,7 +782,12 @@ def local_search_products(query, sources=None, min_price=None, max_price=None, l
 
     result = []
 
+    explicit_adult_query = is_adult_query(query)
+
     for row in rows:
+        if not explicit_adult_query and is_adult_product_row(row):
+            continue
+
         if sources and row["source"].lower() not in sources:
             continue
 
@@ -1393,6 +1453,15 @@ def update_feed():
 
 @app.route("/api/search")
 def api_search():
+    account = get_current_account()
+    if not account:
+        return jsonify({
+            "status": "unauthorized",
+            "authenticated": False,
+            "products": [],
+            "has_more": False
+        }), 401
+
     query = request.args.get("query", "").strip()
 
     sources_raw = request.args.get("sources", "").strip()
@@ -1506,6 +1575,15 @@ def lazy_search_more(query, sources=None, min_price=None, max_price=None, limit=
 
 @app.route("/api/search/more")
 def api_search_more():
+    account = get_current_account()
+    if not account:
+        return jsonify({
+            "status": "unauthorized",
+            "authenticated": False,
+            "products": [],
+            "has_more": False
+        }), 401
+
     try:
         query = request.args.get("query", "").strip()
 
@@ -1558,79 +1636,72 @@ def api_search_more():
 
 @app.route("/api/feed")
 def api_feed():
-
     try:
+        account = get_current_account()
+        if not account:
+            return jsonify({
+                "status": "unauthorized",
+                "authenticated": False,
+                "products": [],
+                "has_more": False
+            }), 401
 
-        products = get_all_products()
+        limit = max(1, min(int(request.args.get("limit", "120")), 300))
+        offset = max(0, int(request.args.get("offset", "0")))
+        products = get_all_products(limit=limit, offset=offset)
+        safe_products = []
+        for product in products:
+            if is_adult_text(product.get("title"), product.get("category"), product.get("description"), product.get("brand")):
+                continue
+            safe_products.append(product)
 
-        print(
-            f"Отдаю из базы: {len(products)} товаров"
-        )
-
-        return jsonify(products)
-
+        total = len(get_all_products())
+        return jsonify({
+            "status": "ok",
+            "authenticated": True,
+            "account_id": account["account_id"],
+            "products": safe_products,
+            "offset": offset,
+            "limit": limit,
+            "total": total,
+            "has_more": offset + limit < total
+        })
     except Exception as e:
-
-        print(
-            f"Ошибка чтения базы: {e}"
-        )
-
-        return jsonify([])
+        print(f"Ошибка /api/feed: {e}")
+        return jsonify({"status": "error", "message": str(e), "products": []}), 500
 
 
 # =========================
 # USER HISTORY API
 # =========================
 
-@app.route(
-    "/api/user/history",
-    methods=["GET"]
-)
+@app.route("/api/user/history", methods=["GET"])
 def api_user_history():
-
-    user_id = request.args.get(
-        "user_id",
-        ""
-    )
-
-    if not user_id:
-
-        return jsonify({
-            "status": "error",
-            "message": "Не указан user_id"
-        }), 400
+    account = current_account()
+    if not account:
+        return jsonify({"status": "unauthorized", "message": "Требуется авторизация STYLEFLOW"}), 401
 
     try:
-
-        history = get_user_history(
-            user_id
+        # При первом входе переносим старую историю, где user_id был Telegram ID,
+        # на постоянный STYLEFLOW account_id.
+        conn = get_db()
+        conn.execute(
+            "UPDATE user_history SET user_id = ? WHERE user_id = ?",
+            (str(account["account_id"]), str(account["telegram_id"]))
         )
+        conn.commit()
+        conn.close()
 
-        print(
-            "История пользователя "
-            f"{user_id}: "
-            f"viewed={len(history['viewed'])}, "
-            f"opened={len(history['opened'])}"
-        )
-
+        history = get_user_history(str(account["account_id"]))
         return jsonify({
             "status": "ok",
-            "user_id": str(user_id),
-
+            "account_id": account["account_id"],
             "viewed": history["viewed"],
             "opened": history["opened"]
         })
-
     except Exception as e:
-
-        print(
-            f"Ошибка получения истории пользователя: {e}"
-        )
-
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+        print(f"Ошибка получения истории пользователя: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # =========================
@@ -1647,9 +1718,8 @@ def api_user_view():
         silent=True
     ) or {}
 
-    user_id = data.get(
-        "user_id"
-    )
+    account = current_account()
+    user_id = str(account["account_id"]) if account else ""
 
     product_id = data.get(
         "product_id"
@@ -1714,9 +1784,8 @@ def api_user_open():
         silent=True
     ) or {}
 
-    user_id = data.get(
-        "user_id"
-    )
+    account = current_account()
+    user_id = str(account["account_id"]) if account else ""
 
     product_id = data.get(
         "product_id"
