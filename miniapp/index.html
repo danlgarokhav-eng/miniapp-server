@@ -1954,6 +1954,20 @@ let isDragging = false;
 let lastTapTime = 0;
 let searchTimer = null;
 
+// Серверный lazy-поиск.
+// Храним активный запрос, чтобы при свайпе догружать следующие страницы.
+let activeServerSearch = {
+    query: "",
+    sources: [],
+    minPrice: null,
+    maxPrice: null
+};
+
+let serverSearchLoading = false;
+let serverSearchRequestId = 0;
+let serverSearchHasMore = true;
+let serverSearchLastFetchAt = 0;
+
 
 /* =========================================================
 SERVER USER HISTORY
@@ -3523,15 +3537,30 @@ function applyFilters() {
 
 
     /*
-    После изменения фильтров
-    строим ленту заново.
-
-    Важно:
-    фильтр → кандидаты → персонализация.
+    После изменения фильтров строим ленту заново.
+    Если указан текстовый запрос — сначала просим серверный lazy-каталог.
     */
 
     currentIndex = 0;
 
+    if (query) {
+        activeServerSearch = {
+            query,
+            sources: uniqueStrings(sources),
+            minPrice,
+            maxPrice
+        };
+        serverSearchHasMore = true;
+        serverSearchRequestId++;
+        void performSearch(query, {
+            sources: uniqueStrings(sources),
+            minPrice,
+            maxPrice
+        });
+        closeFilters();
+        updateFilterButton();
+        return;
+    }
 
     buildPersonalizedFeed();
 
@@ -3629,6 +3658,14 @@ function resetFilters() {
 
     syncFilterUI();
 
+    activeServerSearch = {
+        query: "",
+        sources: [],
+        minPrice: null,
+        maxPrice: null
+    };
+    serverSearchHasMore = true;
+    serverSearchRequestId++;
 
     currentIndex = 0;
 
@@ -7419,77 +7456,402 @@ function hideSearchSuggestions() {
     if (box) box.classList.remove("active");
 }
 
-function performSearch(query) {
+async function performSearch(query, searchOptions = null) {
     const home = document.getElementById("searchHome");
     const results = document.getElementById("searchResults");
     const resultList = document.getElementById("resultList");
     const resultCount = document.getElementById("resultCount");
     if (!home || !results || !resultList || !resultCount) return;
 
+    query = String(query || "").trim();
+
     if (!query) {
         home.style.display = "block";
         results.classList.remove("active");
+        hideSearchSuggestions();
         return;
     }
 
     home.style.display = "none";
     results.classList.add("active");
-
-    const normalizedQuery = query.toLowerCase().trim();
-    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
-
-    rememberSearchQuery(normalizedQuery);
     hideSearchSuggestions();
+    rememberSearchQuery(query.toLowerCase());
 
     if (typeof updateProfileInterests === "function") {
         updateProfileInterests();
     }
 
-    const filtered = allProducts.filter(product => {
-        const searchable = [
-            product.title, product.brand, product.category,
-            product.description, product.source, sourceLabel(product.source)
-        ].join(" ").toLowerCase();
+    const requestId = ++serverSearchRequestId;
+    serverSearchLoading = true;
 
-        const queryMatches = tokens.every(token => searchTokenMatches(token, searchable));
-        if (!queryMatches) return false;
+    resultCount.textContent = "Ищем товары...";
+    resultList.innerHTML = `
+        <div class="search-no-results">
+            🔎 Ищем <b>${escapeHTML(query)}</b>...<br>
+            <span>Сначала проверяем нашу базу, затем при необходимости подключаем источник.</span>
+        </div>
+    `;
 
-        if (activeSearchSources.length) {
-            return activeSearchSources.includes(normalizeSearchSource(product.source));
+    const searchSources = searchOptions && Array.isArray(searchOptions.sources)
+        ? searchOptions.sources.slice()
+        : (Array.isArray(activeSearchSources) ? activeSearchSources.slice() : []);
+
+    activeServerSearch = {
+        query,
+        sources: searchSources,
+        minPrice: searchOptions && searchOptions.minPrice !== undefined
+            ? searchOptions.minPrice
+            : null,
+        maxPrice: searchOptions && searchOptions.maxPrice !== undefined
+            ? searchOptions.maxPrice
+            : null
+    };
+
+    serverSearchHasMore = true;
+
+    try {
+        const data = await fetchServerSearch(false);
+
+        if (requestId !== serverSearchRequestId) return;
+
+        const incoming = Array.isArray(data.products)
+            ? data.products.map(normalizeProduct)
+            : [];
+
+        mergeProductsIntoCatalog(incoming);
+
+        renderServerSearchResults(incoming, data);
+
+        // Запоминаем запрос как активную серверную ленту.
+        // Если товары пришли, пользователь может открыть карточку и продолжить свайпать.
+        if (incoming.length) {
+            prepareServerSearchFeed();
         }
-        return true;
+
+    } catch (error) {
+        console.error("[StyleFlow] Server search error:", error);
+
+        // Резерв: если сервер временно недоступен, используем локальный каталог.
+        const localResults = localSearchFallback(query);
+        renderSearchResultList(localResults, localResults.length, true);
+
+        if (!localResults.length) {
+            resultList.innerHTML = `
+                <div class="search-no-results">
+                    Не удалось выполнить поиск.<br>
+                    <span>Проверь соединение с сервером и попробуй ещё раз.</span>
+                </div>
+            `;
+        }
+    } finally {
+        if (requestId === serverSearchRequestId) {
+            serverSearchLoading = false;
+            serverSearchLastFetchAt = Date.now();
+        }
+    }
+}
+
+
+function buildServerSearchUrl(more = false) {
+    const endpoint = more ? "/api/search/more" : "/api/search";
+    const params = new URLSearchParams();
+
+    params.set("query", activeServerSearch.query || "");
+    params.set("limit", "100");
+
+    if (activeServerSearch.sources && activeServerSearch.sources.length) {
+        params.set("sources", activeServerSearch.sources.join(","));
+    }
+
+    if (activeServerSearch.minPrice !== null && activeServerSearch.minPrice !== undefined) {
+        params.set("min_price", String(activeServerSearch.minPrice));
+    }
+
+    if (activeServerSearch.maxPrice !== null && activeServerSearch.maxPrice !== undefined) {
+        params.set("max_price", String(activeServerSearch.maxPrice));
+    }
+
+    return `${endpoint}?${params.toString()}`;
+}
+
+
+async function fetchServerSearch(more = false) {
+    const response = await fetch(
+        buildServerSearchUrl(more),
+        { cache: "no-store" }
+    );
+
+    if (!response.ok) {
+        throw new Error(`Search request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (data.status === "error") {
+        throw new Error(data.message || "Server search error");
+    }
+
+    return data;
+}
+
+
+function mergeProductsIntoCatalog(incoming) {
+    if (!Array.isArray(incoming) || !incoming.length) return;
+
+    const map = new Map();
+
+    allProducts.forEach(product => {
+        if (product) map.set(String(product.id), product);
     });
 
-    filtered.sort((a, b) => {
-        const score = product => tokens.reduce((sum, token) => {
-            const text = [product.title, product.brand, product.category, product.description].join(" ").toLowerCase();
-            if (text.includes(token)) return sum + 3;
-            if (searchTokenMatches(token, text)) return sum + 1;
-            return sum;
-        }, 0);
-        return score(b) - score(a);
+    incoming.forEach(product => {
+        if (product) map.set(String(product.id), product);
     });
 
-    resultCount.textContent = filtered.length === 1 ? "Найден 1 товар" : `Найдено товаров: ${filtered.length}`;
+    allProducts = Array.from(map.values());
+
+    localStorage.setItem(
+        "styleflow_main_feed",
+        JSON.stringify(allProducts)
+    );
+
+    populateFilterCategories();
+    renderFilterSources();
+}
+
+
+function renderServerSearchResults(incoming, data) {
+    const resultList = document.getElementById("resultList");
+    const resultCount = document.getElementById("resultCount");
+    if (!resultList || !resultCount) return;
+
+    const items = Array.isArray(incoming) ? incoming : [];
+
+    if (!items.length) {
+        resultCount.textContent = "Ничего не найдено";
+        resultList.innerHTML = `
+            <div class="search-no-results">
+                Ничего точного не нашли.<br>
+                <span>Попробуй изменить запрос или выбрать другую площадку.</span>
+            </div>
+        `;
+        return;
+    }
+
+    const fetched = Number(data && data.fetched || 0);
+    resultCount.textContent = fetched > 0
+        ? `Найдено: ${items.length} · добавлено в общую базу`
+        : `Найдено в базе: ${items.length}`;
+
+    renderSearchResultList(items, items.length, false);
+}
+
+
+function renderSearchResultList(items, count, fallback = false) {
+    const resultList = document.getElementById("resultList");
+    const resultCount = document.getElementById("resultCount");
+    if (!resultList || !resultCount) return;
+
+    const list = Array.isArray(items) ? items : [];
+
+    resultCount.textContent = fallback
+        ? `Найдено локально: ${count}`
+        : (count === 1 ? "Найден 1 товар" : `Найдено товаров: ${count}`);
+
     resultList.innerHTML = "";
-    filtered.forEach(product => {
+
+    list.forEach(product => {
         const card = document.createElement("div");
         card.className = "search-result-card";
         card.innerHTML = `
-            <img src="${escapeAttribute(product.image)}" alt="${escapeAttribute(product.title)}">
+            <img
+                src="${escapeAttribute(product.image)}"
+                alt="${escapeAttribute(product.title)}"
+            >
             <div class="search-result-info">
-                <div class="search-result-source">${escapeHTML(sourceLabel(product.source))}</div>
-                <div class="search-result-title">${escapeHTML(product.title)}</div>
-                <div class="search-result-price">${escapeHTML(formatPrice(product))}</div>
-            </div>`;
+                <div class="search-result-source">
+                    ${escapeHTML(sourceLabel(product.source))}
+                </div>
+                <div class="search-result-title">
+                    ${escapeHTML(product.title)}
+                </div>
+                <div class="search-result-price">
+                    ${escapeHTML(formatPrice(product))}
+                </div>
+            </div>
+        `;
+
         card.onclick = () => openProductFromObject(product);
         resultList.appendChild(card);
     });
 
-    if (!filtered.length) {
-        resultList.innerHTML = `<div class="search-no-results">Ничего точного не найдено.<br><span>Попробуй написать чуть иначе — поиск умеет исправлять небольшие опечатки.</span></div>`;
+    if (!list.length) {
+        resultList.innerHTML = `
+            <div class="search-no-results">
+                Ничего не найдено.<br>
+                <span>Попробуй другой запрос.</span>
+            </div>
+        `;
     }
 }
+
+
+function localSearchFallback(query) {
+    const tokens = normalizeText(query).split(/\s+/).filter(Boolean);
+
+    return allProducts.filter(product => {
+        const searchable = [
+            product.title,
+            product.brand,
+            product.category,
+            product.description,
+            product.source,
+            sourceLabel(product.source)
+        ].join(" ").toLowerCase();
+
+        if (!tokens.every(token => searchTokenMatches(token, searchable))) {
+            return false;
+        }
+
+        if (activeSearchSources.length) {
+            return activeSearchSources.includes(
+                normalizeSearchSource(product.source)
+            );
+        }
+
+        return true;
+    });
+}
+
+
+function prepareServerSearchFeed() {
+    // Серверный поиск становится источником текущей ленты.
+    // Важно: старый текстовый фильтр не должен случайно ограничить новый запрос.
+    const queryTokens = normalizeText(activeServerSearch.query || "")
+        .split(/\s+/)
+        .filter(Boolean);
+
+    const candidates = allProducts.filter(product => {
+        const searchable = [
+            product.title,
+            product.brand,
+            product.category,
+            product.description,
+            product.source,
+            sourceLabel(product.source)
+        ].join(" ").toLowerCase();
+
+        if (!queryTokens.every(token => searchTokenMatches(token, searchable))) {
+            return false;
+        }
+
+        if (activeServerSearch.sources && activeServerSearch.sources.length) {
+            if (!activeServerSearch.sources.includes(normalizeSearchSource(product.source))) {
+                return false;
+            }
+        }
+
+        if (activeServerSearch.minPrice !== null && activeServerSearch.minPrice !== undefined) {
+            if (product.price === null || Number(product.price) < Number(activeServerSearch.minPrice)) {
+                return false;
+            }
+        }
+
+        if (activeServerSearch.maxPrice !== null && activeServerSearch.maxPrice !== undefined) {
+            if (product.price === null || Number(product.price) > Number(activeServerSearch.maxPrice)) {
+                return false;
+            }
+        }
+
+        return true;
+    });
+
+    if (!candidates.length) return;
+
+    products = candidates.slice();
+
+    // Для явного поискового запроса сохраняем порядок сервера,
+    // а просмотренные карточки исключаем только если есть другие.
+    const unviewed = products.filter(product => !isProductViewed(product));
+    if (unviewed.length) {
+        products = unviewed.concat(
+            products.filter(product => isProductViewed(product))
+        );
+    }
+
+    currentIndex = 0;
+    resetNavigationHistory();
+    rememberProductInNavigation(products[0]);
+    showProduct();
+
+    switchTab("feed");
+}
+
+
+async function loadMoreServerProducts() {
+    if (
+        serverSearchLoading ||
+        !activeServerSearch.query ||
+        !serverSearchHasMore
+    ) {
+        return false;
+    }
+
+    serverSearchLoading = true;
+
+    try {
+        const data = await fetchServerSearch(true);
+        const incoming = Array.isArray(data.products)
+            ? data.products.map(normalizeProduct)
+            : [];
+
+        const beforeIds = new Set(allProducts.map(product => String(product.id)));
+        const fresh = incoming.filter(product => !beforeIds.has(String(product.id)));
+
+        mergeProductsIntoCatalog(fresh);
+
+        if (fresh.length) {
+            // Если пользователь находится в серверной ленте, просто добавляем
+            // новые карточки в конец, не сбрасывая текущую позицию.
+            const existingIds = new Set(products.map(product => String(product.id)));
+            fresh.forEach(product => {
+                if (!existingIds.has(String(product.id))) {
+                    products.push(product);
+                }
+            });
+        }
+
+        // Сервер сообщает fetched=0, когда следующей страницы больше нет.
+        // Также останавливаемся, если новая выдача совсем не изменилась.
+        if (!fresh.length || Number(data && data.fetched || 0) === 0) {
+            serverSearchHasMore = false;
+        }
+
+        return fresh.length > 0;
+
+    } catch (error) {
+        console.error("[StyleFlow] Ошибка догрузки:", error);
+        return false;
+    } finally {
+        serverSearchLoading = false;
+        serverSearchLastFetchAt = Date.now();
+    }
+}
+
+
+async function maybeLoadMoreServerProducts() {
+    if (!activeServerSearch.query || serverSearchLoading || !serverSearchHasMore) {
+        return;
+    }
+
+    // Догружаем заранее, когда до конца текущей серверной ленты осталось мало карточек.
+    const remaining = products.length - currentIndex - 1;
+
+    if (remaining <= 12) {
+        await loadMoreServerProducts();
+    }
+}
+
 
 
 function getTopUserInterests(limit = 8) {
@@ -8143,7 +8505,12 @@ function findProductById(id) {
 }
 
 
-function nextProduct() {
+async function nextProduct() {
+
+    if (activeServerSearch.query && products.length) {
+        // Догружаем следующую пачку ещё до того, как пользователь упрётся в конец.
+        void maybeLoadMoreServerProducts();
+    }
 
     if (!products.length) {
 
@@ -8228,6 +8595,21 @@ function nextProduct() {
         }
 
         return;
+    }
+
+    if (activeServerSearch.query && serverSearchHasMore) {
+        const loaded = await loadMoreServerProducts();
+
+        if (loaded) {
+            const nextIndex = findNextUnviewedIndex(currentIndex, 1);
+
+            if (nextIndex >= 0) {
+                rememberProductInNavigation(products[nextIndex]);
+                currentIndex = nextIndex;
+                animateCardChange("next");
+                return;
+            }
+        }
     }
 
     console.log(
