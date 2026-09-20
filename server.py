@@ -3,6 +3,9 @@ import json
 import os
 import sqlite3
 import requests
+import re
+import time
+from datetime import datetime, timezone
 
 
 app = Flask(__name__)
@@ -28,6 +31,17 @@ SETTINGS_PATH = os.path.join(
     BASE_DIR,
     "settings.json"
 )
+
+
+# =========================
+# REEFAPI
+# =========================
+# Ключ хранится только на сервере Railway.
+REEF_API_KEY = os.getenv("REEF_KEY", "").strip()
+REEF_API_BASE = "https://api.reefapi.com"
+REEF_FETCH_SIZE = int(os.getenv("REEF_FETCH_SIZE", "100"))
+LOCAL_SEARCH_MIN_RESULTS = int(os.getenv("LOCAL_SEARCH_MIN_RESULTS", "30"))
+LOCAL_SEARCH_PAGE_SIZE = int(os.getenv("LOCAL_SEARCH_PAGE_SIZE", "100"))
 
 
 # =========================
@@ -63,6 +77,7 @@ def init_db():
 
             brand TEXT,
             category TEXT,
+            description TEXT,
 
             image TEXT,
             link TEXT,
@@ -71,6 +86,10 @@ def init_db():
             reviews INTEGER,
 
             is_available INTEGER DEFAULT 1,
+
+            availability_status TEXT DEFAULT 'active',
+            last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_checked_at TIMESTAMP,
 
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -105,6 +124,60 @@ def init_db():
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_user_history_product
         ON user_history(user_id, product_id)
+    """)
+
+    # ---------------------------------
+    # SEARCH CACHE
+    # ---------------------------------
+    # Храним нормализованные поисковые запросы и последнюю страницу,
+    # которую уже получили из внешнего источника.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS search_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_key TEXT NOT NULL,
+            source TEXT NOT NULL,
+            last_fetched_page INTEGER DEFAULT 0,
+            last_fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            result_count INTEGER DEFAULT 0,
+            UNIQUE(query_key, source)
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_products_search_source
+        ON products(source, is_available, updated_at)
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_products_external
+        ON products(source, external_id)
+    """)
+
+    # Мягкая миграция существующей SQLite базы:
+    # если products.db уже существует со старой схемой,
+    # добавляем новые колонки без удаления старых товаров.
+    existing_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(products)").fetchall()
+    }
+
+    for column, definition in {
+        "description": "TEXT",
+        "availability_status": "TEXT DEFAULT 'active'",
+        "last_seen_at": "TIMESTAMP",
+        "last_checked_at": "TIMESTAMP",
+    }.items():
+        if column not in existing_columns:
+            conn.execute(
+                f"ALTER TABLE products ADD COLUMN {column} {definition}"
+            )
+
+    conn.execute("""
+        UPDATE products
+        SET availability_status = COALESCE(availability_status, 'active'),
+            last_seen_at = COALESCE(last_seen_at, updated_at)
+        WHERE availability_status IS NULL
+           OR last_seen_at IS NULL
     """)
 
     conn.commit()
@@ -187,6 +260,11 @@ def save_products(products):
             ""
         )
 
+        description = product.get(
+            "description",
+            product.get("desc", "")
+        )
+
         image = product.get(
             "image",
             ""
@@ -231,15 +309,18 @@ def save_products(products):
                 currency,
                 brand,
                 category,
+                description,
                 image,
                 link,
                 rating,
                 reviews,
                 is_available,
+                availability_status,
+                last_seen_at,
                 updated_at
             )
 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 
             ON CONFLICT(source, external_id)
             DO UPDATE SET
@@ -249,11 +330,17 @@ def save_products(products):
                 currency = excluded.currency,
                 brand = excluded.brand,
                 category = excluded.category,
+                description = excluded.description,
                 image = excluded.image,
                 link = excluded.link,
                 rating = excluded.rating,
                 reviews = excluded.reviews,
                 is_available = excluded.is_available,
+                availability_status = CASE
+                    WHEN excluded.is_available = 1 THEN 'active'
+                    ELSE 'unavailable'
+                END,
+                last_seen_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
         """, (
             source,
@@ -264,11 +351,14 @@ def save_products(products):
             currency,
             brand,
             category,
+            description,
             image,
             link,
             rating,
             reviews,
-            is_available
+            is_available,
+            "active" if is_available else "unavailable",
+            None
         ))
 
         saved += 1
@@ -293,6 +383,7 @@ def get_all_products():
             currency,
             brand,
             category,
+            description,
             image,
             link,
             rating,
@@ -324,6 +415,7 @@ def get_all_products():
 
             "brand": row["brand"],
             "category": row["category"],
+            "description": row["description"],
 
             "image": row["image"],
             "images": (
@@ -527,6 +619,312 @@ def get_user_history(user_id):
     }
 
 
+
+# =========================
+# SEARCH / LAZY CATALOG
+# =========================
+
+def normalize_search_text(value):
+    value = str(value or "").lower().replace("ё", "е")
+    value = re.sub(r"[^a-zа-я0-9]+", " ", value, flags=re.IGNORECASE)
+    return " ".join(value.split())
+
+
+def search_tokens(value):
+    return [x for x in normalize_search_text(value).split() if len(x) >= 2]
+
+
+def local_search_products(query, sources=None, min_price=None, max_price=None, limit=100, offset=0):
+    """
+    Ищет сначала в нашей собственной БД.
+    Поиск намеренно строгий: все значимые слова запроса должны встретиться
+    хотя бы в одном из title/brand/category/description.
+    """
+    tokens = search_tokens(query)
+    if not tokens:
+        return []
+
+    sources = [str(x).lower() for x in (sources or []) if x]
+
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT
+            source, external_id, title, price, old_price, currency,
+            brand, category, description, image, link, rating, reviews,
+            is_available, availability_status, last_seen_at, last_checked_at,
+            created_at, updated_at
+        FROM products
+        WHERE is_available = 1
+    """).fetchall()
+
+    result = []
+
+    for row in rows:
+        if sources and row["source"].lower() not in sources:
+            continue
+
+        if min_price is not None and (row["price"] is None or float(row["price"] or 0) < min_price):
+            continue
+        if max_price is not None and (row["price"] is None or float(row["price"] or 0) > max_price):
+            continue
+
+        haystack = normalize_search_text(" ".join([
+            row["title"] or "",
+            row["brand"] or "",
+            row["category"] or "",
+            row["description"] or "",
+        ]))
+
+        words = set(haystack.split())
+        if not all(token in words or any(
+            len(token) >= 5 and (token in word or word in token)
+            for word in words
+        ) for token in tokens):
+            continue
+
+        exact = sum(1 for token in tokens if token in words)
+        prefix = sum(
+            1 for token in tokens
+            if any(word.startswith(token) for word in words)
+        )
+
+        item = {
+            "id": f"{row['source']}_{row['external_id']}",
+            "source": row["source"],
+            "external_id": row["external_id"],
+            "title": row["title"],
+            "name": row["title"],
+            "price": row["price"],
+            "oldPrice": row["old_price"],
+            "currency": row["currency"],
+            "brand": row["brand"],
+            "category": row["category"],
+            "description": row["description"],
+            "image": row["image"],
+            "images": [row["image"]] if row["image"] else [],
+            "link": row["link"],
+            "url": row["link"],
+            "rating": row["rating"],
+            "reviews": row["reviews"],
+            "available": bool(row["is_available"]),
+            "stock": bool(row["is_available"]),
+            "availability_status": row["availability_status"],
+            "last_seen_at": row["last_seen_at"],
+            "last_checked_at": row["last_checked_at"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "_match_score": exact * 100 + prefix * 10
+        }
+        result.append(item)
+
+    conn.close()
+
+    result.sort(key=lambda x: (
+        -x["_match_score"],
+        -(x["updated_at"] or "")
+    ))
+
+    for item in result:
+        item.pop("_match_score", None)
+
+    return result[offset:offset + limit]
+
+
+def count_local_search_products(query, sources=None, min_price=None, max_price=None):
+    return len(local_search_products(
+        query, sources=sources, min_price=min_price, max_price=max_price,
+        limit=100000, offset=0
+    ))
+
+
+def reef_wildberries_search(query, page=1, country="by", price_min=None, price_max=None):
+    """
+    Первый внешний источник для lazy-catalog: Wildberries через ReefAPI.
+    Ключ берётся из REEF_KEY на Railway.
+    """
+    if not REEF_API_KEY:
+        return []
+
+    payload = {
+        "query": query,
+        "country": country,
+        "page": max(1, min(int(page), 3)),
+    }
+
+    if price_min is not None:
+        payload["price_min"] = price_min
+    if price_max is not None:
+        payload["price_max"] = price_max
+
+    try:
+        response = requests.post(
+            f"{REEF_API_BASE}/wildberries/v1/search",
+            headers={
+                "x-api-key": REEF_API_KEY,
+                "content-type": "application/json",
+            },
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+        body = response.json()
+
+        if not body.get("ok"):
+            print("ReefAPI error:", body.get("error"))
+            return []
+
+        data = body.get("data") or {}
+        rows = data.get("results") or []
+
+        products = []
+
+        for item in rows:
+            product_id = item.get("product_id")
+            if not product_id:
+                continue
+
+            price = item.get("price")
+            was_price = item.get("was_price")
+
+            products.append({
+                "source": "wildberries",
+                "external_id": str(product_id),
+                "title": item.get("title") or item.get("name") or "Без названия",
+                "price": price,
+                "old_price": was_price,
+                "currency": item.get("currency") or "BYN",
+                "brand": item.get("brand") or "",
+                "category": item.get("category") or "",
+                "description": item.get("description") or "",
+                "image": item.get("image") or "",
+                "link": item.get("url") or "",
+                "rating": item.get("rating"),
+                "reviews": item.get("review_count") or item.get("reviews"),
+                "available": item.get("stock_quantity", 1) != 0,
+            })
+
+        return products
+
+    except Exception as e:
+        print(f"Ошибка ReefAPI/Wildberries: {e}")
+        return []
+
+
+def get_search_cache(query_key, source):
+    conn = get_db()
+    row = conn.execute("""
+        SELECT query_key, source, last_fetched_page, last_fetched_at, result_count
+        FROM search_cache
+        WHERE query_key = ? AND source = ?
+        LIMIT 1
+    """, (query_key, source)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_search_cache(query_key, source, page, result_count):
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO search_cache (
+            query_key, source, last_fetched_page, last_fetched_at, result_count
+        )
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)
+        ON CONFLICT(query_key, source)
+        DO UPDATE SET
+            last_fetched_page = excluded.last_fetched_page,
+            last_fetched_at = CURRENT_TIMESTAMP,
+            result_count = excluded.result_count
+    """, (query_key, source, page, result_count))
+    conn.commit()
+    conn.close()
+
+
+def lazy_search(query, sources=None, min_price=None, max_price=None, limit=100):
+    """
+    Главная точка lazy-каталога:
+    1) ищем в своей БД;
+    2) если мало — догружаем внешний источник;
+    3) сохраняем новые карточки;
+    4) повторно читаем БД и отдаём уже общий накопленный каталог.
+    """
+    query = normalize_search_text(query)
+    sources = [str(x).lower() for x in (sources or []) if x]
+
+    if not query:
+        return {
+            "products": [],
+            "local_count": 0,
+            "fetched": 0,
+            "source": "local"
+        }
+
+    local = local_search_products(
+        query,
+        sources=sources,
+        min_price=min_price,
+        max_price=max_price,
+        limit=limit
+    )
+
+    if len(local) >= min(LOCAL_SEARCH_MIN_RESULTS, limit):
+        return {
+            "products": local,
+            "local_count": len(local),
+            "fetched": 0,
+            "source": "local"
+        }
+
+    fetched_total = 0
+
+    # Сейчас ReefAPI подключён к WB. Остальные источники добавим
+    # отдельными адаптерами, не ломая общий механизм.
+    wanted_sources = sources or ["wildberries"]
+
+    if "wildberries" in wanted_sources:
+        cache = get_search_cache(query, "wildberries")
+        next_page = (cache["last_fetched_page"] + 1) if cache else 1
+
+        # Wildberries keyword search у ReefAPI имеет 3 страницы по 100.
+        while next_page <= 3:
+            new_products = reef_wildberries_search(
+                query,
+                page=next_page,
+                price_min=min_price,
+                price_max=max_price
+            )
+
+            if not new_products:
+                break
+
+            fetched_total += save_products(new_products)
+            update_search_cache(
+                query,
+                "wildberries",
+                next_page,
+                len(new_products)
+            )
+
+            local = local_search_products(
+                query,
+                sources=sources,
+                min_price=min_price,
+                max_price=max_price,
+                limit=limit
+            )
+
+            if len(local) >= min(LOCAL_SEARCH_MIN_RESULTS, limit):
+                break
+
+            next_page += 1
+
+    return {
+        "products": local,
+        "local_count": len(local),
+        "fetched": fetched_total,
+        "source": "local+reefapi" if fetched_total else "local"
+    }
+
+
 # =========================
 # INITIALIZE DATABASE
 # =========================
@@ -639,6 +1037,69 @@ def update_feed():
             "status": "error",
             "message": str(e)
         }), 500
+
+
+
+# =========================
+# LAZY SEARCH API
+# =========================
+
+@app.route("/api/search")
+def api_search():
+    query = request.args.get("query", "").strip()
+
+    sources_raw = request.args.get("sources", "").strip()
+    sources = [
+        x.strip().lower()
+        for x in sources_raw.split(",")
+        if x.strip()
+    ]
+
+    def parse_float(name):
+        value = request.args.get(name, "").strip()
+        if not value:
+            return None
+        try:
+            return float(value)
+        except ValueError:
+            return None
+
+    min_price = parse_float("min_price")
+    max_price = parse_float("max_price")
+
+    try:
+        result = lazy_search(
+            query,
+            sources=sources,
+            min_price=min_price,
+            max_price=max_price,
+            limit=max(1, min(int(request.args.get("limit", LOCAL_SEARCH_PAGE_SIZE)), 200))
+        )
+
+        return jsonify({
+            "status": "ok",
+            "query": query,
+            **result
+        })
+
+    except Exception as e:
+        print(f"Ошибка /api/search: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "products": []
+        }), 500
+
+
+@app.route("/api/search/more")
+def api_search_more():
+    """
+    Сейчас endpoint повторно выполняет lazy_search.
+    Если локального каталога мало, он получает следующую страницу ReefAPI.
+    Это специально сделано отдельным endpoint'ом, чтобы фронтенд мог
+    вызывать его, когда в ленте осталось мало карточек.
+    """
+    return api_search()
 
 
 # =========================
