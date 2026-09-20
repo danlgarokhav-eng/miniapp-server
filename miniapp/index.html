@@ -2054,17 +2054,18 @@ RECOMMENDATION SETTINGS
 ========================================================= */
 
 const PERSONALIZATION_START =
-    5;
+    3;
 
 const PERSONALIZATION_FULL =
-    50;
+    40;
 
-
+// Новому пользователю оставляем больше исследования каталога.
+// По мере накопления сигналов случайность уменьшается.
 const MIN_RANDOM_RATIO =
-    0.20;
+    0.10;
 
 const MAX_RANDOM_RATIO =
-    0.75;
+    0.35;
 
 
 const MAX_SAME_CATEGORY_STREAK =
@@ -4493,244 +4494,82 @@ PERSONALIZED FEED
 
 function buildPersonalizedFeed() {
 
-    if (
-        !allProducts.length
-    ) {
-
+    if (!Array.isArray(allProducts) || !allProducts.length) {
         products = [];
-
         return;
     }
 
-
     /*
-    ========================================================
-    ЭТАП 1
-
-    Сначала применяем пользовательские фильтры.
-
-    Только после этого запускаем
-    персонализацию.
-    ========================================================
+    Персональная лента работает только для общей ленты.
+    Явный серверный поиск имеет отдельный режим и сюда не попадает.
     */
+    if (activeServerSearch && String(activeServerSearch.query || '').trim()) {
+        return;
+    }
 
-    const filteredProducts =
-        applyProductFilters(
-            allProducts
-        );
+    const filteredProducts = applyProductFilters(allProducts);
 
-
-    console.log(
-        "[StyleFlow] После фильтров:",
-        filteredProducts.length
-    );
-
-
-    if (
-        !filteredProducts.length
-    ) {
-
+    if (!filteredProducts.length) {
         products = [];
-
-
-        console.log(
-            "[StyleFlow] Фильтры не дали результатов."
-        );
-
-
         return;
     }
 
-
     /*
-    ========================================================
-    ЭТАП 2
+    КЛЮЧЕВОЕ ПРАВИЛО:
+    просмотренные товары никогда не попадают обратно
+    в автоматические рекомендации.
 
-    Убираем просмотренные товары.
-    ========================================================
+    Исключение существует только для явного поиска, который
+    обрабатывается через performSearch()/prepareServerSearchFeed().
     */
-
-    const sortMode = activeFilters.sort || "relevance";
-
-    const strictFilterMode = Boolean(
-        String(activeFilters.query || "").trim() ||
-        activeFilters.minPrice !== null ||
-        activeFilters.maxPrice !== null ||
-        (Array.isArray(activeFilters.sources) && activeFilters.sources.length) ||
-        (Array.isArray(activeFilters.categories) && activeFilters.categories.length) ||
-        sortMode !== "relevance"
+    const viewedSet = new Set(
+        viewedProducts.map(id => String(id))
     );
 
-    // При активном фильтре показываем именно его набор.
-    // Просмотренные товары не выкидываем, иначе фильтр быстро
-    // мог бы закончиться пустой лентой.
-    const viewedSet =
-        new Set(
-            viewedProducts.map(
-                String
-            )
-        );
-
-
-    const unviewed =
-        filteredProducts.filter(
-            product =>
-                !viewedSet.has(
-                    String(product.id)
-                )
-        );
-
-
-    console.log(
-        "[StyleFlow] Всего товаров:",
-        allProducts.length
+    const candidates = filteredProducts.filter(product =>
+        product && !viewedSet.has(String(product.id))
     );
 
-
-    console.log(
-        "[StyleFlow] После фильтров:",
-        filteredProducts.length
-    );
-
-
-    console.log(
-        "[StyleFlow] Просмотрено:",
-        viewedSet.size
-    );
-
-
-    console.log(
-        "[StyleFlow] Непросмотренных:",
-        unviewed.length
-    );
-
-
-    /*
-    Уже просмотренные товары
-    никогда не возвращаем автоматически.
-    */
-
-    const candidates =
-        strictFilterMode
-            ? filteredProducts
-            : unviewed;
-
-
-    if (
-        !candidates.length
-    ) {
-
+    if (!candidates.length) {
         products = [];
-
-
-        console.log(
-            "[StyleFlow] Все доступные товары уже просмотрены."
-        );
-
-
+        console.log('[StyleFlow] Все подходящие товары уже просмотрены.');
         return;
     }
 
+    const profile = buildUserProfile();
+    const personalization = getPersonalizationStrength(profile.totalSignals);
+
+    console.log('[StyleFlow] Персональная лента:', {
+        totalProducts: allProducts.length,
+        candidates: candidates.length,
+        viewed: viewedSet.size,
+        signals: profile.totalSignals,
+        personalization
+    });
 
     /*
-    ========================================================
-    ЭТАП 3
-
-    Существующий алгоритм
-    персонализации.
-    ========================================================
+    До накопления истории не притворяемся, что знаем интересы пользователя.
+    Делаем исследовательскую ленту, но уже без повторов.
     */
-
-    if (strictFilterMode) {
-        products = filteredProducts.slice();
-        applyFeedSort(products, sortMode);
-
-        console.log(
-            "[StyleFlow] Строгий режим фильтра: ",
-            activeFilters
-        );
-
+    if (personalization <= 0) {
+        products = buildDiverseRandomFeed(shuffleArray(candidates));
+        applyFeedSort(products, activeFilters.sort || 'relevance');
         return;
     }
 
+    const scored = candidates.map(product => ({
+        product,
+        score: calculateRecommendationScore(product, profile)
+    }));
 
-    const profile =
-        buildUserProfile();
-
-
-    const personalization =
-        getPersonalizationStrength(
-            profile.totalSignals
-        );
-
-
-    console.log(
-        "[StyleFlow] Сила персонализации:",
+    products = buildWeightedDiverseFeed(
+        scored,
         personalization
     );
 
+    applyFeedSort(products, activeFilters.sort || 'relevance');
 
-    const shuffled =
-        shuffleArray(
-            candidates
-        );
-
-
-    if (
-        personalization <= 0
-    ) {
-
-        products =
-            buildDiverseRandomFeed(
-                shuffled
-            );
-
-        applyFeedSort(products, sortMode);
-
-
-        console.log(
-            "[StyleFlow] Новая лента — полностью случайная"
-        );
-
-
-        return;
-    }
-
-
-    const scored =
-        candidates.map(
-            product => ({
-
-                product,
-
-                score:
-                    calculateRecommendationScore(
-                        product,
-                        profile
-                    )
-            })
-        );
-
-
-    products =
-        buildWeightedDiverseFeed(
-            scored,
-            personalization
-        );
-
-    // Явная сортировка фильтра имеет приоритет над персонализацией.
-    applyFeedSort(products, sortMode);
-
-
-    console.log(
-        "[StyleFlow] Персональная лента построена"
-    );
-
-
-    console.log(
-        "[StyleFlow] Профиль:",
-        profile
-    );
+    console.log('[StyleFlow] Рекомендации построены.');
 }
 
 
@@ -4981,7 +4820,7 @@ function buildWeightedDiverseFeed(
             MAX_RANDOM_RATIO -
             MIN_RANDOM_RATIO
         ) *
-        personalization;
+        Math.max(0, Math.min(1, personalization));
 
 
     while (
@@ -5261,33 +5100,71 @@ function buildUserProfile() {
         totalSignals: 0
     };
 
-    viewedProducts.forEach(id => {
+    /*
+    Просмотр — слабый сигнал.
+    Более свежие действия имеют больший вес.
+    */
+    const viewed = Array.isArray(viewedProducts)
+        ? viewedProducts.slice(-200)
+        : [];
+
+    viewed.forEach((id, index) => {
         const product = findProductById(id);
         if (!product) return;
-        addProfileSignal(profile, product, 1);
+
+        const recency = 0.55 + (index + 1) / viewed.length * 0.45;
+        addProfileSignal(profile, product, 0.8 * recency);
     });
 
-    openedProducts.forEach(id => {
+    /*
+    Открытие карточки — значительно более сильный сигнал.
+    */
+    const opened = Array.isArray(openedProducts)
+        ? openedProducts.slice(-120)
+        : [];
+
+    opened.forEach((id, index) => {
         const product = findProductById(id);
         if (!product) return;
-        addProfileSignal(profile, product, 4);
+
+        const recency = 0.60 + (index + 1) / opened.length * 0.40;
+        addProfileSignal(profile, product, 4.0 * recency);
     });
 
-    favorites.forEach(product => {
-        const normalized = normalizeProduct(product);
-        addProfileSignal(profile, normalized, 7);
+    /*
+    Избранное — самый сильный явный сигнал интереса.
+    */
+    favorites.forEach(item => {
+        const product = normalizeProduct(item);
+        addProfileSignal(profile, product, 8);
     });
 
-    const searchHistory = loadJSON("styleflow_search_history", []);
+    /*
+    Поиск — сильный сигнал намерения.
+    Последние запросы важнее старых.
+    */
+    const searchHistory = loadJSON(
+        'styleflow_search_history',
+        []
+    );
+
     if (Array.isArray(searchHistory)) {
-        searchHistory.slice(-40).forEach(entry => {
-            const query = typeof entry === "string" ? entry : entry.query;
+        const recentSearches = searchHistory.slice(-40);
+
+        recentSearches.forEach((entry, index) => {
+            const query = typeof entry === 'string'
+                ? entry
+                : entry && entry.query;
+
             if (!query) return;
+
+            const recency = 0.60 + (index + 1) / recentSearches.length * 0.40;
 
             tokenizeForRecommendations(query).forEach(token => {
                 profile.keywords[token] =
-                    (profile.keywords[token] || 0) + 3;
-                profile.totalSignals += 3;
+                    (profile.keywords[token] || 0) + 5 * recency;
+
+                profile.totalSignals += 5 * recency;
             });
         });
     }
@@ -5427,146 +5304,93 @@ function calculateRecommendationScore(
     profile
 ) {
 
-    let score = 0;
+    if (!product || !profile) {
+        return 0;
+    }
 
+    let score = 0;
 
     const searchable = normalizeText([
         product.title,
         product.brand,
         product.category,
         product.description
-    ].filter(Boolean).join(" "));
+    ].filter(Boolean).join(' '));
 
+    /* Совпадение с тем, что пользователь реально ищет. */
     tokenizeForRecommendations(searchable).forEach(token => {
         const weight = profile.keywords[token];
-        if (weight) score += weight * 1.8;
+        if (weight) {
+            score += weight * 2.4;
+        }
     });
 
-
-    const category =
-        normalizeText(
-            product.category
-        );
-
-
-    if (
-        category &&
-        profile.categories[
-            category
-        ]
-    ) {
-
-        score +=
-            profile.categories[
-                category
-            ] *
-            5;
+    const category = normalizeText(product.category);
+    if (category && profile.categories[category]) {
+        score += profile.categories[category] * 6;
     }
 
-
-    const brand =
-        normalizeText(
-            product.brand
-        );
-
-
-    if (
-        brand &&
-        profile.brands[
-            brand
-        ]
-    ) {
-
-        score +=
-            profile.brands[
-                brand
-            ] *
-            7;
+    const brand = normalizeText(product.brand);
+    if (brand && profile.brands[brand]) {
+        score += profile.brands[brand] * 9;
     }
 
-
-    const source =
-        normalizeText(
-            product.source
-        );
-
-
-    if (
-        source &&
-        profile.sources[
-            source
-        ]
-    ) {
-
-        score +=
-            profile.sources[
-                source
-            ] *
-            2;
+    const source = normalizeText(product.source);
+    if (source && profile.sources[source]) {
+        score += profile.sources[source] * 1.5;
     }
 
-
+    /* Близость цены к привычному диапазону пользователя. */
     if (
         product.price !== null &&
-        profile.prices.length > 0
+        Number.isFinite(Number(product.price)) &&
+        profile.prices.length
     ) {
+        const averagePrice = getWeightedAveragePrice(profile.prices);
 
-        const averagePrice =
-            getWeightedAveragePrice(
-                profile.prices
+        if (averagePrice > 0) {
+            const difference = Math.abs(
+                Number(product.price) - averagePrice
             );
 
+            const percentage = difference / averagePrice;
 
-        if (
-            averagePrice > 0
-        ) {
-
-            const difference =
-                Math.abs(
-                    Number(
-                        product.price
-                    ) -
-                    averagePrice
-                );
-
-
-            const percentage =
-                difference /
-                averagePrice;
-
-
-            if (
-                percentage <= 0.10
-            ) {
-
-                score += 12;
-
-            } else if (
-                percentage <= 0.25
-            ) {
-
-                score += 7;
-
-            } else if (
-                percentage <= 0.50
-            ) {
-
+            if (percentage <= 0.10) {
+                score += 14;
+            } else if (percentage <= 0.25) {
+                score += 8;
+            } else if (percentage <= 0.50) {
                 score += 3;
             }
         }
     }
 
+    /* Небольшой бонус новым карточкам, чтобы лента не застывала. */
+    const dateValue = new Date(
+        product.updated_at || product.created_at || 0
+    ).getTime();
 
-    score +=
-        Math.random() * 4;
+    if (Number.isFinite(dateValue) && dateValue > 0) {
+        const ageDays = Math.max(
+            0,
+            (Date.now() - dateValue) / 86400000
+        );
 
+        if (ageDays <= 1) {
+            score += 2;
+        } else if (ageDays <= 7) {
+            score += 1;
+        }
+    }
 
-    return Math.max(
-        0,
-        score
-    );
+    /*
+    Очень маленькая случайность только для равных/похожих кандидатов.
+    Она не способна перебить сильный интерес пользователя.
+    */
+    score += Math.random() * 0.8;
+
+    return Math.max(0, score);
 }
-
 
 /* =========================================================
 WEIGHTED PRICE
