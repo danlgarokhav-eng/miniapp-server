@@ -68,7 +68,8 @@ false;
 /* ========================================================= SERVER USER
 HISTORY ========================================================= */
 
-let telegramUserId = null; let styleflowAccount = null;
+let telegramUserId = null; let styleflowAccountId = null; let
+styleflowAccount = null;
 
 let userHistoryLoaded = false;
 
@@ -205,7 +206,12 @@ getTelegramInitData(); if (!initData) return false;
 
         if (data && data.verified && data.user_id) {
             telegramUserId = String(data.user_id);
+            styleflowAccountId = data.account_id ? String(data.account_id) : null;
             styleflowAccount = data.account || null;
+
+            // После входа переключаем весь пользовательский кэш
+            // на конкретный STYLEFLOW account.
+            hydrateAccountLocalState();
             renderStyleflowAccount();
             console.log(
                 "[StyleFlow] STYLEFLOW аккаунт подтверждён:",
@@ -219,7 +225,7 @@ getTelegramInitData(); if (!initData) return false;
         console.error("[StyleFlow] Ошибка Telegram auth:", error);
     }
 
-    return Boolean(telegramUserId);
+    return false;
 
 }
 
@@ -270,9 +276,22 @@ async function logoutStyleflow() { try { await fetch(“/api/auth/logout”,
 console.error(“[StyleFlow] Ошибка выхода:”, error); }
 
     styleflowAccount = null;
+    styleflowAccountId = null;
+    telegramUserId = null;
+    favorites = [];
+    viewedProducts = [];
+    openedProducts = [];
     renderStyleflowAccount();
 
 }
+
+function showAccountRequiredState() { const productCard =
+document.getElementById(“productCard”); const feedEmpty =
+document.getElementById(“feedEmpty”); if (productCard)
+productCard.style.display = “none”; if (feedEmpty) {
+feedEmpty.style.display = ““; feedEmpty.innerHTML =
+<div class="empty-title">Войдите в STYLEFLOW</div>             <div class="empty-text">Откройте Mini App через кнопку регистрации в Telegram-боте.</div>;
+} }
 
 /* ========================================================= START
 ========================================================= */
@@ -294,12 +313,16 @@ document.addEventListener( “DOMContentLoaded”, async () => {
 
         renderCachedFeedImmediately();
 
-        const authPromise = authenticateTelegram();
-        const feedPromise = loadFeed();
+        const authenticated = await authenticateTelegram();
 
-        await authPromise;
+        if (!authenticated) {
+            console.warn("[StyleFlow] Пользователь не авторизован в STYLEFLOW. Ожидаем вход через Telegram.");
+            showAccountRequiredState();
+            return;
+        }
+
         await loadUserHistory();
-        await feedPromise;
+        await loadFeed();
 
         if (!activeServerSearch.query) {
             rebuildFeedKeepingPosition();
@@ -316,15 +339,8 @@ HISTORY ========================================================= */
 
 async function loadUserHistory() {
 
-    if (!telegramUserId) {
-
-        console.log(
-            "[StyleFlow] Telegram user.id не найден. Используем localStorage."
-        );
-
-
+    if (!styleflowAccountId) {
         userHistoryLoaded = true;
-
         return;
     }
 
@@ -333,9 +349,7 @@ async function loadUserHistory() {
 
         const response =
             await fetch(
-                `/api/user/history?user_id=${encodeURIComponent(
-                    telegramUserId
-                )}`,
+                `/api/user/history`,
                 {
                     cache: "no-store"
                 }
@@ -365,6 +379,9 @@ async function loadUserHistory() {
             data.status === "ok"
         ) {
 
+            // Серверная история — источник истины для аккаунта.
+            // Локальный кэш только дополняет её, но не смешивается
+            // с данными другого STYLEFLOW аккаунта.
             viewedProducts =
                 mergeUniqueIds(
                     viewedProducts,
@@ -577,9 +594,6 @@ async function syncUserAction( action, productId ) {
 
                 body: JSON.stringify({
 
-                    user_id:
-                        telegramUserId,
-
                     product_id:
                         String(
                             productId
@@ -658,7 +672,7 @@ serverSearchRequestId;
     try {
         const response = await fetch(
             `/api/feed?limit=${FEED_PAGE_SIZE}&offset=0`,
-            {cache: "no-store"}
+            {cache: "no-store", credentials: "include"}
         );
 
         if (!response.ok) throw new Error("Feed request failed");
@@ -725,7 +739,7 @@ async function loadMoreFeedProducts(force = false) { if (feedLoading ||
     try {
         const response = await fetch(
             `/api/feed?limit=${FEED_PAGE_SIZE}&offset=${feedOffset}`,
-            {cache: "no-store"}
+            {cache: "no-store", credentials: "include"}
         );
 
         if (!response.ok) {
@@ -961,6 +975,14 @@ function normalizeProduct( item, index = 0 ) {
                 : [image],
 
         url,
+
+        isAdult: Boolean(
+            item.is_adult ??
+            item.isAdult ??
+            /дилдо|вибратор|фаллоимитатор|порно|порнография|эротик|интим|секс|sex|porn|dildo|vibrator|xxx|adult/i.test(
+                `${title} ${brand} ${category} ${item.description || item.short_description || ""}`
+            )
+        ),
 
         raw: item
     };
@@ -5346,25 +5368,6 @@ document.getElementById(“resultCount”);
 
     query = String(query || "").trim();
 
-    if (isBlockedSearchQueryLocal(query)) {
-        const resultCount = document.getElementById("resultCount");
-        const resultList = document.getElementById("resultList");
-
-        if (resultCount) resultCount.textContent = "Поиск ограничен";
-
-        if (resultList) {
-            resultList.innerHTML = `
-                <div class="search-no-results search-blocked-message">
-                    🚫 Этот запрос нельзя использовать в поиске.<br>
-                    <span>Попробуй сформулировать запрос иначе.</span>
-                </div>
-            `;
-        }
-
-        showToast("Поисковый запрос заблокирован");
-        return;
-    }
-
     if (!query) {
         /*
         Пустой запрос полностью выключает режим серверного поиска.
@@ -5471,24 +5474,6 @@ document.getElementById(“resultCount”);
             return;
         }
 
-        if (data && data.blocked) {
-            products = [];
-            currentIndex = 0;
-            currentProduct = null;
-            serverSearchHasMore = false;
-
-            resultCount.textContent = "Поиск ограничен";
-            resultList.innerHTML = `
-                <div class="search-no-results search-blocked-message">
-                    🚫 Этот запрос нельзя использовать в поиске.<br>
-                    <span>Попробуй сформулировать запрос иначе.</span>
-                </div>
-            `;
-
-            showToast("Поисковый запрос заблокирован");
-            return;
-        }
-
         const incoming = Array.isArray(data.products)
             ? data.products.map(normalizeProduct)
             : [];
@@ -5577,10 +5562,6 @@ URLSearchParams();
 
     params.set("query", activeServerSearch.query || "");
     params.set("limit", "100");
-    if (telegramUserId) {
-        params.set("user_id", String(telegramUserId));
-    }
-
     if (activeServerSearch.sources && activeServerSearch.sources.length) {
         params.set("sources", activeServerSearch.sources.join(","));
     }
@@ -5605,15 +5586,6 @@ fetch( buildServerSearchUrl(more), { cache: “no-store” } );
     }
 
     const data = await response.json();
-
-    if (data.status === "blocked" || data.blocked) {
-        return {
-            ...data,
-            blocked: true,
-            products: [],
-            has_more: false
-        };
-    }
 
     if (data.status === "error") {
         throw new Error(data.message || "Server search error");
@@ -6982,6 +6954,31 @@ function showToast( message ) {
 
 }
 
+/* =========================================================
+ACCOUNT-SCOPED LOCAL STORAGE
+========================================================= */
+
+const ACCOUNT_LOCAL_KEYS = new Set([ “styleflow_favorites”,
+“styleflow_viewed”, “styleflow_opened”, “styleflow_search_history”,
+“styleflow_filters”, “styleflow_search_sources”]);
+
+function getAccountStorageKey(key) { if (ACCOUNT_LOCAL_KEYS.has(key) &&
+styleflowAccountId) { return
+styleflow_account_${styleflowAccountId}_${key}; } return key; }
+
+function hydrateAccountLocalState() { if (!styleflowAccountId) return;
+
+    favorites = loadJSON("styleflow_favorites", []);
+    viewedProducts = loadJSON("styleflow_viewed", []);
+    openedProducts = loadJSON("styleflow_opened", []);
+
+    const accountFilters = loadJSON("styleflow_filters", null);
+    if (accountFilters && typeof accountFilters === "object") {
+        activeFilters = accountFilters;
+    }
+
+}
+
 /* ========================================================= LOCAL
 STORAGE ========================================================= */
 
@@ -7019,7 +7016,7 @@ function saveJSON( key, value ) {
     try {
 
         localStorage.setItem(
-            key,
+            getAccountStorageKey(key),
             JSON.stringify(value)
         );
 
@@ -7840,6 +7837,7 @@ function buildPersonalizedFeed() { if (!Array.isArray(allProducts) ||
     const candidates =
         filtered.filter(
             product =>
+                !product.isAdult &&
                 !sfV3IsViewed(product)
         );
 
