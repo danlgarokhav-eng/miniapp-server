@@ -1,4 +1,3 @@
-
 /* =========================================================
 STYLEFLOW
 Personalized marketplace feed
@@ -5063,6 +5062,8 @@ function setupSearch() {
         return;
     }
 
+    renderRecentSearches();
+
 
     input.addEventListener(
         "input",
@@ -5118,6 +5119,51 @@ function setupSearch() {
 }
 
 
+function focusSearchInput() {
+    switchTab("search");
+    setTimeout(() => {
+        const input = document.getElementById("searchInput");
+        if (input) input.focus();
+    }, 80);
+}
+
+function renderRecentSearches() {
+    const block = document.getElementById("recentSearchesBlock");
+    const container = document.getElementById("recentSearches");
+    if (!block || !container) return;
+
+    const history = loadJSON("styleflow_search_history", []);
+    const items = Array.isArray(history)
+        ? history
+            .slice()
+            .reverse()
+            .map(item => typeof item === "string" ? item : item && item.query)
+            .filter(Boolean)
+            .map(String)
+            .filter((value, index, arr) => arr.findIndex(v => normalizeText(v) === normalizeText(value)) === index)
+            .slice(0, 6)
+        : [];
+
+    if (!items.length) {
+        container.innerHTML = "";
+        block.style.display = "none";
+        return;
+    }
+
+    block.style.display = "block";
+    container.innerHTML = items.map(query => `
+        <button type="button" class="chip recent-search-chip" data-recent-query="${escapeAttribute(query)}">
+            🕘 ${escapeHTML(query)}
+        </button>
+    `).join("");
+
+    container.querySelectorAll("[data-recent-query]").forEach(button => {
+        button.addEventListener("click", () => {
+            quickSearch(button.getAttribute("data-recent-query") || "");
+        });
+    });
+}
+
 function quickSearch(
     query
 ) {
@@ -5139,7 +5185,9 @@ function quickSearch(
 
 
     input.value =
-        query;
+        String(query || "").trim();
+
+    hideSearchSuggestions();
 
 
     const clearButton =
@@ -5382,154 +5430,66 @@ function searchTokenMatches(token, searchable) {
 }
 
 
-const UNIVERSAL_SEARCH_SUGGESTIONS = [
-    ["🚗", "машина", "автомобили"],
-    ["🚗", "автомобиль", "автомобили"],
-    ["🚗", "bmw", "автомобили"],
-    ["🚗", "mercedes", "автомобили"],
-    ["🚗", "audi", "автомобили"],
-    ["🏠", "квартира", "недвижимость"],
-    ["🏠", "дом", "недвижимость"],
-    ["🏠", "недвижимость", "недвижимость"],
-    ["💻", "ноутбук", "электроника"],
-    ["💻", "компьютер", "электроника"],
-    ["💻", "пк", "электроника"],
-    ["📱", "телефон", "электроника"],
-    ["📱", "iphone", "электроника"],
-    ["📱", "айфон", "электроника"],
-    ["📱", "samsung", "электроника"],
-    ["🔧", "ремонт", "услуги"],
-    ["🔧", "ремонт телефона", "услуги"],
-    ["🔧", "ремонт ноутбука", "услуги"],
-    ["🔧", "ремонт автомобиля", "услуги"],
-    ["🛠️", "строительство", "услуги"],
-    ["🪑", "мебель", "товары"],
-    ["🎮", "игровой компьютер", "электроника"],
-    ["🎧", "наушники", "электроника"],
-    ["📷", "камера", "электроника"],
-    ["⚙️", "запчасти", "автомобили"]
-];
-
-function rememberSearchQuery(query) {
-    const normalized = normalizeText(query);
-    if (!normalized || normalized.length < 2) return;
-
-    let history = loadJSON("styleflow_search_history", []);
-    if (!Array.isArray(history)) history = [];
-
-    history.push({
-        query: normalized,
-        created_at: Date.now()
-    });
-
-    if (history.length > 100) {
-        history = history.slice(-100);
-    }
-
-    saveJSON("styleflow_search_history", history);
-}
-
+// Поисковые подсказки показывают только реальные продолжения введённого текста.
+// Никаких популярных запросов, случайных категорий или нерелевантной истории.
 function buildDynamicSearchSuggestions(query) {
     const normalized = normalizeText(query);
-    if (!normalized) return [];
+    if (!normalized || normalized.length < 2) return [];
 
     const result = [];
     const used = new Set();
 
-    function add(icon, text, meta, score) {
-        const key = normalizeText(text);
-        if (!key || used.has(key)) return;
+    function add(text, meta) {
+        const value = String(text || '').trim();
+        const key = normalizeText(value);
+        if (!key || used.has(key) || !key.startsWith(normalized)) return;
+        if (key === normalized) return;
         used.add(key);
-        result.push({ icon, text, meta, score });
+        result.push({ icon: '⌕', text: value, meta: meta || 'продолжить запрос' });
     }
 
-    UNIVERSAL_SEARCH_SUGGESTIONS.forEach(([icon, text, meta]) => {
-        const n = normalizeText(text);
-        let score = 0;
-
-        if (n === normalized) score = 100;
-        else if (n.startsWith(normalized)) score = 85;
-        else if (n.includes(normalized)) score = 70;
-        else if (searchTokenMatches(normalized, n)) score = 55;
-
-        if (score) add(icon, text, meta, score);
-    });
-
-    const queryTokens = normalized.split(/\s+/).filter(Boolean);
-
+    // Сначала используем реальные названия/категории из каталога,
+    // но только те, которые НАЧИНАЮТСЯ с того, что уже ввёл пользователь.
     allProducts.forEach(product => {
-        const candidates = [
-            product.title,
-            product.brand,
-            product.category
-        ].filter(Boolean);
+        [product.title, product.brand, product.category].forEach(value => {
+            const text = String(value || '').trim();
+            const n = normalizeText(text);
+            if (!n || !n.startsWith(normalized)) return;
 
-        candidates.forEach(candidate => {
-            const clean = String(candidate).trim();
-            const candidateNormalized = normalizeText(clean);
-
-            if (!candidateNormalized || candidateNormalized.length < 2) return;
-
-            let score = 0;
-            if (candidateNormalized.startsWith(normalized)) score = 80;
-            else if (candidateNormalized.includes(normalized)) score = 65;
-            else if (queryTokens.some(token =>
-                searchTokenMatches(token, candidateNormalized)
-            )) score = 50;
-
-            if (score) {
-                add(
-                    sourceIcon(product.source),
-                    clean,
-                    sourceLabel(product.source),
-                    score
-                );
-            }
+            // Для длинных карточек берём только начало, чтобы подсказка
+            // была именно продолжением запроса, а не случайным названием товара.
+            const words = text.split(/\s+/).filter(Boolean);
+            if (words.length > 1) add(words.slice(0, Math.min(words.length, 4)).join(' '), sourceLabel(product.source));
+            else add(text, sourceLabel(product.source));
         });
     });
 
-    const history = loadJSON("styleflow_search_history", []);
+    // Затем — только прошлые запросы пользователя, если они тоже начинаются
+    // с текущего текста. Никаких совпадений по середине слова.
+    const history = loadJSON('styleflow_search_history', []);
     if (Array.isArray(history)) {
         history.slice().reverse().forEach(entry => {
-            const text = typeof entry === "string" ? entry : entry.query;
-            if (!text) return;
-
-            const n = normalizeText(text);
-            let score = 0;
-
-            if (n.startsWith(normalized)) score = 90;
-            else if (n.includes(normalized)) score = 72;
-            else if (searchTokenMatches(normalized, n)) score = 55;
-
-            if (score) add("🕘", text, "твой прошлый поиск", score);
+            const text = typeof entry === 'string' ? entry : entry && entry.query;
+            const n = normalizeText(text || '');
+            if (n && n.startsWith(normalized) && n !== normalized) {
+                add(String(text).trim(), 'твой прошлый запрос');
+            }
         });
     }
 
-    return result
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 7);
+    return result.slice(0, 5);
 }
 
 function renderSearchSuggestions(query) {
-    const box = document.getElementById("searchSuggestions");
+    const box = document.getElementById('searchSuggestions');
     if (!box) return;
-
-    const normalized = normalizeText(query);
-
-    if (!normalized) {
-        box.classList.remove("active");
-        box.innerHTML = "";
-        return;
-    }
-
     const suggestions = buildDynamicSearchSuggestions(query);
-
     if (!suggestions.length) {
-        box.classList.remove("active");
-        box.innerHTML = "";
+        box.classList.remove('active');
+        box.innerHTML = '';
+        box._suggestions = [];
         return;
     }
-
     box.innerHTML = suggestions.map((item, index) => `
         <button type="button" class="search-suggestion" onclick="selectSearchSuggestion(${index})">
             <span class="search-suggestion-icon">${escapeHTML(item.icon)}</span>
@@ -5539,59 +5499,34 @@ function renderSearchSuggestions(query) {
             </span>
             <span class="search-suggestion-hint">›</span>
         </button>
-    `).join("");
-
+    `).join('');
     box._suggestions = suggestions;
-    box.classList.add("active");
+    box.classList.add('active');
 }
 
 async function selectSearchSuggestion(index) {
-    const box = document.getElementById("searchSuggestions");
-    const input = document.getElementById("searchInput");
+    const box = document.getElementById('searchSuggestions');
+    const input = document.getElementById('searchInput');
     if (!box || !input || !box._suggestions) return;
-
     const item = box._suggestions[index];
     if (!item) return;
-
-    // Подсказка должна стать именно поисковым запросом.
-    // Раньше здесь запускался поиск без явной фиксации выбранного
-    // значения, из-за чего в некоторых сценариях в ленту попадал
-    // предыдущий каталог.
-    const selectedQuery = String(item.text || "").trim();
+    const selectedQuery = String(item.text || '').trim();
     if (!selectedQuery) return;
-
     input.value = selectedQuery;
-
-    const clearButton = document.getElementById("searchClear");
-    if (clearButton) clearButton.style.display = "flex";
-
-    box.classList.remove("active");
-    box.innerHTML = "";
-    box._suggestions = [];
-
-    // Сохраняем именно выбранную подсказку как запрос пользователя.
-    rememberSearchQuery(selectedQuery);
-
-    // Передаём запрос напрямую в серверный поиск и не используем
-    // старое значение фильтра/предыдущего поиска.
+    const clearButton = document.getElementById('searchClear');
+    if (clearButton) clearButton.style.display = 'flex';
+    hideSearchSuggestions();
     await performSearch(selectedQuery, {
-        sources: Array.isArray(activeSearchSources)
-            ? activeSearchSources.slice()
-            : [],
+        sources: Array.isArray(activeSearchSources) ? activeSearchSources.slice() : [],
         minPrice: null,
         maxPrice: null
     });
 }
 
-
-let searchSuggestionsFocusFix = false;
-
 function setupSearchSuggestionFocus() {
     const input = document.getElementById("searchInput");
     const box = document.getElementById("searchSuggestions");
-    if (!input || !box || searchSuggestionsFocusFix) return;
-
-    searchSuggestionsFocusFix = true;
+    if (!input || !box) return;
 
     input.addEventListener("focus", () => {
         const value = input.value.trim();
@@ -5600,16 +5535,13 @@ function setupSearchSuggestionFocus() {
 
     input.addEventListener("blur", () => {
         setTimeout(() => {
-            if (!box.matches(":hover") &&
-                document.activeElement !== input) {
-                box.classList.remove("active");
+            if (document.activeElement !== input && !box.matches(":hover")) {
+                hideSearchSuggestions();
             }
-        }, 180);
+        }, 160);
     });
 
-    box.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-    });
+    box.addEventListener("mousedown", event => event.preventDefault());
 }
 
 function hideSearchSuggestions() {
@@ -6603,7 +6535,7 @@ function toggleProductDetails() {
 
     const button = document.getElementById("productDetailsToggle");
     if (button) {
-        button.textContent = productDetailsCollapsed ? "⌃ Показать" : "⌄ Свернуть";
+        button.textContent = productDetailsCollapsed ? "⌄" : "⌃";
     }
 }
 
@@ -6741,14 +6673,12 @@ function setupSwipe() {
                 80
             ) {
 
-                if (
-                    deltaY < 0
-                ) {
-
+                // КАК В TIKTOK:
+                // палец ВВЕРХ = следующий новый товар;
+                // палец ВНИЗ = назад к только что просмотренному.
+                if (deltaY < 0) {
                     nextProduct();
-
                 } else {
-
                     previousProduct();
                 }
 
@@ -7125,39 +7055,41 @@ function animateCardChange(
     direction,
     allowViewed = false
 ) {
+    const card = document.getElementById("productCard");
+    if (!card) return;
 
-    const card =
-        document.getElementById(
-            "productCard"
-        );
+    const next = direction === "next";
+    card.classList.add("sf-card-switching");
+    card.classList.toggle("sf-card-next", next);
+    card.classList.toggle("sf-card-previous", !next);
 
-    if (!card) {
-        return;
-    }
-
+    // Текущая карточка физически уходит в ту же сторону, куда
+    // пользователь сделал жест. Новая карточка приходит с противоположной стороны.
+    card.style.transition = "transform .28s cubic-bezier(.22,.8,.25,1), opacity .22s ease";
+    card.style.transform = next ? "translate3d(0,-108vh,0)" : "translate3d(0,108vh,0)";
     card.style.opacity = "0";
 
-    card.style.transform =
-        direction === "next"
-            ? "translateY(-20px)"
-            : "translateY(20px)";
+    setTimeout(() => {
+        showProduct(allowViewed);
 
-    setTimeout(
-        () => {
+        card.style.transition = "none";
+        card.style.transform = next ? "translate3d(0,108vh,0)" : "translate3d(0,-108vh,0)";
+        card.style.opacity = "0";
 
-            showProduct(allowViewed);
-
-            requestAnimationFrame(
-                () => {
-
-                    card.style.opacity = "1";
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                card.style.transition = "transform .30s cubic-bezier(.22,.8,.25,1), opacity .26s ease";
+                card.style.transform = "translate3d(0,0,0)";
+                card.style.opacity = "1";
+                setTimeout(() => {
+                    card.classList.remove("sf-card-switching","sf-card-next","sf-card-previous");
+                    card.style.transition = "";
                     card.style.transform = "";
-                }
-            );
-
-        },
-        100
-    );
+                    card.style.opacity = "";
+                }, 320);
+            });
+        });
+    }, 285);
 }
 
 function resetCardPosition() {
@@ -7311,7 +7243,7 @@ function loadJSON(
 
         const value =
             localStorage.getItem(
-                key
+                getAccountStorageKey(key)
             );
 
 
@@ -9029,15 +8961,44 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         .search-box input { padding-right:104px !important; }
         .search-submit { position:absolute !important; right:52px !important; top:7px !important; z-index:4; width:40px !important; height:40px !important; margin:0 !important; }
         .search-clear { right:8px !important; top:8px !important; z-index:5; width:38px !important; height:38px !important; }
-        .product-details-toggle { top:auto !important; bottom:92px !important; right:14px !important; z-index:20 !important; padding:10px 13px !important; font-size:12px !important; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+        .price-row { display:flex !important; align-items:center !important; flex-wrap:wrap !important; gap:0 !important; }
+        .product-details-toggle { position:relative !important; top:auto !important; right:auto !important; bottom:auto !important; z-index:20 !important; width:24px !important; height:24px !important; min-width:24px !important; margin-left:7px !important; padding:0 !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border:1px solid rgba(255,255,255,.18) !important; border-radius:50% !important; background:rgba(0,0,0,.38) !important; color:rgba(255,255,255,.86) !important; font-size:13px !important; line-height:1 !important; box-shadow:none !important; backdrop-filter:blur(10px) !important; }
+        .product-details-toggle:active { transform:scale(.9); }
+        .card.details-collapsed .product-info { opacity:1 !important; transform:none !important; pointer-events:auto !important; }
+        .card.details-collapsed .product-info > :not(.price-row) { display:none !important; }
+        .card.details-collapsed .price-row { position:absolute !important; left:0 !important; bottom:0 !important; }
+        .card.details-collapsed .price-row .price { display:inline-block !important; }
+        .card.details-collapsed .price-row .old-price { display:none !important; }
+        .card.details-collapsed .product-details-toggle { display:inline-flex !important; }
+        .card.details-collapsed .open-product { display:none !important; }
+        .card.details-collapsed .product-info > .source-badge, .card.details-collapsed .product-info > .brand, .card.details-collapsed .product-info > .title, .card.details-collapsed .product-info > .meta { display:none !important; }
+        .sf-card-switching { will-change:transform,opacity; overflow:hidden !important; }
+        .sf-card-next, .sf-card-previous { backface-visibility:hidden; }
+        .search-home-panel { margin-top:6px; }
+        .search-home-subtitle { margin-top:-6px; color:rgba(255,255,255,.42); font-size:12px; line-height:1.45; }
+        .search-help-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; margin-top:14px; }
+        .search-help-card { min-width:0; min-height:72px; display:flex; align-items:center; gap:10px; padding:12px; border:1px solid rgba(255,255,255,.07); border-radius:16px; background:rgba(255,255,255,.045); color:#fff; text-align:left; cursor:pointer; }
+        .search-help-card:active { transform:scale(.98); }
+        .search-help-icon { width:34px; height:34px; flex:0 0 34px; display:flex; align-items:center; justify-content:center; border-radius:11px; background:rgba(155,124,255,.14); font-size:19px; }
+        .search-help-card b { display:block; font-size:12px; }
+        .search-help-card small { display:block; margin-top:3px; color:rgba(255,255,255,.4); font-size:10px; }
+        .recent-searches-block { margin-top:8px; }
+        .recent-searches:empty, #recentSearchesBlock:has(.recent-searches:empty) { display:none; }
+        .recent-search-chip { display:inline-flex; align-items:center; gap:6px; max-width:100%; }
         .profile-final-collections { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
         .profile-final-collection { min-height:96px; padding:14px; border:1px solid rgba(255,255,255,.08); border-radius:18px; background:rgba(255,255,255,.045); color:#fff; text-align:left; }
         .profile-final-reset { width:100%; margin-top:10px; padding:13px 14px; border:1px solid rgba(255,255,255,.1); border-radius:15px; background:rgba(255,255,255,.04); color:rgba(255,255,255,.78); font-weight:800; }
         .sf-search-progress { padding:48px 16px; text-align:center; }
         .sf-search-spinner { width:32px;height:32px;margin:0 auto 15px;border:3px solid rgba(255,255,255,.14);border-top-color:#fff;border-radius:50%;animation:sfSpin .8s linear infinite; }
-        .sf-search-step { min-height:20px;color:rgba(255,255,255,.55);font-size:12px;margin-top:7px; }
+        .sf-search-step { min-height:20px;color:rgba(255,255,255,.55);font-size:12px;margin-top:7px;opacity:1;transform:translateY(0);transition:opacity .48s ease,transform .48s ease,filter .48s ease; }
+        .sf-search-step.sf-step-out { opacity:0;transform:translateY(7px);filter:blur(3px); }
+        .sf-search-step.sf-step-in { opacity:1;transform:translateY(0);filter:blur(0); }
+        #searchSuggestions { display:none !important; }
+        .stats { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+        .profile-final-collection { cursor:pointer; transition:transform .18s ease,border-color .18s ease,background .18s ease; }
+        .profile-final-collection:active { transform:scale(.97); }
         @keyframes sfSpin { to { transform:rotate(360deg); } }
-        .card.sf-changing { transition:transform .18s ease,opacity .18s ease !important; }
+        .card.sf-changing { transition:transform .24s cubic-bezier(.22,.8,.25,1),opacity .24s ease !important; }
     `;
     document.head.appendChild(style);
 
@@ -9049,6 +9010,9 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
             const ok = await originalAuth.apply(this, arguments);
             if (ok && typeof window.loadServerFavorites === 'function') {
                 await window.loadServerFavorites();
+            }
+            if (ok && typeof renderRecentSearches === 'function') {
+                renderRecentSearches();
             }
             return ok;
         };
@@ -9176,13 +9140,43 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         if (heading) heading.textContent = 'Подборки';
         box.innerHTML = `
             <div class="profile-final-collections">
-                <button class="profile-final-collection" onclick="openCollectionSearch('Техника','ноутбук')"><b>💻 Техника</b><br><small>Ноутбуки, телефоны, электроника</small></button>
+                <button class="profile-final-collection" onclick="openCollectionSearch('Техника','техника')"><b>💻 Техника</b><br><small>Ноутбуки, телефоны, электроника</small></button>
                 <button class="profile-final-collection" onclick="openCollectionSearch('Одежда','одежда')"><b>👕 Одежда</b><br><small>Вещи и аксессуары</small></button>
                 <button class="profile-final-collection" onclick="openCollectionSearch('Билеты','билеты')"><b>🎟️ Билеты</b><br><small>События и поездки</small></button>
-                <button class="profile-final-collection" onclick="openCollectionSearch('Авто','автомобиль')"><b>🚗 Авто</b><br><small>Машины и запчасти</small></button>
+                <button class="profile-final-collection" onclick="openCollectionSearch('Авто','авто')"><b>🚗 Авто</b><br><small>Машины и запчасти</small></button>
             </div>
             <button class="profile-final-reset" onclick="resetRecommendationAlgorithm()">↻ Сбросить алгоритм рекомендаций</button>
         `;
+    };
+
+    // ---------- PROFILE COLLECTIONS: EXACT CATEGORY ----------
+    window.openCollectionSearch = async function (label, query) {
+        const input = document.getElementById('searchInput');
+        const q = String(query || label || '').trim();
+        if (!q) return;
+        if (input) {
+            input.value = q;
+            const clear = document.getElementById('searchClear');
+            if (clear) clear.style.display = 'flex';
+        }
+        hideSearchSuggestions();
+        switchTab('search');
+        await new Promise(resolve => setTimeout(resolve, 80));
+        await performSearch(q, {
+            sources: Array.isArray(activeSearchSources) ? activeSearchSources.slice() : [],
+            minPrice: null,
+            maxPrice: null,
+            collectionLabel: String(label || q)
+        });
+    };
+
+    // Подсказки полностью отключены: поиск запускается только по Enter,
+    // кнопке поиска или выбору последнего запроса.
+    window.renderSearchSuggestions = function () {};
+    window.selectSearchSuggestion = function () {};
+    window.hideSearchSuggestions = function () {
+        const box = document.getElementById('searchSuggestions');
+        if (box) { box.classList.remove('active'); box.innerHTML = ''; }
     };
 
     window.updateProfileInterests = function () { renderProfileRecommendations(); };
@@ -9218,7 +9212,10 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         const nav=document.getElementById(navs[tab]); if(nav) nav.classList.add('active');
         if(tab==='favorites'){ renderFavorites(); void loadServerFavorites(); }
         if(tab==='profile'){ updateProfile(); renderProfileRecommendations(); }
-        if(tab==='search'){ setTimeout(()=>document.getElementById('searchInput')?.focus(),100); }
+        if(tab==='search'){
+            if (typeof renderRecentSearches === 'function') renderRecentSearches();
+            setTimeout(()=>document.getElementById('searchInput')?.focus(),100);
+        }
     };
 
     // ---------- STRICT CLIENT SEARCH ----------
@@ -9238,66 +9235,257 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
     }
 
     // ---------- SEARCH: WAIT HERE, THEN FEED ONLY WITH THIS QUERY ----------
+    // ---------- SEARCH: SLOWER, SMOOTH PROGRESS + RELIABLE RETRY ----------
     window.performSearch = async function (query, options=null) {
-        const home=document.getElementById('searchHome'), results=document.getElementById('searchResults'), list=document.getElementById('resultList'), count=document.getElementById('resultCount');
+        const home=document.getElementById('searchHome');
+        const results=document.getElementById('searchResults');
+        const list=document.getElementById('resultList');
+        const count=document.getElementById('resultCount');
+        const input=document.getElementById('searchInput');
         query=String(query||'').trim();
         if(!home||!results||!list||!count) return;
-        if(!query){ activeServerSearch={query:'',sources:[],minPrice:null,maxPrice:null}; products=[]; currentProduct=null; resetNavigationHistory(); home.style.display='block'; results.classList.remove('active'); return; }
+
+        if(!query){
+            activeServerSearch={query:'',sources:[],minPrice:null,maxPrice:null};
+            products=[]; currentProduct=null; currentIndex=0; resetNavigationHistory();
+            home.style.display='block'; results.classList.remove('active');
+            hideSearchSuggestions();
+            return;
+        }
+
+        if(input) input.value=query;
+        hideSearchSuggestions();
+
         const requestId=++serverSearchRequestId;
-        activeServerSearch={query,sources:Array.isArray(options?.sources)?options.sources.slice():[],minPrice:options?.minPrice??null,maxPrice:options?.maxPrice??null};
-        serverSearchHasMore=true; serverSearchLoading=true; products=[]; currentProduct=null; currentIndex=0; resetNavigationHistory(); switchTab('search'); home.style.display='none'; results.classList.add('active');
-        const steps=['Ищем в базе STYLEFLOW…','Проверяем Wildberries…','Проверяем Kufar…','Отбираем точные совпадения…','Готовим выдачу…'];
-        let step=0; clearInterval(window.__sfSearchTimer); list.innerHTML=`<div class="sf-search-progress"><div class="sf-search-spinner"></div><b>Ищем «${escapeHTML(query)}»</b><div id="sfSearchStep" class="sf-search-step">${steps[0]}</div></div>`;
-        count.textContent='Ищем…'; window.__sfSearchTimer=setInterval(()=>{step=(step+1)%steps.length;const n=document.getElementById('sfSearchStep');if(n)n.textContent=steps[step];},700);
+        activeServerSearch={
+            query,
+            sources:Array.isArray(options?.sources)?options.sources.slice():[],
+            minPrice:options?.minPrice??null,
+            maxPrice:options?.maxPrice??null
+        };
+        serverSearchHasMore=true;
+        serverSearchLoading=true;
+        products=[]; currentProduct=null; currentIndex=0; resetNavigationHistory();
+        switchTab('search');
+        home.style.display='none';
+        results.classList.add('active');
+
+        const steps=[
+            'Смотрим базу STYLEFLOW…',
+            'Проверяем площадки…',
+            'Ищем точные совпадения…',
+            'Сверяем категории и названия…',
+            'Собираем подходящие карточки…',
+            'Почти готово…'
+        ];
+        let step=0;
+        const minProgressMs=3600;
+        const progressStarted=Date.now();
+        clearInterval(window.__sfSearchTimer);
+
+        list.innerHTML=`<div class="sf-search-progress">
+            <div class="sf-search-spinner"></div>
+            <b>Ищем «${escapeHTML(query)}»</b>
+            <div id="sfSearchStep" class="sf-search-step sf-step-in">${steps[0]}</div>
+        </div>`;
+        count.textContent='Ищем…';
+
+        window.__sfSearchTimer=setInterval(()=>{
+            const node=document.getElementById('sfSearchStep');
+            if(!node) return;
+            node.classList.remove('sf-step-in');
+            node.classList.add('sf-step-out');
+            setTimeout(()=>{
+                if(!node || requestId!==serverSearchRequestId) return;
+                step=(step+1)%steps.length;
+                node.textContent=steps[step];
+                node.classList.remove('sf-step-out');
+                node.classList.add('sf-step-in');
+            },480);
+        },1800);
+
+        const params=new URLSearchParams({query,limit:'100'});
+        if(activeServerSearch.sources.length) params.set('sources',activeServerSearch.sources.join(','));
+        if(activeServerSearch.minPrice!=null) params.set('min_price',String(activeServerSearch.minPrice));
+        if(activeServerSearch.maxPrice!=null) params.set('max_price',String(activeServerSearch.maxPrice));
+
+        const localFallback=()=>{
+            const sourceCatalog=(Array.isArray(allProducts)&&allProducts.length)
+                ? allProducts
+                : loadJSON('styleflow_main_feed', []);
+            const local=(Array.isArray(sourceCatalog)?sourceCatalog:[])
+                .map(normalizeProduct)
+                .filter(p=>sfStrictProduct(p,query))
+                .filter(p=>!activeServerSearch.sources.length || activeServerSearch.sources.includes(String(p.source||'').toLowerCase()))
+                .filter(p=>activeServerSearch.minPrice==null || Number(p.price)>=Number(activeServerSearch.minPrice))
+                .filter(p=>activeServerSearch.maxPrice==null || Number(p.price)<=Number(activeServerSearch.maxPrice));
+            return local;
+        };
+
+        const fetchSearch=async()=>{
+            let response=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include',headers:{'Accept':'application/json'}});
+            if(response.status===401 && typeof authenticateTelegram==='function'){
+                const ok=await authenticateTelegram().catch(()=>false);
+                if(ok){
+                    response=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include',headers:{'Accept':'application/json'}});
+                }
+            }
+            if(!response.ok){
+                let body='';
+                try{ body=await response.text(); }catch(e){}
+                throw new Error('search '+response.status+(body?': '+body.slice(0,180):''));
+            }
+            return response.json();
+        };
+
         try{
-            const params=new URLSearchParams({query,limit:'100'});
-            if(activeServerSearch.sources.length) params.set('sources',activeServerSearch.sources.join(','));
-            if(activeServerSearch.minPrice!=null) params.set('min_price',String(activeServerSearch.minPrice));
-            if(activeServerSearch.maxPrice!=null) params.set('max_price',String(activeServerSearch.maxPrice));
-            const r=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include'});
-            if(!r.ok) throw new Error('search '+r.status);
-            const data=await r.json();
+            let data;
+            try {
+                data=await fetchSearch();
+            } catch(apiError) {
+                console.warn('[StyleFlow] server search failed, using local fallback:',apiError);
+                const fallback=localFallback();
+                if(!fallback.length) throw apiError;
+                data={status:'ok',products:fallback,local_fallback:true};
+            }
+
             if(requestId!==serverSearchRequestId) return;
-            const incoming=(Array.isArray(data.products)?data.products:[]).map(normalizeProduct).filter(p=>sfStrictProduct(p,query));
+
+            const incoming=(Array.isArray(data.products)?data.products:[])
+                .map(normalizeProduct)
+                .filter(p=>sfStrictProduct(p,query));
+
             mergeProductsIntoCatalog(incoming);
+            const elapsed=Date.now()-progressStarted;
+            if(elapsed<minProgressMs) await new Promise(resolve=>setTimeout(resolve,minProgressMs-elapsed));
+            if(requestId!==serverSearchRequestId) return;
+
             list.innerHTML='';
             count.textContent=incoming.length?`Найдено товаров: ${incoming.length}`:'Ничего точного не найдено';
-            if(!incoming.length){ list.innerHTML=`<div class="search-no-results">По запросу <b>${escapeHTML(query)}</b> точных товаров не нашли.<br><span>Попробуй другое написание или площадку.</span></div>`; return; }
-            incoming.forEach(p=>{const c=document.createElement('div');c.className='search-result-card';c.innerHTML=`<img src="${escapeAttribute(p.image||'')}" alt=""><div class="search-result-info"><div class="search-result-source">${escapeHTML(sourceLabel(p.source))}</div><div class="search-result-title">${escapeHTML(p.title||'')}</div><div class="search-result-price">${escapeHTML(formatPrice(p))}</div></div>`;c.onclick=()=>openProductFromObject(p);list.appendChild(c);});
+
+            if(!incoming.length){
+                list.innerHTML=`<div class="search-no-results">По запросу <b>${escapeHTML(query)}</b> ничего точного не нашли.<br><span>Попробуй изменить запрос или площадки.</span></div>`;
+                return;
+            }
+
+            incoming.forEach(p=>{
+                const c=document.createElement('div');
+                c.className='search-result-card';
+                c.innerHTML=`<img src="${escapeAttribute(p.image||'')}" alt=""><div class="search-result-info"><div class="search-result-source">${escapeHTML(sourceLabel(p.source))}</div><div class="search-result-title">${escapeHTML(p.title||'')}</div><div class="search-result-price">${escapeHTML(formatPrice(p))}</div></div>`;
+                c.onclick=()=>openProductFromObject(p);
+                list.appendChild(c);
+            });
+
             products=incoming.filter(p=>!isProductViewed(p));
             if(!products.length) products=incoming.slice();
-            currentIndex=0; resetNavigationHistory(); currentProduct=null;
+            currentIndex=0;
+            resetNavigationHistory();
+            currentProduct=null;
             rememberProductInNavigation(products[0]);
-            stopSearchProgress();
             switchTab('feed');
             showProduct(true);
             preloadUpcomingImages();
         }catch(e){
             console.error('[StyleFlow] search',e);
-            if(requestId===serverSearchRequestId){list.innerHTML='<div class="search-no-results">Не удалось выполнить поиск. Попробуй ещё раз.</div>';count.textContent='Ошибка поиска';}
-        }finally{if(requestId===serverSearchRequestId){serverSearchLoading=false;clearInterval(window.__sfSearchTimer);}}
+            if(requestId===serverSearchRequestId){
+                const elapsed=Date.now()-progressStarted;
+                if(elapsed<minProgressMs) await new Promise(resolve=>setTimeout(resolve,minProgressMs-elapsed));
+                list.innerHTML='<div class="search-no-results">Поиск временно недоступен.<br><span>Проверь подключение и попробуй ещё раз.</span></div>';
+                count.textContent='Не удалось выполнить поиск';
+            }
+        }finally{
+            if(requestId===serverSearchRequestId){
+                serverSearchLoading=false;
+                clearInterval(window.__sfSearchTimer);
+            }
+        }
     };
 
-    // ---------- NAVIGATION: UP = NEW, DOWN = PREVIOUS VIEWED ----------
+    // ---------- NAVIGATION: UP = PREVIOUS VIEWED, DOWN = NEW ----------
+    // ---------- NAVIGATION: DOWN = NEXT/NEW, UP = RECENTLY VIEWED ----------
     window.nextProduct = async function () {
-        if(!products.length){ buildPersonalizedFeed(); currentIndex=0; if(products.length){rememberProductInNavigation(products[0]); showProduct();} return; }
-        // If user moved back, going forward returns the exact next viewed card.
-        if(navigationPosition < navigationHistory.length-1){ navigationPosition++; const p=findProductById(navigationHistory[navigationPosition]); if(p){currentProduct=p; currentIndex=Math.max(0,products.findIndex(x=>String(x.id)===String(p.id))); animateCardChange('next',true); return;} }
+        if(!products.length){
+            buildPersonalizedFeed();
+            currentIndex=0;
+            if(products.length){
+                resetNavigationHistory();
+                rememberProductInNavigation(products[0]);
+                showProduct();
+            }
+            return;
+        }
+
+        // Если мы вернулись назад, свайп вниз возвращает нас вперёд
+        // по уже пройденному маршруту: А ← Б ← В → Б → В.
+        if(navigationPosition < navigationHistory.length-1){
+            navigationPosition++;
+            const p=findProductById(navigationHistory[navigationPosition]);
+            if(p){
+                currentProduct=p;
+                currentIndex=Math.max(0,products.findIndex(x=>String(x.id)===String(p.id)));
+                animateCardChange('next',true);
+                return;
+            }
+        }
+
         const next=findNextUnviewedIndex(currentIndex,1);
-        if(next>=0){ rememberProductInNavigation(currentProduct); currentIndex=next; rememberProductInNavigation(products[next]); animateCardChange('next',false); return; }
-        if(activeServerSearch.query && serverSearchHasMore){ if(await loadMoreServerProducts()){const n=findNextUnviewedIndex(currentIndex,1);if(n>=0){rememberProductInNavigation(currentProduct);currentIndex=n;rememberProductInNavigation(products[n]);animateCardChange('next',false);return;}} }
-        if(!activeServerSearch.query && feedHasMore){ if(await loadMoreFeedProducts(true)){const n=findNextUnviewedIndex(currentIndex,1);if(n>=0){rememberProductInNavigation(currentProduct);currentIndex=n;rememberProductInNavigation(products[n]);animateCardChange('next',false);return;}} }
+        if(next>=0){
+            currentIndex=next;
+            currentProduct=products[next];
+            rememberProductInNavigation(currentProduct);
+            animateCardChange('next',false);
+            return;
+        }
+
+        if(activeServerSearch.query && serverSearchHasMore){
+            if(await loadMoreServerProducts()){
+                const n=findNextUnviewedIndex(currentIndex,1);
+                if(n>=0){
+                    currentIndex=n;
+                    currentProduct=products[n];
+                    rememberProductInNavigation(currentProduct);
+                    animateCardChange('next',false);
+                    return;
+                }
+            }
+        }
+
+        if(!activeServerSearch.query && feedHasMore){
+            if(await loadMoreFeedProducts(true)){
+                const n=findNextUnviewedIndex(currentIndex,1);
+                if(n>=0){
+                    currentIndex=n;
+                    currentProduct=products[n];
+                    rememberProductInNavigation(currentProduct);
+                    animateCardChange('next',false);
+                    return;
+                }
+            }
+        }
+
         showToast(activeServerSearch.query?'По этому запросу больше товаров нет':'Ты просмотрел все доступные товары');
     };
 
     window.previousProduct = function () {
-        if(navigationPosition<=0){showToast('Это начало просмотренной ленты');return;}
+        // Свайп вверх НИКОГДА не ищет новый товар.
+        // Он только возвращает предыдущую карточку из текущей истории.
+        if(navigationPosition<=0){
+            showToast('Ты в начале просмотренной истории');
+            return;
+        }
+
         navigationPosition--;
         const id=navigationHistory[navigationPosition];
         const p=findProductById(id);
         if(!p) return;
+
         const idx=products.findIndex(x=>String(x.id)===String(id));
-        if(idx<0){products=[p,...products];currentIndex=0;}else currentIndex=idx;
+        if(idx<0){
+            products=[p,...products];
+            currentIndex=0;
+        }else{
+            currentIndex=idx;
+        }
         currentProduct=p;
         animateCardChange('previous',true);
     };
@@ -9316,3 +9504,124 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
     window.addEventListener('load', async ()=>{ if(styleflowAccountId) await loadServerFavorites(); });
 })();
 
+/* =========================================================
+   STYLEFLOW PREMIUM TAB NAVIGATION / GESTURES
+   ========================================================= */
+(function(){
+    const tabs=["feed","favorites","search","profile"];
+    const screens={feed:"feedScreen",favorites:"favoritesScreen",search:"searchScreen",profile:"profileScreen"};
+    const navs={feed:"navFeed",favorites:"navFavorites",search:"navSearch",profile:"navProfile"};
+    let animating=false;
+
+    const indexOfTab=t=>Math.max(0,tabs.indexOf(t));
+    const clearMotion=el=>el&&el.classList.remove("tab-enter-from-right","tab-enter-from-left","tab-leave-to-left","tab-leave-to-right");
+
+    let transitionId=0;
+
+    function premiumSwitchTab(tab,opts={}){
+        if(!screens[tab])return;
+        const oldTab=currentTab;
+        if(oldTab===tab&&!opts.force)return;
+
+        const id=++transitionId;
+        const direction=typeof opts.direction==="number"
+            ? (opts.direction<0?-1:1)
+            : (indexOfTab(tab)>indexOfTab(oldTab)?1:-1);
+
+        const oldScreen=document.getElementById(screens[oldTab]);
+        const newScreen=document.getElementById(screens[tab]);
+        if(!newScreen)return;
+
+        animating=true;
+
+        // Clean every previous motion state first.
+        Object.values(screens).forEach(screenId=>{
+            const el=document.getElementById(screenId);
+            if(!el)return;
+            clearMotion(el);
+            if(el!==oldScreen&&el!==newScreen)el.classList.remove("active");
+        });
+
+        // The incoming screen gets its own opaque layer, so the outgoing
+        // screen can never visually bleed through its text/content.
+        newScreen.classList.remove("active");
+        newScreen.classList.add(direction>0?"tab-enter-from-right":"tab-enter-from-left");
+        newScreen.style.zIndex="3";
+
+        if(oldScreen){
+            oldScreen.classList.add("active");
+            oldScreen.classList.add(direction>0?"tab-leave-to-left":"tab-leave-to-right");
+            oldScreen.style.zIndex="2";
+        }
+
+        // Force the initial position to be painted before activating it.
+        requestAnimationFrame(()=>{
+            requestAnimationFrame(()=>{
+                if(id!==transitionId)return;
+                newScreen.classList.add("active");
+                newScreen.classList.remove("tab-enter-from-right","tab-enter-from-left");
+            });
+        });
+
+        currentTab=tab;
+        Object.entries(navs).forEach(([name,navId])=>{
+            const el=document.getElementById(navId);
+            if(el)el.classList.toggle("active",name===tab);
+        });
+
+        if(tab==="favorites"&&typeof renderFavorites==="function")renderFavorites();
+        if(tab==="profile"&&typeof updateProfile==="function")updateProfile();
+        if(tab==="search"&&opts.focusSearch!==false){
+            setTimeout(()=>{
+                if(id!==transitionId)return;
+                const input=document.getElementById("searchInput");
+                if(input)input.focus();
+            },560);
+        }
+
+        setTimeout(()=>{
+            if(id!==transitionId)return;
+
+            // Critical: the old screen is removed from the active state.
+            // Without this, it returns to opacity:1 after the transition and
+            // sits underneath the new screen, causing the exact overlap bug.
+            if(oldScreen&&oldScreen!==newScreen){
+                oldScreen.classList.remove("active");
+                clearMotion(oldScreen);
+                oldScreen.style.zIndex="1";
+            }
+
+            newScreen.classList.add("active");
+            clearMotion(newScreen);
+            newScreen.style.zIndex="2";
+            animating=false;
+        },590);
+    }
+    window.switchTab=premiumSwitchTab;
+
+    function boot(){
+        const nav=document.querySelector(".bottom-nav");
+        if(nav&&!nav.dataset.premiumNav){
+            nav.dataset.premiumNav="1";
+            let glow=document.createElement("div");glow.className="nav-swipe-glow";nav.appendChild(glow);
+            let sx=0,sy=0,drag=false,moved=false;
+            const start=(x,y)=>{sx=x;sy=y;drag=true;moved=false;nav.classList.add("nav-dragging");nav.style.transition="none";};
+            const move=(x,y)=>{if(!drag)return;const dx=x-sx,dy=y-sy;if(Math.abs(dx)<=Math.abs(dy)*1.1)return;if(Math.abs(dx)>8)moved=true;const resistance=Math.max(-24,Math.min(24,dx*.1));nav.style.transform=`translate3d(calc(-50% + ${resistance}px),0,0)`;glow.style.left=`${Math.max(5,Math.min(nav.clientWidth-77,nav.clientWidth/2+dx*.32-36))}px`;};
+            const end=x=>{if(!drag)return;drag=false;nav.classList.remove("nav-dragging");nav.style.transition="";nav.style.transform="translate3d(-50%,0,0)";const dx=x-sx;if(Math.abs(dx)<55||!moved)return;const i=indexOfTab(currentTab),n=dx<0?i+1:i-1;if(n>=0&&n<tabs.length)premiumSwitchTab(tabs[n],{direction:dx<0?1:-1});else nav.animate([{transform:"translate3d(-50%,0,0)"},{transform:`translate3d(calc(-50% + ${dx<0?-9:9}px),0,0)`},{transform:"translate3d(-50%,0,0)"}],{duration:330,easing:"cubic-bezier(.16,1,.3,1)"});};
+            nav.addEventListener("touchstart",e=>{if(e.touches[0])start(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
+            nav.addEventListener("touchmove",e=>{if(e.touches[0])move(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
+            nav.addEventListener("touchend",e=>{if(e.changedTouches[0])end(e.changedTouches[0].clientX);},{passive:true});
+            nav.querySelectorAll(".nav-item").forEach(item=>{item.addEventListener("pointerdown",()=>item.classList.add("nav-press"));["pointerup","pointercancel","pointerleave"].forEach(t=>item.addEventListener(t,()=>item.classList.remove("nav-press")));});
+        }
+
+        const app=document.getElementById("app");
+        if(app&&!app.dataset.premiumTabSwipe){
+            app.dataset.premiumTabSwipe="1";
+            let sx=0,sy=0,active=false;
+            const ignored=t=>!t||!!t.closest("input,textarea,button,a,select,.product-card,#productCard,.bottom-nav,.search-results,.favorites-grid");
+            app.addEventListener("touchstart",e=>{if(!e.touches[0]||ignored(e.target))return;sx=e.touches[0].clientX;sy=e.touches[0].clientY;active=true;},{passive:true});
+            app.addEventListener("touchend",e=>{if(!active||!e.changedTouches[0])return;active=false;if(animating)return;const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;if(Math.abs(dx)<85||Math.abs(dx)<Math.abs(dy)*1.35)return;const i=indexOfTab(currentTab),n=dx<0?i+1:i-1;if(n>=0&&n<tabs.length)premiumSwitchTab(tabs[n],{direction:dx<0?1:-1});},{passive:true});
+        }
+    }
+    if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot,{once:true});else boot();
+})();
