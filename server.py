@@ -1336,45 +1336,101 @@ def update_search_cache(query_key, source, page, result_count):
 
 
 def lazy_search(query, sources=None, min_price=None, max_price=None, limit=100):
-    """Полный поиск: локальная БД + Wildberries/ReefAPI + Kufar."""
+    """
+    Надёжный поиск: локальная БД + доступные внешние источники.
+
+    Важный принцип: ошибка одной площадки НЕ должна превращать весь поиск
+    в HTTP 500. Если WB временно недоступен, результаты Kufar/БД всё равно
+    возвращаются, и наоборот.
+    """
     query = normalize_search_text(query)
     sources = [str(x).lower() for x in (sources or []) if x]
 
     if not query:
-        return {"products": [], "local_count": 0, "fetched": 0, "source": "local", "has_more": False}
+        return {
+            "products": [],
+            "local_count": 0,
+            "fetched": 0,
+            "source": "local",
+            "has_more": False,
+            "source_errors": []
+        }
 
-    local = local_search_products(query, sources=sources, min_price=min_price, max_price=max_price, limit=limit)
+    source_errors = []
     fetched_total = 0
     wanted_sources = sources or ["wildberries", "kufar"]
 
-    # First page from both active sources. This makes a fresh search actually search
-    # both marketplaces instead of relying on whatever happens to be in SQLite.
+    try:
+        local = local_search_products(
+            query,
+            sources=sources,
+            min_price=min_price,
+            max_price=max_price,
+            limit=limit
+        )
+    except Exception as exc:
+        print(f"Ошибка локального поиска: {exc}")
+        local = []
+        source_errors.append("local")
+
     if "wildberries" in wanted_sources:
-        cache = get_search_cache(query, "wildberries")
-        next_page = (cache["last_fetched_page"] + 1) if cache else 1
-        if next_page <= 3:
-            new_products = reef_wildberries_search(query, page=next_page, price_min=min_price, price_max=max_price)
-            if new_products:
-                fetched_total += save_products(new_products)
-                update_search_cache(query, "wildberries", next_page, len(new_products))
+        try:
+            cache = get_search_cache(query, "wildberries")
+            next_page = (cache["last_fetched_page"] + 1) if cache else 1
+            if next_page <= 3:
+                new_products = reef_wildberries_search(
+                    query,
+                    page=next_page,
+                    price_min=min_price,
+                    price_max=max_price
+                )
+                if new_products:
+                    fetched_total += save_products(new_products)
+                    update_search_cache(
+                        query, "wildberries", next_page, len(new_products)
+                    )
+        except Exception as exc:
+            print(f"Ошибка поиска Wildberries: {exc}")
+            source_errors.append("wildberries")
 
     if "kufar" in wanted_sources:
-        # Куфар отдаёт первую страницу по query; SQLite дедуплицирует повторные карточки.
-        new_products = kufar_search(query, page=1, size=KUFAR_FETCH_SIZE)
-        if new_products:
-            fetched_total += save_products(new_products)
-            update_search_cache(query, "kufar", 1, len(new_products))
+        try:
+            new_products = kufar_search(
+                query,
+                page=1,
+                size=KUFAR_FETCH_SIZE
+            )
+            if new_products:
+                fetched_total += save_products(new_products)
+                update_search_cache(
+                    query, "kufar", 1, len(new_products)
+                )
+        except Exception as exc:
+            print(f"Ошибка поиска Kufar: {exc}")
+            source_errors.append("kufar")
 
-    local = local_search_products(query, sources=sources, min_price=min_price, max_price=max_price, limit=limit)
+    try:
+        local = local_search_products(
+            query,
+            sources=sources,
+            min_price=min_price,
+            max_price=max_price,
+            limit=limit
+        )
+    except Exception as exc:
+        print(f"Ошибка повторного локального поиска: {exc}")
+        local = local or []
+        if "local" not in source_errors:
+            source_errors.append("local")
 
     return {
         "products": local,
         "local_count": len(local),
         "fetched": fetched_total,
         "source": "local+wildberries+kufar" if fetched_total else "local",
-        "has_more": bool(fetched_total)
+        "has_more": bool(fetched_total),
+        "source_errors": source_errors
     }
-
 
 
 # =========================
@@ -1826,48 +1882,67 @@ def api_search():
 
 
 def lazy_search_more(query, sources=None, min_price=None, max_price=None, limit=100):
+    """Догрузка следующей страницы без падения всего поиска из-за одного источника."""
     query = normalize_search_text(query)
     sources = [str(x).lower() for x in (sources or []) if x]
+
     if not query:
-        return {"products": [], "local_count": 0, "fetched": 0, "source": "local", "has_more": False}
+        return {"products": [], "local_count": 0, "fetched": 0, "source": "local", "has_more": False, "source_errors": []}
 
     wanted_sources = sources or ["wildberries", "kufar"]
     fetched_total = 0
-    exhausted = True
+    source_errors = []
 
     if "wildberries" in wanted_sources:
-        cache = get_search_cache(query, "wildberries")
-        next_page = (cache["last_fetched_page"] + 1) if cache else 1
-        if next_page <= 3:
-            exhausted = False
-            new_products = reef_wildberries_search(query, page=next_page, price_min=min_price, price_max=max_price)
-            if new_products:
-                fetched_total += save_products(new_products)
-                update_search_cache(query, "wildberries", next_page, len(new_products))
+        try:
+            cache = get_search_cache(query, "wildberries")
+            next_page = (cache["last_fetched_page"] + 1) if cache else 1
+            if next_page <= 3:
+                new_products = reef_wildberries_search(
+                    query, page=next_page,
+                    price_min=min_price, price_max=max_price
+                )
+                if new_products:
+                    fetched_total += save_products(new_products)
+                    update_search_cache("%s" % query, "wildberries", next_page, len(new_products))
+        except Exception as exc:
+            print(f"Ошибка догрузки Wildberries: {exc}")
+            source_errors.append("wildberries")
 
     if "kufar" in wanted_sources:
-        cache = get_search_cache(query, "kufar")
-        # Куфар endpoint currently returns a fresh first page without a portable cursor
-        # in the existing cache schema. Avoid hammering it endlessly: after one fetch,
-        # report no more until cache expires/replaced.
-        if not cache:
-            exhausted = False
-            new_products = kufar_search(query, page=1, size=KUFAR_FETCH_SIZE)
-            if new_products:
-                fetched_total += save_products(new_products)
-                update_search_cache(query, "kufar", 1, len(new_products))
+        try:
+            cache = get_search_cache(query, "kufar")
+            if not cache:
+                new_products = kufar_search(query, page=1, size=KUFAR_FETCH_SIZE)
+                if new_products:
+                    fetched_total += save_products(new_products)
+                    update_search_cache(query, "kufar", 1, len(new_products))
+        except Exception as exc:
+            print(f"Ошибка догрузки Kufar: {exc}")
+            source_errors.append("kufar")
 
-    local = local_search_products(query, sources=sources, min_price=min_price, max_price=max_price, limit=limit)
-    wb_cache = get_search_cache(query, "wildberries")
-    wb_more = bool(wb_cache and wb_cache.get("last_fetched_page", 0) < 3 and "wildberries" in wanted_sources)
-    kufar_more = bool(not get_search_cache(query, "kufar") and "kufar" in wanted_sources)
+    try:
+        local = local_search_products(
+            query, sources=sources,
+            min_price=min_price, max_price=max_price, limit=limit
+        )
+    except Exception as exc:
+        print(f"Ошибка локальной догрузки: {exc}")
+        local = []
+        source_errors.append("local")
+
+    wb_cache = get_search_cache(query, "wildberries") if "wildberries" in wanted_sources else None
+    kufar_cache = get_search_cache(query, "kufar") if "kufar" in wanted_sources else None
+    wb_more = bool(wb_cache and wb_cache.get("last_fetched_page", 0) < 3)
+    kufar_more = bool(not kufar_cache and "kufar" in wanted_sources)
 
     return {
         "products": local,
         "local_count": len(local),
         "fetched": fetched_total,
         "source": "local+wildberries+kufar" if fetched_total else "local",
-        "has_more": wb_more or kufar_more
+        "has_more": wb_more or kufar_more,
+        "source_errors": source_errors
     }
 
 
