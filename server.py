@@ -685,24 +685,29 @@ def score_server_product(product, opened, favorite_ids, queries):
 
 
 def get_recommended_feed_products(account_id, limit=120, offset=0):
-    # Pull a wider candidate pool, exclude adult and already viewed products,
-    # then rank by account signals. This means prefetch follows the user,
-    # rather than simply taking the next random catalog slice.
-    candidates = get_all_products(limit=600, offset=0)
+    """Персональная лента с отдельным порядком для каждого STYLEFLOW account."""
+    account_id = str(account_id)
     viewed, opened, favorite_ids, queries = get_account_recommendation_profile(account_id)
+    candidates = get_all_products(limit=2500, offset=0)
+    conn = get_db()
+    reset_row = conn.execute("SELECT recommendations_reset_at FROM users WHERE id = ? LIMIT 1", (int(account_id),)).fetchone()
+    conn.close()
+    reset_marker = str(reset_row["recommendations_reset_at"] or "") if reset_row else ""
+    import hashlib
     safe = []
     for product in candidates:
+        pid = str(product.get("id"))
         if is_adult_text(product.get("title"), product.get("category"), product.get("description"), product.get("brand")):
             continue
-        if str(product.get("id")) in viewed:
+        if pid in viewed:
             continue
         score = score_server_product(product, opened, favorite_ids, queries)
-        safe.append((score, product))
-    # Keep exploration: scores tie-break by a stable-ish catalog order.
-    safe.sort(key=lambda x: x[0], reverse=True)
-    selected = [p for _, p in safe[offset:offset + limit]]
+        digest = hashlib.sha256(f"styleflow:{account_id}:{reset_marker}:{pid}".encode("utf-8")).hexdigest()
+        tie = int(digest[:12], 16) / float(16 ** 12)
+        safe.append((score, tie, product))
+    safe.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    selected = [p for _, _, p in safe[offset:offset + limit]]
     return selected, len(safe)
-
 
 def get_database_stats():
 
@@ -951,6 +956,36 @@ def search_tokens(value):
     return [x for x in normalize_search_text(value).split() if len(x) >= 2]
 
 
+def strict_search_token_matches(token, text):
+    token = normalize_search_text(token)
+    text = normalize_search_text(text)
+    if not token or not text:
+        return False
+    words = re.findall(r"[a-zа-я0-9]+", text, flags=re.IGNORECASE)
+    aliases = {
+        "айфон": {"iphone"}, "iphone": {"айфон"},
+        "самсунг": {"samsung"}, "samsung": {"самсунг"},
+        "телефон": {"смартфон", "смартфоны", "phone", "iphone"},
+        "смартфон": {"телефон", "phone", "iphone", "айфон"},
+    }
+    variants = {token, *aliases.get(token, set())}
+    for word in words:
+        for variant in variants:
+            if word == variant or word.startswith(variant) or variant.startswith(word):
+                return True
+            if len(variant) >= 5 and len(word) >= 5 and (variant in word or word in variant):
+                return True
+    return False
+
+
+def strict_product_matches_query(product, query):
+    tokens = search_tokens(query)
+    if not tokens:
+        return False
+    core = " ".join([product.get("title") or "", product.get("brand") or "", product.get("category") or ""])
+    return all(strict_search_token_matches(t, core) for t in tokens)
+
+
 def local_search_products(query, sources=None, min_price=None, max_price=None, limit=100, offset=0):
     """
     Ищет сначала в нашей собственной БД.
@@ -990,29 +1025,19 @@ def local_search_products(query, sources=None, min_price=None, max_price=None, l
         if max_price is not None and (row["price"] is None or float(row["price"] or 0) > max_price):
             continue
 
-        haystack = normalize_search_text(" ".join([
-            row["title"] or "",
-            row["brand"] or "",
-            row["category"] or "",
-            row["description"] or "",
-        ]))
-
-        words = set(haystack.split())
-
-        def token_match(token):
-            if token in words:
-                return True
-            if len(token) >= 3 and any(word.startswith(token) or token.startswith(word) for word in words):
-                return True
-            if len(token) >= 5 and any(token in word or word in token for word in words):
-                return True
-            return False
-
-        if not all(token_match(token) for token in tokens):
+        product_for_match = {
+            "title": row["title"],
+            "brand": row["brand"],
+            "category": row["category"],
+            "description": row["description"],
+        }
+        if not strict_product_matches_query(product_for_match, query):
             continue
 
+        searchable = normalize_search_text(" ".join([row["title"] or "", row["brand"] or "", row["category"] or ""]))
+        words = set(searchable.split())
         exact = sum(1 for token in tokens if token in words)
-        prefix = sum(1 for token in tokens if token_match(token))
+        prefix = sum(1 for token in tokens if strict_search_token_matches(token, searchable))
 
         item = {
             "id": f"{row['source']}_{row['external_id']}",
@@ -1246,8 +1271,12 @@ def kufar_search(query, page=1, size=None):
         # В тестовом ответе Куфара цена приходит как целое число в копейках:
         # например 3500 = 35.00 BYN. Для полей price/price_value используем
         # этот формат; если API явно отдаёт уже денежный amount — не делим.
-        if "price" in item or "price_value" in item or item.get("price_cents") is not None:
-            price = price / 100.0
+        raw_text = str(price).strip().replace(" ", "")
+        explicit_cents = item.get("price_cents") is not None
+        if explicit_cents or raw_text.isdigit():
+            price = float(price or 0) / 100.0
+        else:
+            price = float(price or 0)
 
         photos = _first_value(item, "photos", "images", "gallery", default=[])
         if isinstance(photos, dict):
