@@ -1969,7 +1969,7 @@
                 id="searchInput"
                 type="text"
                 autocomplete="off"
-                placeholder="Что ищете? Например: машина, ноутбук, ремонт..."
+                placeholder="Что ищете?"
             >
 
             <button
@@ -1992,6 +1992,8 @@
 
         </div>
 
+        <div id="searchSuggestions" class="search-suggestions" aria-live="polite"></div>
+
         <div class="search-platforms">
             <div class="search-platforms-title">Искать на площадках</div>
             <div id="searchSources" class="search-source-chips">
@@ -2003,7 +2005,6 @@
             </div>
         </div>
 
-        <div id="searchSuggestions" class="search-suggestions"></div>
 
         <div id="searchHome" class="search-home-panel">
 
@@ -7348,10 +7349,16 @@ function renderRecentSearches() {
 
     block.style.display = "block";
     container.innerHTML = items.map(query => `
-        <button type="button" class="chip recent-search-chip" onclick="quickSearch(${JSON.stringify(query).replace(/</g, "\\u003c")})">
+        <button type="button" class="chip recent-search-chip" data-recent-query="${escapeAttribute(query)}">
             🕘 ${escapeHTML(query)}
         </button>
     `).join("");
+
+    container.querySelectorAll("[data-recent-query]").forEach(button => {
+        button.addEventListener("click", () => {
+            quickSearch(button.getAttribute("data-recent-query") || "");
+        });
+    });
 }
 
 function quickSearch(
@@ -7375,7 +7382,9 @@ function quickSearch(
 
 
     input.value =
-        query;
+        String(query || "").trim();
+
+    hideSearchSuggestions();
 
 
     const clearButton =
@@ -7618,152 +7627,66 @@ function searchTokenMatches(token, searchable) {
 }
 
 
-const UNIVERSAL_SEARCH_SUGGESTIONS = [
-    ["🚗", "машина", "автомобили"],
-    ["🚗", "автомобиль", "автомобили"],
-    ["🚗", "bmw", "автомобили"],
-    ["🚗", "mercedes", "автомобили"],
-    ["🚗", "audi", "автомобили"],
-    ["🏠", "квартира", "недвижимость"],
-    ["🏠", "дом", "недвижимость"],
-    ["🏠", "недвижимость", "недвижимость"],
-    ["💻", "ноутбук", "электроника"],
-    ["💻", "компьютер", "электроника"],
-    ["💻", "пк", "электроника"],
-    ["📱", "телефон", "электроника"],
-    ["📱", "iphone", "электроника"],
-    ["📱", "айфон", "электроника"],
-    ["📱", "samsung", "электроника"],
-    ["🔧", "ремонт", "услуги"],
-    ["🔧", "ремонт телефона", "услуги"],
-    ["🔧", "ремонт ноутбука", "услуги"],
-    ["🔧", "ремонт автомобиля", "услуги"],
-    ["🛠️", "строительство", "услуги"],
-    ["🪑", "мебель", "товары"],
-    ["🎮", "игровой компьютер", "электроника"],
-    ["🎧", "наушники", "электроника"],
-    ["📷", "камера", "электроника"],
-    ["⚙️", "запчасти", "автомобили"]
-];
-
-function rememberSearchQuery(query) {
-    const normalized = normalizeText(query);
-    if (!normalized || normalized.length < 2) return;
-
-    let history = loadJSON("styleflow_search_history", []);
-    if (!Array.isArray(history)) history = [];
-
-    history.push({
-        query: normalized,
-        created_at: Date.now()
-    });
-
-    if (history.length > 100) {
-        history = history.slice(-100);
-    }
-
-    saveJSON("styleflow_search_history", history);
-}
-
+// Поисковые подсказки показывают только реальные продолжения введённого текста.
+// Никаких популярных запросов, случайных категорий или нерелевантной истории.
 function buildDynamicSearchSuggestions(query) {
     const normalized = normalizeText(query);
-    if (!normalized) return [];
+    if (!normalized || normalized.length < 2) return [];
 
     const result = [];
     const used = new Set();
 
-    function add(icon, text, meta, score) {
-        const cleanText = String(text || "").trim();
-        const key = normalizeText(cleanText);
-        if (!key || used.has(key)) return;
+    function add(text, meta) {
+        const value = String(text || '').trim();
+        const key = normalizeText(value);
+        if (!key || used.has(key) || !key.startsWith(normalized)) return;
+        if (key === normalized) return;
         used.add(key);
-        result.push({ icon, text: cleanText, meta, score });
+        result.push({ icon: '⌕', text: value, meta: meta || 'продолжить запрос' });
     }
 
-    // В подсказках больше НЕ показываем общий каталог вроде BMW/ноутбуков/
-    // грузоперевозок и т.п. Подсказка должна быть связана именно с тем,
-    // что пользователь уже написал.
-    const queryTokens = normalized.split(/\s+/).filter(Boolean);
-
+    // Сначала используем реальные названия/категории из каталога,
+    // но только те, которые НАЧИНАЮТСЯ с того, что уже ввёл пользователь.
     allProducts.forEach(product => {
-        const candidates = [
-            product.title,
-            product.brand,
-            product.category
-        ].filter(Boolean);
+        [product.title, product.brand, product.category].forEach(value => {
+            const text = String(value || '').trim();
+            const n = normalizeText(text);
+            if (!n || !n.startsWith(normalized)) return;
 
-        candidates.forEach(candidate => {
-            const clean = String(candidate).trim();
-            const candidateNormalized = normalizeText(clean);
-            if (!candidateNormalized || candidateNormalized.length < 2) return;
-
-            let score = 0;
-            if (candidateNormalized === normalized) score = 100;
-            else if (candidateNormalized.startsWith(normalized)) score = 88;
-            else if (candidateNormalized.includes(normalized)) score = 76;
-            else if (queryTokens.some(token => searchTokenMatches(token, candidateNormalized))) score = 58;
-
-            if (score) {
-                add(
-                    sourceIcon(product.source),
-                    clean,
-                    sourceLabel(product.source),
-                    score
-                );
-            }
+            // Для длинных карточек берём только начало, чтобы подсказка
+            // была именно продолжением запроса, а не случайным названием товара.
+            const words = text.split(/\s+/).filter(Boolean);
+            if (words.length > 1) add(words.slice(0, Math.min(words.length, 4)).join(' '), sourceLabel(product.source));
+            else add(text, sourceLabel(product.source));
         });
     });
 
-    const history = loadJSON("styleflow_search_history", []);
+    // Затем — только прошлые запросы пользователя, если они тоже начинаются
+    // с текущего текста. Никаких совпадений по середине слова.
+    const history = loadJSON('styleflow_search_history', []);
     if (Array.isArray(history)) {
         history.slice().reverse().forEach(entry => {
-            const text = typeof entry === "string" ? entry : entry.query;
-            if (!text) return;
-
-            const n = normalizeText(text);
-            if (!n) return;
-
-            let score = 0;
-            if (n === normalized) score = 98;
-            else if (n.startsWith(normalized)) score = 92;
-            else if (n.includes(normalized)) score = 80;
-            else if (searchTokenMatches(normalized, n)) score = 64;
-
-            if (score) add("🕘", text, "твой прошлый поиск", score);
+            const text = typeof entry === 'string' ? entry : entry && entry.query;
+            const n = normalizeText(text || '');
+            if (n && n.startsWith(normalized) && n !== normalized) {
+                add(String(text).trim(), 'твой прошлый запрос');
+            }
         });
     }
 
-    // Если релевантных подсказок нет, показываем только сам запрос.
-    // Никаких случайных популярных слов.
-    if (!result.length) {
-        add("🔎", query.trim(), "искать этот запрос", 1);
-    }
-
-    return result
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 6);
+    return result.slice(0, 5);
 }
 
 function renderSearchSuggestions(query) {
-    const box = document.getElementById("searchSuggestions");
+    const box = document.getElementById('searchSuggestions');
     if (!box) return;
-
-    const normalized = normalizeText(query);
-
-    if (!normalized) {
-        box.classList.remove("active");
-        box.innerHTML = "";
-        return;
-    }
-
     const suggestions = buildDynamicSearchSuggestions(query);
-
     if (!suggestions.length) {
-        box.classList.remove("active");
-        box.innerHTML = "";
+        box.classList.remove('active');
+        box.innerHTML = '';
+        box._suggestions = [];
         return;
     }
-
     box.innerHTML = suggestions.map((item, index) => `
         <button type="button" class="search-suggestion" onclick="selectSearchSuggestion(${index})">
             <span class="search-suggestion-icon">${escapeHTML(item.icon)}</span>
@@ -7773,60 +7696,34 @@ function renderSearchSuggestions(query) {
             </span>
             <span class="search-suggestion-hint">›</span>
         </button>
-    `).join("");
-
+    `).join('');
     box._suggestions = suggestions;
-    box.classList.add("active");
+    box.classList.add('active');
 }
 
 async function selectSearchSuggestion(index) {
-    const box = document.getElementById("searchSuggestions");
-    const input = document.getElementById("searchInput");
+    const box = document.getElementById('searchSuggestions');
+    const input = document.getElementById('searchInput');
     if (!box || !input || !box._suggestions) return;
-
     const item = box._suggestions[index];
     if (!item) return;
-
-    // Подсказка должна стать именно поисковым запросом.
-    // Раньше здесь запускался поиск без явной фиксации выбранного
-    // значения, из-за чего в некоторых сценариях в ленту попадал
-    // предыдущий каталог.
-    const selectedQuery = String(item.text || "").trim();
+    const selectedQuery = String(item.text || '').trim();
     if (!selectedQuery) return;
-
     input.value = selectedQuery;
-
-    const clearButton = document.getElementById("searchClear");
-    if (clearButton) clearButton.style.display = "flex";
-
-    box.classList.remove("active");
-    box.innerHTML = "";
-    box._suggestions = [];
-
-    // Сохраняем именно выбранную подсказку как запрос пользователя.
-    rememberSearchQuery(selectedQuery);
-    renderRecentSearches();
-
-    // Передаём запрос напрямую в серверный поиск и не используем
-    // старое значение фильтра/предыдущего поиска.
+    const clearButton = document.getElementById('searchClear');
+    if (clearButton) clearButton.style.display = 'flex';
+    hideSearchSuggestions();
     await performSearch(selectedQuery, {
-        sources: Array.isArray(activeSearchSources)
-            ? activeSearchSources.slice()
-            : [],
+        sources: Array.isArray(activeSearchSources) ? activeSearchSources.slice() : [],
         minPrice: null,
         maxPrice: null
     });
 }
 
-
-let searchSuggestionsFocusFix = false;
-
 function setupSearchSuggestionFocus() {
     const input = document.getElementById("searchInput");
     const box = document.getElementById("searchSuggestions");
-    if (!input || !box || searchSuggestionsFocusFix) return;
-
-    searchSuggestionsFocusFix = true;
+    if (!input || !box) return;
 
     input.addEventListener("focus", () => {
         const value = input.value.trim();
@@ -7835,16 +7732,13 @@ function setupSearchSuggestionFocus() {
 
     input.addEventListener("blur", () => {
         setTimeout(() => {
-            if (!box.matches(":hover") &&
-                document.activeElement !== input) {
-                box.classList.remove("active");
+            if (document.activeElement !== input && !box.matches(":hover")) {
+                hideSearchSuggestions();
             }
-        }, 180);
+        }, 160);
     });
 
-    box.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-    });
+    box.addEventListener("mousedown", event => event.preventDefault());
 }
 
 function hideSearchSuggestions() {
@@ -8976,15 +8870,17 @@ function setupSwipe() {
                 80
             ) {
 
+                // Вверх = назад по уже просмотренной истории.
+                // Вниз = вперёд к следующему новому товару.
                 if (
                     deltaY < 0
                 ) {
 
-                    nextProduct();
+                    previousProduct();
 
                 } else {
 
-                    previousProduct();
+                    nextProduct();
                 }
 
 
@@ -9546,7 +9442,7 @@ function loadJSON(
 
         const value =
             localStorage.getItem(
-                key
+                getAccountStorageKey(key)
             );
 
 
@@ -11531,7 +11427,7 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         }finally{if(requestId===serverSearchRequestId){serverSearchLoading=false;clearInterval(window.__sfSearchTimer);}}
     };
 
-    // ---------- NAVIGATION: UP = NEW, DOWN = PREVIOUS VIEWED ----------
+    // ---------- NAVIGATION: UP = PREVIOUS VIEWED, DOWN = NEW ----------
     window.nextProduct = async function () {
         if(!products.length){ buildPersonalizedFeed(); currentIndex=0; if(products.length){rememberProductInNavigation(products[0]); showProduct();} return; }
         // If user moved back, going forward returns the exact next viewed card.
