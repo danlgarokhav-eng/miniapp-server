@@ -1701,7 +1701,7 @@
 
 
 /* STYLEFLOW PREMIUM NAVIGATION */
-.screen{display:block!important;visibility:hidden;pointer-events:none;opacity:0;transform:translate3d(8%,0,0) scale(.985);transform-origin:50% 50%;filter:blur(7px);will-change:transform,opacity,filter;transition:transform 520ms cubic-bezier(.22,1,.36,1),opacity 360ms ease,filter 520ms cubic-bezier(.22,1,.36,1),visibility 0s linear 520ms;z-index:1}
+.screen{display:block!important;visibility:hidden;pointer-events:none;opacity:0;transform:translate3d(8%,0,0) scale(.985);transform-origin:50% 50%;filter:blur(7px);will-change:transform,opacity,filter;transition:transform 560ms cubic-bezier(.16,1,.3,1),opacity 380ms ease,filter 560ms cubic-bezier(.16,1,.3,1),visibility 0s linear 560ms;z-index:1;background:#09090d;isolation:isolate}
 .screen.active{visibility:visible;pointer-events:auto;opacity:1;transform:translate3d(0,0,0) scale(1);filter:blur(0);z-index:2;transition:transform 560ms cubic-bezier(.16,1,.3,1),opacity 380ms ease,filter 560ms cubic-bezier(.16,1,.3,1),visibility 0s linear 0s}
 .screen.tab-enter-from-right{transform:translate3d(100%,0,0) scale(.965);opacity:0;filter:blur(10px)}
 .screen.tab-enter-from-left{transform:translate3d(-100%,0,0) scale(.965);opacity:0;filter:blur(10px)}
@@ -1746,13 +1746,6 @@
             </div>
 
             <div class="topbar-actions">
-                <button
-                    class="top-search"
-                    onclick="switchTab('search')"
-                    aria-label="Поиск"
-                >
-                    🔎
-                </button>
                 <button
                     id="filterButton"
                     class="top-filter"
@@ -11523,22 +11516,86 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
     const indexOfTab=t=>Math.max(0,tabs.indexOf(t));
     const clearMotion=el=>el&&el.classList.remove("tab-enter-from-right","tab-enter-from-left","tab-leave-to-left","tab-leave-to-right");
 
+    let transitionId=0;
+
     function premiumSwitchTab(tab,opts={}){
         if(!screens[tab])return;
         const oldTab=currentTab;
         if(oldTab===tab&&!opts.force)return;
-        const direction=typeof opts.direction==="number"?opts.direction:(indexOfTab(tab)>indexOfTab(oldTab)?1:-1);
+
+        const id=++transitionId;
+        const direction=typeof opts.direction==="number"
+            ? (opts.direction<0?-1:1)
+            : (indexOfTab(tab)>indexOfTab(oldTab)?1:-1);
+
         const oldScreen=document.getElementById(screens[oldTab]);
         const newScreen=document.getElementById(screens[tab]);
+        if(!newScreen)return;
+
         animating=true;
-        if(oldScreen){clearMotion(oldScreen);oldScreen.classList.add(direction>0?"tab-leave-to-left":"tab-leave-to-right");}
-        if(newScreen){clearMotion(newScreen);newScreen.classList.add(direction>0?"tab-enter-from-right":"tab-enter-from-left");newScreen.classList.add("active");requestAnimationFrame(()=>requestAnimationFrame(()=>clearMotion(newScreen)));}
+
+        // Clean every previous motion state first.
+        Object.values(screens).forEach(screenId=>{
+            const el=document.getElementById(screenId);
+            if(!el)return;
+            clearMotion(el);
+            if(el!==oldScreen&&el!==newScreen)el.classList.remove("active");
+        });
+
+        // The incoming screen gets its own opaque layer, so the outgoing
+        // screen can never visually bleed through its text/content.
+        newScreen.classList.remove("active");
+        newScreen.classList.add(direction>0?"tab-enter-from-right":"tab-enter-from-left");
+        newScreen.style.zIndex="3";
+
+        if(oldScreen){
+            oldScreen.classList.add("active");
+            oldScreen.classList.add(direction>0?"tab-leave-to-left":"tab-leave-to-right");
+            oldScreen.style.zIndex="2";
+        }
+
+        // Force the initial position to be painted before activating it.
+        requestAnimationFrame(()=>{
+            requestAnimationFrame(()=>{
+                if(id!==transitionId)return;
+                newScreen.classList.add("active");
+                newScreen.classList.remove("tab-enter-from-right","tab-enter-from-left");
+            });
+        });
+
         currentTab=tab;
-        Object.entries(navs).forEach(([name,id])=>{const el=document.getElementById(id);if(el)el.classList.toggle("active",name===tab);});
+        Object.entries(navs).forEach(([name,navId])=>{
+            const el=document.getElementById(navId);
+            if(el)el.classList.toggle("active",name===tab);
+        });
+
         if(tab==="favorites"&&typeof renderFavorites==="function")renderFavorites();
         if(tab==="profile"&&typeof updateProfile==="function")updateProfile();
-        if(tab==="search"&&opts.focusSearch!==false)setTimeout(()=>{const input=document.getElementById("searchInput");if(input)input.focus();},260);
-        setTimeout(()=>{if(oldScreen)clearMotion(oldScreen);animating=false;},590);
+        if(tab==="search"&&opts.focusSearch!==false){
+            setTimeout(()=>{
+                if(id!==transitionId)return;
+                const input=document.getElementById("searchInput");
+                if(input)input.focus();
+            },560);
+        }
+
+        setTimeout(()=>{
+            if(id!==transitionId)return;
+
+            // Critical: the old screen is removed from the active state.
+            // Without this, it returns to opacity:1 after the transition and
+            // sits underneath the new screen, causing the exact overlap bug.
+            if(oldScreen&&oldScreen!==newScreen){
+                oldScreen.classList.remove("active");
+                clearMotion(oldScreen);
+                oldScreen.style.zIndex="1";
+            }
+
+            newScreen.classList.add("active");
+            clearMotion(newScreen);
+            newScreen.style.zIndex="2";
+            animating=false;
+        },590);
     }
     window.switchTab=premiumSwitchTab;
 
