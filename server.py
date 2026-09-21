@@ -84,80 +84,63 @@ def get_db():
     return conn
 
 
+def _table_columns(conn, table_name):
+    """Возвращает набор колонок существующей SQLite-таблицы."""
+    try:
+        return {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+    except Exception:
+        return set()
+
+
+def _add_column_if_missing(conn, table_name, column_name, definition):
+    columns = _table_columns(conn, table_name)
+    if column_name not in columns:
+        conn.execute(
+            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"
+        )
+        return True
+    return False
+
+
 def init_db():
     conn = get_db()
 
     # ---------------------------------
     # PRODUCTS
     # ---------------------------------
-
     conn.execute("""
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-
             source TEXT NOT NULL,
             external_id TEXT NOT NULL,
-
             title TEXT,
             price REAL,
             old_price REAL,
             currency TEXT,
-
             brand TEXT,
             category TEXT,
             description TEXT,
-
             image TEXT,
             link TEXT,
-
             rating REAL,
             reviews INTEGER,
-
             is_available INTEGER DEFAULT 1,
-
             availability_status TEXT DEFAULT 'active',
             last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_checked_at TIMESTAMP,
-
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
             UNIQUE(source, external_id)
         )
     """)
 
     # ---------------------------------
-    # USER HISTORY
-    # ---------------------------------
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-            user_id TEXT NOT NULL,
-            product_id TEXT NOT NULL,
-            action TEXT NOT NULL,
-
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # Индекс для быстрого получения истории конкретного пользователя
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_user_history_user
-        ON user_history(user_id)
-    """)
-
-    # Индекс для поиска конкретного товара пользователя
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_user_history_product
-        ON user_history(user_id, product_id)
-    """)
-
-    # ---------------------------------
     # STYLEFLOW USERS
+    # ВАЖНО: users создаём ДО таблиц, которые ссылаются на users.id.
     # ---------------------------------
-
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,6 +155,18 @@ def init_db():
         )
     """)
 
+    # Миграция старой таблицы users, если она была создана предыдущей версией.
+    _add_column_if_missing(conn, "users", "telegram_username", "TEXT")
+    _add_column_if_missing(conn, "users", "first_name", "TEXT")
+    _add_column_if_missing(conn, "users", "last_name", "TEXT")
+    _add_column_if_missing(conn, "users", "photo_url", "TEXT")
+    _add_column_if_missing(conn, "users", "created_at", "TIMESTAMP")
+    _add_column_if_missing(conn, "users", "last_login_at", "TIMESTAMP")
+    _add_column_if_missing(conn, "users", "recommendations_reset_at", "TIMESTAMP")
+
+    # ---------------------------------
+    # SESSIONS
+    # ---------------------------------
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,21 +183,48 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_sessions_token_hash
         ON sessions(token_hash)
     """)
-
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_sessions_user
         ON sessions(user_id)
     """)
 
     # ---------------------------------
+    # USER HISTORY
+    # ---------------------------------
+    # Эта таблица исторически использовала user_id TEXT.
+    # Сейчас туда записывается постоянный STYLEFLOW account_id в виде строки.
+    # Поэтому существующие записи можно сохранить без пересоздания таблицы.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            product_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_history_user
+        ON user_history(user_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_history_product
+        ON user_history(user_id, product_id)
+    """)
+
+    # ---------------------------------
     # USER FAVORITES
     # ---------------------------------
+    # В v7 таблица имела user_id INTEGER NOT NULL.
+    # В v8+ используется account_id. Если обнаружена старая схема,
+    # пересобираем только эту маленькую таблицу и переносим все записи.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS user_favorites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            account_id INTEGER NOT NULL,
+            account_id INTEGER,
             product_id TEXT NOT NULL,
-            product_json TEXT NOT NULL,
+            product_json TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(account_id, product_id),
@@ -210,6 +232,57 @@ def init_db():
         )
     """)
 
+    favorite_columns = _table_columns(conn, "user_favorites")
+
+    if "user_id" in favorite_columns and "account_id" not in favorite_columns:
+        # Старая v7-схема. Создаём чистую v8-схему и переносим данные.
+        conn.execute("DROP TABLE IF EXISTS user_favorites_migration")
+        conn.execute("""
+            CREATE TABLE user_favorites_migration (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER,
+                product_id TEXT NOT NULL,
+                product_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(account_id, product_id),
+                FOREIGN KEY(account_id) REFERENCES users(id)
+            )
+        """)
+
+        conn.execute("""
+            INSERT OR IGNORE INTO user_favorites_migration
+                (id, account_id, product_id, product_json, created_at, updated_at)
+            SELECT
+                id,
+                CAST(user_id AS INTEGER),
+                product_id,
+                product_json,
+                created_at,
+                updated_at
+            FROM user_favorites
+            WHERE user_id IS NOT NULL
+        """)
+
+        conn.execute("DROP TABLE user_favorites")
+        conn.execute("ALTER TABLE user_favorites_migration RENAME TO user_favorites")
+        print("Миграция user_favorites: user_id -> account_id выполнена")
+
+    # Если таблица была создана промежуточной версией, достраиваем недостающие поля.
+    favorite_columns = _table_columns(conn, "user_favorites")
+    if "account_id" not in favorite_columns:
+        conn.execute("ALTER TABLE user_favorites ADD COLUMN account_id INTEGER")
+    if "product_json" not in favorite_columns:
+        conn.execute("ALTER TABLE user_favorites ADD COLUMN product_json TEXT")
+    if "created_at" not in favorite_columns:
+        conn.execute("ALTER TABLE user_favorites ADD COLUMN created_at TIMESTAMP")
+    if "updated_at" not in favorite_columns:
+        conn.execute("ALTER TABLE user_favorites ADD COLUMN updated_at TIMESTAMP")
+
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_user_favorites_account_product
+        ON user_favorites(account_id, product_id)
+    """)
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_user_favorites_account
         ON user_favorites(account_id, updated_at)
@@ -228,6 +301,15 @@ def init_db():
         )
     """)
 
+    search_columns = _table_columns(conn, "user_searches")
+    if "account_id" not in search_columns:
+        conn.execute("ALTER TABLE user_searches ADD COLUMN account_id INTEGER")
+        search_columns = _table_columns(conn, "user_searches")
+    if "query" not in search_columns:
+        conn.execute("ALTER TABLE user_searches ADD COLUMN query TEXT")
+    if "created_at" not in search_columns:
+        conn.execute("ALTER TABLE user_searches ADD COLUMN created_at TIMESTAMP")
+
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_user_searches_account
         ON user_searches(account_id, created_at)
@@ -236,8 +318,6 @@ def init_db():
     # ---------------------------------
     # SEARCH CACHE
     # ---------------------------------
-    # Храним нормализованные поисковые запросы и последнюю страницу,
-    # которую уже получили из внешнего источника.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS search_cache (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -250,29 +330,17 @@ def init_db():
         )
     """)
 
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_products_search_source
-        ON products(source, is_available, updated_at)
-    """)
-
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_products_external
-        ON products(source, external_id)
-    """)
-
-    # Мягкая миграция существующей SQLite базы:
-    # если products.db уже существует со старой схемой,
-    # добавляем новые колонки без удаления старых товаров.
-    existing_columns = {
-        row["name"]
-        for row in conn.execute("PRAGMA table_info(products)").fetchall()
-    }
-
+    # ---------------------------------
+    # PRODUCTS — мягкая миграция старой базы
+    # ---------------------------------
+    existing_columns = _table_columns(conn, "products")
     for column, definition in {
         "description": "TEXT",
         "availability_status": "TEXT DEFAULT 'active'",
         "last_seen_at": "TIMESTAMP",
         "last_checked_at": "TIMESTAMP",
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP",
     }.items():
         if column not in existing_columns:
             conn.execute(
@@ -282,19 +350,35 @@ def init_db():
     conn.execute("""
         UPDATE products
         SET availability_status = COALESCE(availability_status, 'active'),
-            last_seen_at = COALESCE(last_seen_at, updated_at)
+            last_seen_at = COALESCE(last_seen_at, updated_at, CURRENT_TIMESTAMP),
+            created_at = COALESCE(created_at, CURRENT_TIMESTAMP),
+            updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)
         WHERE availability_status IS NULL
            OR last_seen_at IS NULL
+           OR created_at IS NULL
+           OR updated_at IS NULL
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_products_search_source
+        ON products(source, is_available, updated_at)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_products_external
+        ON products(source, external_id)
     """)
 
     conn.commit()
     conn.close()
 
     print("========================================")
-    print("База данных инициализирована")
+    print("База данных инициализирована / миграция OK")
     print(f"DB: {DB_PATH}")
-    print("Таблица товаров: OK")
-    print("Таблица истории пользователей: OK")
+    print("Товары: OK")
+    print("Пользователи: OK")
+    print("История: OK")
+    print("Избранное: OK")
+    print("Поисковые события: OK")
     print("========================================")
 
 
