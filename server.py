@@ -195,26 +195,42 @@ def init_db():
     """)
 
     # ---------------------------------
-    # STYLEFLOW FAVORITES
+    # USER FAVORITES
     # ---------------------------------
-    # Избранное хранится на сервере и привязано к STYLEFLOW account_id,
-    # поэтому один Telegram-аккаунт видит его одинаково на всех устройствах.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS user_favorites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
+            account_id INTEGER NOT NULL,
             product_id TEXT NOT NULL,
-            product_json TEXT,
+            product_json TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, product_id),
-            FOREIGN KEY(user_id) REFERENCES users(id)
+            UNIQUE(account_id, product_id),
+            FOREIGN KEY(account_id) REFERENCES users(id)
         )
     """)
 
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_user_favorites_user
-        ON user_favorites(user_id, updated_at)
+        CREATE INDEX IF NOT EXISTS idx_user_favorites_account
+        ON user_favorites(account_id, updated_at)
+    """)
+
+    # ---------------------------------
+    # USER SEARCH EVENTS
+    # ---------------------------------
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_searches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id INTEGER NOT NULL,
+            query TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(account_id) REFERENCES users(id)
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_searches_account
+        ON user_searches(account_id, created_at)
     """)
 
     # ---------------------------------
@@ -460,11 +476,11 @@ def save_products(products):
     return saved
 
 
-def get_all_products():
+def get_all_products(limit=None, offset=0):
 
     conn = get_db()
 
-    rows = conn.execute("""
+    sql = """
         SELECT
             source,
             external_id,
@@ -483,7 +499,14 @@ def get_all_products():
         FROM products
         WHERE is_available = 1
         ORDER BY updated_at DESC
-    """).fetchall()
+    """
+
+    params = []
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([max(1, int(limit)), max(0, int(offset))])
+
+    rows = conn.execute(sql, params).fetchall()
 
     conn.close()
 
@@ -531,6 +554,70 @@ def get_all_products():
         })
 
     return products
+
+
+def get_account_recommendation_profile(account_id):
+    """Лёгкий серверный профиль для предзагрузки: история + избранное."""
+    account_id = str(account_id)
+    conn = get_db()
+    history_rows = conn.execute(
+        "SELECT product_id, action FROM user_history WHERE user_id = ? ORDER BY id DESC LIMIT 500",
+        (account_id,)
+    ).fetchall()
+    favorite_rows = conn.execute(
+        "SELECT product_id FROM user_favorites WHERE account_id = ? ORDER BY id DESC LIMIT 300",
+        (account_id,)
+    ).fetchall()
+    search_rows = conn.execute(
+        "SELECT query FROM user_searches WHERE account_id = ? ORDER BY id DESC LIMIT 50",
+        (account_id,)
+    ).fetchall()
+    conn.close()
+    viewed = {str(r["product_id"]) for r in history_rows if r["action"] == "view"}
+    opened = [str(r["product_id"]) for r in history_rows if r["action"] == "open"]
+    favorites = {str(r["product_id"]) for r in favorite_rows}
+    queries = [str(r["query"]) for r in search_rows]
+    return viewed, set(opened), favorites, queries
+
+
+def score_server_product(product, opened, favorite_ids, queries):
+    text = normalize_search_text(" ".join([
+        product.get("title") or "",
+        product.get("brand") or "",
+        product.get("category") or "",
+        product.get("description") or ""
+    ]))
+    score = 0.0
+    pid = str(product.get("id"))
+    if pid in favorite_ids:
+        score += 50
+    if pid in opened:
+        score += 15
+    for query in queries[-20:]:
+        for token in search_tokens(query):
+            if token in text:
+                score += 5
+    return score
+
+
+def get_recommended_feed_products(account_id, limit=120, offset=0):
+    # Pull a wider candidate pool, exclude adult and already viewed products,
+    # then rank by account signals. This means prefetch follows the user,
+    # rather than simply taking the next random catalog slice.
+    candidates = get_all_products(limit=600, offset=0)
+    viewed, opened, favorite_ids, queries = get_account_recommendation_profile(account_id)
+    safe = []
+    for product in candidates:
+        if is_adult_text(product.get("title"), product.get("category"), product.get("description"), product.get("brand")):
+            continue
+        if str(product.get("id")) in viewed:
+            continue
+        score = score_server_product(product, opened, favorite_ids, queries)
+        safe.append((score, product))
+    # Keep exploration: scores tie-break by a stable-ish catalog order.
+    safe.sort(key=lambda x: x[0], reverse=True)
+    selected = [p for _, p in safe[offset:offset + limit]]
+    return selected, len(safe)
 
 
 def get_database_stats():
@@ -827,17 +914,21 @@ def local_search_products(query, sources=None, min_price=None, max_price=None, l
         ]))
 
         words = set(haystack.split())
-        if not all(token in words or any(
-            len(token) >= 5 and (token in word or word in token)
-            for word in words
-        ) for token in tokens):
+
+        def token_match(token):
+            if token in words:
+                return True
+            if len(token) >= 3 and any(word.startswith(token) or token.startswith(word) for word in words):
+                return True
+            if len(token) >= 5 and any(token in word or word in token for word in words):
+                return True
+            return False
+
+        if not all(token_match(token) for token in tokens):
             continue
 
         exact = sum(1 for token in tokens if token in words)
-        prefix = sum(
-            1 for token in tokens
-            if any(word.startswith(token) for word in words)
-        )
+        prefix = sum(1 for token in tokens if token_match(token))
 
         item = {
             "id": f"{row['source']}_{row['external_id']}",
@@ -967,6 +1058,141 @@ def reef_wildberries_search(query, page=1, country="by", price_min=None, price_m
         return []
 
 
+KUFAR_API_URL = "https://cre-api.kufar.by/ads-search/v1/engine/v1/search/rendered-paginated"
+KUFAR_IMAGE_BASE = "https://rms.kufar.by/v1/gallery/"
+KUFAR_FETCH_SIZE = int(os.getenv("KUFAR_FETCH_SIZE", "100"))
+
+
+def _first_value(obj, *keys, default=None):
+    if not isinstance(obj, dict):
+        return default
+    for key in keys:
+        if key in obj and obj[key] not in (None, ""):
+            return obj[key]
+    return default
+
+
+def _kufar_photo_url(photo):
+    if isinstance(photo, str):
+        if photo.startswith("http"):
+            return photo
+        return KUFAR_IMAGE_BASE + photo.lstrip("/")
+    if isinstance(photo, dict):
+        value = _first_value(photo, "url", "path", "id", "name")
+        if value:
+            if str(value).startswith("http"):
+                return str(value)
+            return KUFAR_IMAGE_BASE + str(value).lstrip("/")
+    return ""
+
+
+def kufar_search(query, page=1, size=None):
+    """Получает объявления Куфара и приводит их к единому формату STYLEFLOW."""
+    size = max(10, min(int(size or KUFAR_FETCH_SIZE), 100))
+    params = {
+        "size": size,
+        "sort": "lst.d",
+        "query": query,
+    }
+    # Текущий endpoint Куфара использует cursor, но старые ответы могли
+    # не содержать его. Для совместимости поддерживаем оба варианта.
+    cache = get_search_cache(normalize_search_text(query), "kufar")
+    if cache and cache.get("result_count"):
+        # Cursor отдельно не храним в старой таблице; первый запрос безопаснее,
+        # а повторный вызов всё равно дедуплицируется SQLite UNIQUE.
+        pass
+
+    try:
+        response = requests.get(
+            KUFAR_API_URL,
+            params=params,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
+                "Accept": "application/json,text/plain,*/*",
+            },
+            timeout=25,
+        )
+        response.raise_for_status()
+        body = response.json()
+    except Exception as exc:
+        print(f"Ошибка Kufar search '{query}': {exc}")
+        return []
+
+    raw = []
+    if isinstance(body, dict):
+        candidates = [
+            body.get("ads"), body.get("items"), body.get("results"),
+            body.get("listings"),
+            (body.get("data") or {}).get("ads") if isinstance(body.get("data"), dict) else None,
+            (body.get("data") or {}).get("items") if isinstance(body.get("data"), dict) else None,
+            (body.get("data") or {}).get("results") if isinstance(body.get("data"), dict) else None,
+        ]
+        for candidate in candidates:
+            if isinstance(candidate, list):
+                raw = candidate
+                break
+    elif isinstance(body, list):
+        raw = body
+
+    products = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+
+        external_id = _first_value(item, "ad_id", "id", "advert_id", "cid")
+        if not external_id:
+            continue
+
+        title = _first_value(item, "subject", "title", "name", default="Без названия")
+        description = _first_value(item, "body", "description", "description_text", default="")
+        category = _first_value(item, "category_name", "category", default="")
+        brand = _first_value(item, "brand", "brand_name", default="")
+        link = _first_value(item, "ad_link", "url", "link", default="")
+
+        price = _first_value(item, "price", "price_byn", "price_value", default=0)
+        if isinstance(price, dict):
+            price = _first_value(price, "value", "amount", default=0)
+        try:
+            price = float(price or 0)
+        except Exception:
+            price = 0
+
+        # В некоторых ответах Куфар цена приходит в копейках (3500 -> 35.00).
+        # Если явно указана денежная единица/формат в копейках — переводим.
+        # В тестовом ответе Куфара цена приходит как целое число в копейках:
+        # например 3500 = 35.00 BYN. Для полей price/price_value используем
+        # этот формат; если API явно отдаёт уже денежный amount — не делим.
+        if "price" in item or "price_value" in item or item.get("price_cents") is not None:
+            price = price / 100.0
+
+        photos = _first_value(item, "photos", "images", "gallery", default=[])
+        if isinstance(photos, dict):
+            photos = list(photos.values())
+        if not isinstance(photos, list):
+            photos = [photos] if photos else []
+        images = [u for u in (_kufar_photo_url(x) for x in photos) if u]
+
+        products.append({
+            "source": "kufar",
+            "external_id": str(external_id),
+            "title": str(title or "Без названия"),
+            "price": price,
+            "old_price": _first_value(item, "old_price", "regular_price", default=None),
+            "currency": _first_value(item, "currency", "currency_code", default="BYN"),
+            "brand": str(brand or ""),
+            "category": str(category or ""),
+            "description": str(description or ""),
+            "image": images[0] if images else _kufar_photo_url(_first_value(item, "image", default="")),
+            "images": images,
+            "link": str(link or ""),
+            "rating": _first_value(item, "rating", default=None),
+            "reviews": _first_value(item, "reviews", "review_count", default=None),
+            "available": True,
+        })
+
+    return products
+
+
 def get_search_cache(query_key, source):
     conn = get_db()
     row = conn.execute("""
@@ -997,89 +1223,45 @@ def update_search_cache(query_key, source, page, result_count):
 
 
 def lazy_search(query, sources=None, min_price=None, max_price=None, limit=100):
-    """
-    Главная точка lazy-каталога:
-    1) ищем в своей БД;
-    2) если мало — догружаем внешний источник;
-    3) сохраняем новые карточки;
-    4) повторно читаем БД и отдаём уже общий накопленный каталог.
-    """
+    """Полный поиск: локальная БД + Wildberries/ReefAPI + Kufar."""
     query = normalize_search_text(query)
     sources = [str(x).lower() for x in (sources or []) if x]
 
     if not query:
-        return {
-            "products": [],
-            "local_count": 0,
-            "fetched": 0,
-            "source": "local"
-        }
+        return {"products": [], "local_count": 0, "fetched": 0, "source": "local", "has_more": False}
 
-    local = local_search_products(
-        query,
-        sources=sources,
-        min_price=min_price,
-        max_price=max_price,
-        limit=limit
-    )
-
-    if len(local) >= min(LOCAL_SEARCH_MIN_RESULTS, limit):
-        return {
-            "products": local,
-            "local_count": len(local),
-            "fetched": 0,
-            "source": "local"
-        }
-
+    local = local_search_products(query, sources=sources, min_price=min_price, max_price=max_price, limit=limit)
     fetched_total = 0
+    wanted_sources = sources or ["wildberries", "kufar"]
 
-    # Сейчас ReefAPI подключён к WB. Остальные источники добавим
-    # отдельными адаптерами, не ломая общий механизм.
-    wanted_sources = sources or ["wildberries"]
-
+    # First page from both active sources. This makes a fresh search actually search
+    # both marketplaces instead of relying on whatever happens to be in SQLite.
     if "wildberries" in wanted_sources:
         cache = get_search_cache(query, "wildberries")
         next_page = (cache["last_fetched_page"] + 1) if cache else 1
+        if next_page <= 3:
+            new_products = reef_wildberries_search(query, page=next_page, price_min=min_price, price_max=max_price)
+            if new_products:
+                fetched_total += save_products(new_products)
+                update_search_cache(query, "wildberries", next_page, len(new_products))
 
-        # Wildberries keyword search у ReefAPI имеет 3 страницы по 100.
-        while next_page <= 3:
-            new_products = reef_wildberries_search(
-                query,
-                page=next_page,
-                price_min=min_price,
-                price_max=max_price
-            )
-
-            if not new_products:
-                break
-
+    if "kufar" in wanted_sources:
+        # Куфар отдаёт первую страницу по query; SQLite дедуплицирует повторные карточки.
+        new_products = kufar_search(query, page=1, size=KUFAR_FETCH_SIZE)
+        if new_products:
             fetched_total += save_products(new_products)
-            update_search_cache(
-                query,
-                "wildberries",
-                next_page,
-                len(new_products)
-            )
+            update_search_cache(query, "kufar", 1, len(new_products))
 
-            local = local_search_products(
-                query,
-                sources=sources,
-                min_price=min_price,
-                max_price=max_price,
-                limit=limit
-            )
-
-            if len(local) >= min(LOCAL_SEARCH_MIN_RESULTS, limit):
-                break
-
-            next_page += 1
+    local = local_search_products(query, sources=sources, min_price=min_price, max_price=max_price, limit=limit)
 
     return {
         "products": local,
         "local_count": len(local),
         "fetched": fetched_total,
-        "source": "local+reefapi" if fetched_total else "local"
+        "source": "local+wildberries+kufar" if fetched_total else "local",
+        "has_more": bool(fetched_total)
     }
+
 
 
 # =========================
@@ -1531,68 +1713,48 @@ def api_search():
 
 
 def lazy_search_more(query, sources=None, min_price=None, max_price=None, limit=100):
-    """
-    Принудительно догружает следующую страницу внешнего источника.
-
-    В отличие от lazy_search() этот метод НЕ останавливается только потому,
-    что в локальной БД уже есть 30+ совпадений. Это нужно для бесконечной
-    ленты: /api/search/more должен действительно получать следующую пачку.
-    """
     query = normalize_search_text(query)
     sources = [str(x).lower() for x in (sources or []) if x]
-
     if not query:
-        return {
-            "products": [],
-            "local_count": 0,
-            "fetched": 0,
-            "source": "local",
-            "has_more": False
-        }
+        return {"products": [], "local_count": 0, "fetched": 0, "source": "local", "has_more": False}
 
+    wanted_sources = sources or ["wildberries", "kufar"]
     fetched_total = 0
-    wanted_sources = sources or ["wildberries"]
+    exhausted = True
 
     if "wildberries" in wanted_sources:
         cache = get_search_cache(query, "wildberries")
         next_page = (cache["last_fetched_page"] + 1) if cache else 1
-
         if next_page <= 3:
-            new_products = reef_wildberries_search(
-                query,
-                page=next_page,
-                price_min=min_price,
-                price_max=max_price
-            )
-
+            exhausted = False
+            new_products = reef_wildberries_search(query, page=next_page, price_min=min_price, price_max=max_price)
             if new_products:
-                fetched_total = save_products(new_products)
-                update_search_cache(
-                    query,
-                    "wildberries",
-                    next_page,
-                    len(new_products)
-                )
+                fetched_total += save_products(new_products)
+                update_search_cache(query, "wildberries", next_page, len(new_products))
 
-    local = local_search_products(
-        query,
-        sources=sources,
-        min_price=min_price,
-        max_price=max_price,
-        limit=limit
-    )
+    if "kufar" in wanted_sources:
+        cache = get_search_cache(query, "kufar")
+        # Куфар endpoint currently returns a fresh first page without a portable cursor
+        # in the existing cache schema. Avoid hammering it endlessly: after one fetch,
+        # report no more until cache expires/replaced.
+        if not cache:
+            exhausted = False
+            new_products = kufar_search(query, page=1, size=KUFAR_FETCH_SIZE)
+            if new_products:
+                fetched_total += save_products(new_products)
+                update_search_cache(query, "kufar", 1, len(new_products))
 
-    has_more = False
-    if "wildberries" in wanted_sources:
-        cache = get_search_cache(query, "wildberries")
-        has_more = bool(cache and cache["last_fetched_page"] < 3)
+    local = local_search_products(query, sources=sources, min_price=min_price, max_price=max_price, limit=limit)
+    wb_cache = get_search_cache(query, "wildberries")
+    wb_more = bool(wb_cache and wb_cache.get("last_fetched_page", 0) < 3 and "wildberries" in wanted_sources)
+    kufar_more = bool(not get_search_cache(query, "kufar") and "kufar" in wanted_sources)
 
     return {
         "products": local,
         "local_count": len(local),
         "fetched": fetched_total,
-        "source": "local+reefapi" if fetched_total else "local",
-        "has_more": has_more
+        "source": "local+wildberries+kufar" if fetched_total else "local",
+        "has_more": wb_more or kufar_more
     }
 
 
@@ -1662,131 +1824,24 @@ def api_feed():
     try:
         account = get_current_account()
         if not account:
-            return jsonify({
-                "status": "unauthorized",
-                "authenticated": False,
-                "products": [],
-                "has_more": False
-            }), 401
+            return jsonify({"status": "unauthorized", "authenticated": False, "products": [], "has_more": False}), 401
 
         limit = max(1, min(int(request.args.get("limit", "120")), 300))
         offset = max(0, int(request.args.get("offset", "0")))
-        products = get_all_products(limit=limit, offset=offset)
-        safe_products = []
-        for product in products:
-            if is_adult_text(product.get("title"), product.get("category"), product.get("description"), product.get("brand")):
-                continue
-            safe_products.append(product)
-
-        total = len(get_all_products())
+        products, safe_total = get_recommended_feed_products(account["account_id"], limit=limit, offset=offset)
         return jsonify({
             "status": "ok",
             "authenticated": True,
             "account_id": account["account_id"],
-            "products": safe_products,
+            "products": products,
             "offset": offset,
             "limit": limit,
-            "total": total,
-            "has_more": offset + limit < total
+            "total": safe_total,
+            "has_more": offset + len(products) < safe_total
         })
     except Exception as e:
         print(f"Ошибка /api/feed: {e}")
         return jsonify({"status": "error", "message": str(e), "products": []}), 500
-
-
-# =========================
-# USER FAVORITES API
-# =========================
-
-@app.route("/api/user/favorites", methods=["GET"])
-def api_user_favorites():
-    account = current_account()
-    if not account:
-        return jsonify({"status": "unauthorized", "message": "Требуется авторизация STYLEFLOW"}), 401
-
-    try:
-        conn = get_db()
-        rows = conn.execute("""
-            SELECT product_id, product_json
-            FROM user_favorites
-            WHERE user_id = ?
-            ORDER BY updated_at DESC, id DESC
-        """, (int(account["account_id"]),)).fetchall()
-        conn.close()
-
-        favorites = []
-        for row in rows:
-            try:
-                item = json.loads(row["product_json"]) if row["product_json"] else None
-            except Exception:
-                item = None
-            if not isinstance(item, dict):
-                item = {"id": str(row["product_id"])}
-            item["id"] = str(item.get("id") or row["product_id"])
-            favorites.append(item)
-
-        return jsonify({
-            "status": "ok",
-            "account_id": account["account_id"],
-            "favorites": favorites
-        })
-    except Exception as e:
-        print(f"Ошибка получения избранного: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route("/api/user/favorites", methods=["POST"])
-def api_user_favorite_add():
-    account = current_account()
-    if not account:
-        return jsonify({"status": "unauthorized", "message": "Требуется авторизация STYLEFLOW"}), 401
-
-    data = request.get_json(silent=True) or {}
-    product = data.get("product")
-    if not isinstance(product, dict) or not product.get("id"):
-        return jsonify({"status": "error", "message": "Нужен product"}), 400
-
-    product_id = str(product["id"])
-    try:
-        product_json = json.dumps(product, ensure_ascii=False, separators=(",", ":"))
-        conn = get_db()
-        conn.execute("""
-            INSERT INTO user_favorites (user_id, product_id, product_json, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(user_id, product_id)
-            DO UPDATE SET product_json = excluded.product_json, updated_at = CURRENT_TIMESTAMP
-        """, (int(account["account_id"]), product_id, product_json))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "ok", "action": "add", "product_id": product_id})
-    except Exception as e:
-        print(f"Ошибка добавления в избранное: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route("/api/user/favorites", methods=["DELETE"])
-def api_user_favorite_remove():
-    account = current_account()
-    if not account:
-        return jsonify({"status": "unauthorized", "message": "Требуется авторизация STYLEFLOW"}), 401
-
-    data = request.get_json(silent=True) or {}
-    product_id = str(data.get("product_id") or "").strip()
-    if not product_id:
-        return jsonify({"status": "error", "message": "Нужен product_id"}), 400
-
-    try:
-        conn = get_db()
-        conn.execute(
-            "DELETE FROM user_favorites WHERE user_id = ? AND product_id = ?",
-            (int(account["account_id"]), product_id)
-        )
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "ok", "action": "remove", "product_id": product_id})
-    except Exception as e:
-        print(f"Ошибка удаления из избранного: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # =========================
@@ -1952,6 +2007,110 @@ def api_user_open():
             "status": "error",
             "message": str(e)
         }), 500
+
+
+# =========================
+# ACCOUNT FAVORITES / SEARCH EVENTS / RESET
+# =========================
+
+def require_account():
+    account = get_current_account()
+    if not account:
+        return None
+    return account
+
+
+@app.route("/api/user/favorites", methods=["GET"])
+def api_user_favorites():
+    account = require_account()
+    if not account:
+        return jsonify({"status": "unauthorized", "products": []}), 401
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT product_json FROM user_favorites WHERE account_id = ? ORDER BY id DESC",
+        (account["account_id"],)
+    ).fetchall()
+    conn.close()
+    products = []
+    for row in rows:
+        try:
+            products.append(json.loads(row["product_json"]))
+        except Exception:
+            pass
+    return jsonify({"status": "ok", "products": products})
+
+
+@app.route("/api/user/favorite", methods=["POST"])
+def api_user_favorite():
+    account = require_account()
+    if not account:
+        return jsonify({"status": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    product = data.get("product") or {}
+    action = str(data.get("action") or "add").lower()
+    product_id = str(product.get("id") or data.get("product_id") or "").strip()
+    if not product_id:
+        return jsonify({"status": "error", "message": "product_id обязателен"}), 400
+
+    conn = get_db()
+    if action == "remove":
+        conn.execute(
+            "DELETE FROM user_favorites WHERE account_id = ? AND product_id = ?",
+            (account["account_id"], product_id)
+        )
+    else:
+        product = dict(product)
+        product["id"] = product_id
+        conn.execute(
+            """
+            INSERT INTO user_favorites(account_id, product_id, product_json, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(account_id, product_id)
+            DO UPDATE SET product_json = excluded.product_json, updated_at = CURRENT_TIMESTAMP
+            """,
+            (account["account_id"], product_id, json.dumps(product, ensure_ascii=False))
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "action": action, "product_id": product_id})
+
+
+@app.route("/api/user/search", methods=["POST"])
+def api_user_search_event():
+    account = require_account()
+    if not account:
+        return jsonify({"status": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    query = normalize_search_text(data.get("query", ""))
+    if query:
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO user_searches(account_id, query) VALUES (?, ?)",
+            (account["account_id"], query)
+        )
+        conn.commit()
+        conn.close()
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/user/reset-recommendations", methods=["POST"])
+def api_reset_recommendations():
+    account = require_account()
+    if not account:
+        return jsonify({"status": "unauthorized"}), 401
+
+    account_id = str(account["account_id"])
+    conn = get_db()
+    # Избранное НЕ трогаем: пользовательские лайки должны переживать сброс.
+    conn.execute("DELETE FROM user_history WHERE user_id = ?", (account_id,))
+    conn.execute("DELETE FROM user_searches WHERE account_id = ?", (account["account_id"],))
+    conn.execute(
+        "UPDATE users SET recommendations_reset_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (account["account_id"],)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "message": "Рекомендации сброшены"})
 
 
 # =========================
