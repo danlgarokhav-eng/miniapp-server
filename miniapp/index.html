@@ -1992,7 +1992,6 @@
 
         </div>
 
-        <div id="searchSuggestions" class="search-suggestions" aria-live="polite"></div>
 
         <div class="search-platforms">
             <div class="search-platforms-title">Искать на площадках</div>
@@ -2070,10 +2069,6 @@
                 <div class="stat-label">❤️ избранное</div>
             </div>
             <div class="stat">
-                <div id="viewedCount" class="stat-number">0</div>
-                <div class="stat-label">👁 просмотрено</div>
-            </div>
-            <div class="stat">
                 <div id="openedCount" class="stat-number">0</div>
                 <div class="stat-label">↗ открыто</div>
             </div>
@@ -2112,11 +2107,6 @@
                     <span>Найти что угодно</span>
                 </button>
             </div>
-        </div>
-
-        <div class="profile-section">
-            <div class="profile-section-title">История просмотров · последние 150</div>
-            <div id="recentGrid" class="recent-grid"></div>
         </div>
 
     </section>
@@ -8870,8 +8860,8 @@ function setupSwipe() {
                 80
             ) {
 
-                // Вверх = назад по уже просмотренной истории.
-                // Вниз = вперёд к следующему новому товару.
+                // Свайп пальцем ВНИЗ = следующий новый товар.
+                // Свайп пальцем ВВЕРХ = предыдущий уже просмотренный товар.
                 if (
                     deltaY < 0
                 ) {
@@ -11184,9 +11174,15 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         .profile-final-reset { width:100%; margin-top:10px; padding:13px 14px; border:1px solid rgba(255,255,255,.1); border-radius:15px; background:rgba(255,255,255,.04); color:rgba(255,255,255,.78); font-weight:800; }
         .sf-search-progress { padding:48px 16px; text-align:center; }
         .sf-search-spinner { width:32px;height:32px;margin:0 auto 15px;border:3px solid rgba(255,255,255,.14);border-top-color:#fff;border-radius:50%;animation:sfSpin .8s linear infinite; }
-        .sf-search-step { min-height:20px;color:rgba(255,255,255,.55);font-size:12px;margin-top:7px; }
+        .sf-search-step { min-height:20px;color:rgba(255,255,255,.55);font-size:12px;margin-top:7px;opacity:1;transform:translateY(0);transition:opacity .48s ease,transform .48s ease,filter .48s ease; }
+        .sf-search-step.sf-step-out { opacity:0;transform:translateY(7px);filter:blur(3px); }
+        .sf-search-step.sf-step-in { opacity:1;transform:translateY(0);filter:blur(0); }
+        #searchSuggestions { display:none !important; }
+        .stats { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+        .profile-final-collection { cursor:pointer; transition:transform .18s ease,border-color .18s ease,background .18s ease; }
+        .profile-final-collection:active { transform:scale(.97); }
         @keyframes sfSpin { to { transform:rotate(360deg); } }
-        .card.sf-changing { transition:transform .18s ease,opacity .18s ease !important; }
+        .card.sf-changing { transition:transform .24s cubic-bezier(.22,.8,.25,1),opacity .24s ease !important; }
     `;
     document.head.appendChild(style);
 
@@ -11198,6 +11194,9 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
             const ok = await originalAuth.apply(this, arguments);
             if (ok && typeof window.loadServerFavorites === 'function') {
                 await window.loadServerFavorites();
+            }
+            if (ok && typeof renderRecentSearches === 'function') {
+                renderRecentSearches();
             }
             return ok;
         };
@@ -11325,13 +11324,43 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         if (heading) heading.textContent = 'Подборки';
         box.innerHTML = `
             <div class="profile-final-collections">
-                <button class="profile-final-collection" onclick="openCollectionSearch('Техника','ноутбук')"><b>💻 Техника</b><br><small>Ноутбуки, телефоны, электроника</small></button>
+                <button class="profile-final-collection" onclick="openCollectionSearch('Техника','техника')"><b>💻 Техника</b><br><small>Ноутбуки, телефоны, электроника</small></button>
                 <button class="profile-final-collection" onclick="openCollectionSearch('Одежда','одежда')"><b>👕 Одежда</b><br><small>Вещи и аксессуары</small></button>
                 <button class="profile-final-collection" onclick="openCollectionSearch('Билеты','билеты')"><b>🎟️ Билеты</b><br><small>События и поездки</small></button>
-                <button class="profile-final-collection" onclick="openCollectionSearch('Авто','автомобиль')"><b>🚗 Авто</b><br><small>Машины и запчасти</small></button>
+                <button class="profile-final-collection" onclick="openCollectionSearch('Авто','авто')"><b>🚗 Авто</b><br><small>Машины и запчасти</small></button>
             </div>
             <button class="profile-final-reset" onclick="resetRecommendationAlgorithm()">↻ Сбросить алгоритм рекомендаций</button>
         `;
+    };
+
+    // ---------- PROFILE COLLECTIONS: EXACT CATEGORY ----------
+    window.openCollectionSearch = async function (label, query) {
+        const input = document.getElementById('searchInput');
+        const q = String(query || label || '').trim();
+        if (!q) return;
+        if (input) {
+            input.value = q;
+            const clear = document.getElementById('searchClear');
+            if (clear) clear.style.display = 'flex';
+        }
+        hideSearchSuggestions();
+        switchTab('search');
+        await new Promise(resolve => setTimeout(resolve, 80));
+        await performSearch(q, {
+            sources: Array.isArray(activeSearchSources) ? activeSearchSources.slice() : [],
+            minPrice: null,
+            maxPrice: null,
+            collectionLabel: String(label || q)
+        });
+    };
+
+    // Подсказки полностью отключены: поиск запускается только по Enter,
+    // кнопке поиска или выбору последнего запроса.
+    window.renderSearchSuggestions = function () {};
+    window.selectSearchSuggestion = function () {};
+    window.hideSearchSuggestions = function () {
+        const box = document.getElementById('searchSuggestions');
+        if (box) { box.classList.remove('active'); box.innerHTML = ''; }
     };
 
     window.updateProfileInterests = function () { renderProfileRecommendations(); };
@@ -11367,7 +11396,10 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         const nav=document.getElementById(navs[tab]); if(nav) nav.classList.add('active');
         if(tab==='favorites'){ renderFavorites(); void loadServerFavorites(); }
         if(tab==='profile'){ updateProfile(); renderProfileRecommendations(); }
-        if(tab==='search'){ setTimeout(()=>document.getElementById('searchInput')?.focus(),100); }
+        if(tab==='search'){
+            if (typeof renderRecentSearches === 'function') renderRecentSearches();
+            setTimeout(()=>document.getElementById('searchInput')?.focus(),100);
+        }
     };
 
     // ---------- STRICT CLIENT SEARCH ----------
@@ -11387,66 +11419,248 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
     }
 
     // ---------- SEARCH: WAIT HERE, THEN FEED ONLY WITH THIS QUERY ----------
+    // ---------- SEARCH: SLOWER, SMOOTH PROGRESS + RELIABLE RETRY ----------
     window.performSearch = async function (query, options=null) {
-        const home=document.getElementById('searchHome'), results=document.getElementById('searchResults'), list=document.getElementById('resultList'), count=document.getElementById('resultCount');
+        const home=document.getElementById('searchHome');
+        const results=document.getElementById('searchResults');
+        const list=document.getElementById('resultList');
+        const count=document.getElementById('resultCount');
+        const input=document.getElementById('searchInput');
         query=String(query||'').trim();
         if(!home||!results||!list||!count) return;
-        if(!query){ activeServerSearch={query:'',sources:[],minPrice:null,maxPrice:null}; products=[]; currentProduct=null; resetNavigationHistory(); home.style.display='block'; results.classList.remove('active'); return; }
+
+        if(!query){
+            activeServerSearch={query:'',sources:[],minPrice:null,maxPrice:null};
+            products=[]; currentProduct=null; currentIndex=0; resetNavigationHistory();
+            home.style.display='block'; results.classList.remove('active');
+            hideSearchSuggestions();
+            return;
+        }
+
+        if(input) input.value=query;
+        hideSearchSuggestions();
+
         const requestId=++serverSearchRequestId;
-        activeServerSearch={query,sources:Array.isArray(options?.sources)?options.sources.slice():[],minPrice:options?.minPrice??null,maxPrice:options?.maxPrice??null};
-        serverSearchHasMore=true; serverSearchLoading=true; products=[]; currentProduct=null; currentIndex=0; resetNavigationHistory(); switchTab('search'); home.style.display='none'; results.classList.add('active');
-        const steps=['Ищем в базе STYLEFLOW…','Проверяем Wildberries…','Проверяем Kufar…','Отбираем точные совпадения…','Готовим выдачу…'];
-        let step=0; clearInterval(window.__sfSearchTimer); list.innerHTML=`<div class="sf-search-progress"><div class="sf-search-spinner"></div><b>Ищем «${escapeHTML(query)}»</b><div id="sfSearchStep" class="sf-search-step">${steps[0]}</div></div>`;
-        count.textContent='Ищем…'; window.__sfSearchTimer=setInterval(()=>{step=(step+1)%steps.length;const n=document.getElementById('sfSearchStep');if(n)n.textContent=steps[step];},700);
+        activeServerSearch={
+            query,
+            sources:Array.isArray(options?.sources)?options.sources.slice():[],
+            minPrice:options?.minPrice??null,
+            maxPrice:options?.maxPrice??null
+        };
+        serverSearchHasMore=true;
+        serverSearchLoading=true;
+        products=[]; currentProduct=null; currentIndex=0; resetNavigationHistory();
+        switchTab('search');
+        home.style.display='none';
+        results.classList.add('active');
+
+        const steps=[
+            'Смотрим базу STYLEFLOW…',
+            'Проверяем площадки…',
+            'Ищем точные совпадения…',
+            'Сверяем категории и названия…',
+            'Собираем подходящие карточки…',
+            'Почти готово…'
+        ];
+        let step=0;
+        const minProgressMs=2600;
+        const progressStarted=Date.now();
+        clearInterval(window.__sfSearchTimer);
+
+        list.innerHTML=`<div class="sf-search-progress">
+            <div class="sf-search-spinner"></div>
+            <b>Ищем «${escapeHTML(query)}»</b>
+            <div id="sfSearchStep" class="sf-search-step sf-step-in">${steps[0]}</div>
+        </div>`;
+        count.textContent='Ищем…';
+
+        window.__sfSearchTimer=setInterval(()=>{
+            const node=document.getElementById('sfSearchStep');
+            if(!node) return;
+            node.classList.remove('sf-step-in');
+            node.classList.add('sf-step-out');
+            setTimeout(()=>{
+                if(!node || requestId!==serverSearchRequestId) return;
+                step=(step+1)%steps.length;
+                node.textContent=steps[step];
+                node.classList.remove('sf-step-out');
+                node.classList.add('sf-step-in');
+            },480);
+        },1500);
+
+        const params=new URLSearchParams({query,limit:'100'});
+        if(activeServerSearch.sources.length) params.set('sources',activeServerSearch.sources.join(','));
+        if(activeServerSearch.minPrice!=null) params.set('min_price',String(activeServerSearch.minPrice));
+        if(activeServerSearch.maxPrice!=null) params.set('max_price',String(activeServerSearch.maxPrice));
+
+        const localFallback=()=>{
+            const local=(Array.isArray(allProducts)?allProducts:[])
+                .map(normalizeProduct)
+                .filter(p=>sfStrictProduct(p,query))
+                .filter(p=>!activeServerSearch.sources.length || activeServerSearch.sources.includes(String(p.source||'').toLowerCase()))
+                .filter(p=>activeServerSearch.minPrice==null || Number(p.price)>=Number(activeServerSearch.minPrice))
+                .filter(p=>activeServerSearch.maxPrice==null || Number(p.price)<=Number(activeServerSearch.maxPrice));
+            return local;
+        };
+
+        const fetchSearch=async()=>{
+            let response=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include'});
+            if(response.status===401 && typeof authenticateTelegram==='function'){
+                try { await authenticateTelegram(); } catch(e) {}
+                response=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include'});
+            }
+            if(!response.ok) throw new Error('search '+response.status);
+            return response.json();
+        };
+
         try{
-            const params=new URLSearchParams({query,limit:'100'});
-            if(activeServerSearch.sources.length) params.set('sources',activeServerSearch.sources.join(','));
-            if(activeServerSearch.minPrice!=null) params.set('min_price',String(activeServerSearch.minPrice));
-            if(activeServerSearch.maxPrice!=null) params.set('max_price',String(activeServerSearch.maxPrice));
-            const r=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include'});
-            if(!r.ok) throw new Error('search '+r.status);
-            const data=await r.json();
+            let data;
+            try {
+                data=await fetchSearch();
+            } catch(apiError) {
+                console.warn('[StyleFlow] server search failed, using local fallback:',apiError);
+                const fallback=localFallback();
+                if(!fallback.length) throw apiError;
+                data={status:'ok',products:fallback,local_fallback:true};
+            }
+
             if(requestId!==serverSearchRequestId) return;
-            const incoming=(Array.isArray(data.products)?data.products:[]).map(normalizeProduct).filter(p=>sfStrictProduct(p,query));
+
+            const incoming=(Array.isArray(data.products)?data.products:[])
+                .map(normalizeProduct)
+                .filter(p=>sfStrictProduct(p,query));
+
             mergeProductsIntoCatalog(incoming);
+            const elapsed=Date.now()-progressStarted;
+            if(elapsed<minProgressMs) await new Promise(resolve=>setTimeout(resolve,minProgressMs-elapsed));
+            if(requestId!==serverSearchRequestId) return;
+
             list.innerHTML='';
             count.textContent=incoming.length?`Найдено товаров: ${incoming.length}`:'Ничего точного не найдено';
-            if(!incoming.length){ list.innerHTML=`<div class="search-no-results">По запросу <b>${escapeHTML(query)}</b> точных товаров не нашли.<br><span>Попробуй другое написание или площадку.</span></div>`; return; }
-            incoming.forEach(p=>{const c=document.createElement('div');c.className='search-result-card';c.innerHTML=`<img src="${escapeAttribute(p.image||'')}" alt=""><div class="search-result-info"><div class="search-result-source">${escapeHTML(sourceLabel(p.source))}</div><div class="search-result-title">${escapeHTML(p.title||'')}</div><div class="search-result-price">${escapeHTML(formatPrice(p))}</div></div>`;c.onclick=()=>openProductFromObject(p);list.appendChild(c);});
+
+            if(!incoming.length){
+                list.innerHTML=`<div class="search-no-results">По запросу <b>${escapeHTML(query)}</b> ничего точного не нашли.<br><span>Попробуй изменить запрос или площадки.</span></div>`;
+                return;
+            }
+
+            incoming.forEach(p=>{
+                const c=document.createElement('div');
+                c.className='search-result-card';
+                c.innerHTML=`<img src="${escapeAttribute(p.image||'')}" alt=""><div class="search-result-info"><div class="search-result-source">${escapeHTML(sourceLabel(p.source))}</div><div class="search-result-title">${escapeHTML(p.title||'')}</div><div class="search-result-price">${escapeHTML(formatPrice(p))}</div></div>`;
+                c.onclick=()=>openProductFromObject(p);
+                list.appendChild(c);
+            });
+
             products=incoming.filter(p=>!isProductViewed(p));
             if(!products.length) products=incoming.slice();
-            currentIndex=0; resetNavigationHistory(); currentProduct=null;
+            currentIndex=0;
+            resetNavigationHistory();
+            currentProduct=null;
             rememberProductInNavigation(products[0]);
-            stopSearchProgress();
             switchTab('feed');
             showProduct(true);
             preloadUpcomingImages();
         }catch(e){
             console.error('[StyleFlow] search',e);
-            if(requestId===serverSearchRequestId){list.innerHTML='<div class="search-no-results">Не удалось выполнить поиск. Попробуй ещё раз.</div>';count.textContent='Ошибка поиска';}
-        }finally{if(requestId===serverSearchRequestId){serverSearchLoading=false;clearInterval(window.__sfSearchTimer);}}
+            if(requestId===serverSearchRequestId){
+                const elapsed=Date.now()-progressStarted;
+                if(elapsed<minProgressMs) await new Promise(resolve=>setTimeout(resolve,minProgressMs-elapsed));
+                list.innerHTML='<div class="search-no-results">Поиск временно недоступен.<br><span>Проверь подключение и попробуй ещё раз.</span></div>';
+                count.textContent='Не удалось выполнить поиск';
+            }
+        }finally{
+            if(requestId===serverSearchRequestId){
+                serverSearchLoading=false;
+                clearInterval(window.__sfSearchTimer);
+            }
+        }
     };
 
     // ---------- NAVIGATION: UP = PREVIOUS VIEWED, DOWN = NEW ----------
+    // ---------- NAVIGATION: DOWN = NEXT/NEW, UP = RECENTLY VIEWED ----------
     window.nextProduct = async function () {
-        if(!products.length){ buildPersonalizedFeed(); currentIndex=0; if(products.length){rememberProductInNavigation(products[0]); showProduct();} return; }
-        // If user moved back, going forward returns the exact next viewed card.
-        if(navigationPosition < navigationHistory.length-1){ navigationPosition++; const p=findProductById(navigationHistory[navigationPosition]); if(p){currentProduct=p; currentIndex=Math.max(0,products.findIndex(x=>String(x.id)===String(p.id))); animateCardChange('next',true); return;} }
+        if(!products.length){
+            buildPersonalizedFeed();
+            currentIndex=0;
+            if(products.length){
+                resetNavigationHistory();
+                rememberProductInNavigation(products[0]);
+                showProduct();
+            }
+            return;
+        }
+
+        // Если мы вернулись назад, свайп вниз возвращает нас вперёд
+        // по уже пройденному маршруту: А ← Б ← В → Б → В.
+        if(navigationPosition < navigationHistory.length-1){
+            navigationPosition++;
+            const p=findProductById(navigationHistory[navigationPosition]);
+            if(p){
+                currentProduct=p;
+                currentIndex=Math.max(0,products.findIndex(x=>String(x.id)===String(p.id)));
+                animateCardChange('next',true);
+                return;
+            }
+        }
+
         const next=findNextUnviewedIndex(currentIndex,1);
-        if(next>=0){ rememberProductInNavigation(currentProduct); currentIndex=next; rememberProductInNavigation(products[next]); animateCardChange('next',false); return; }
-        if(activeServerSearch.query && serverSearchHasMore){ if(await loadMoreServerProducts()){const n=findNextUnviewedIndex(currentIndex,1);if(n>=0){rememberProductInNavigation(currentProduct);currentIndex=n;rememberProductInNavigation(products[n]);animateCardChange('next',false);return;}} }
-        if(!activeServerSearch.query && feedHasMore){ if(await loadMoreFeedProducts(true)){const n=findNextUnviewedIndex(currentIndex,1);if(n>=0){rememberProductInNavigation(currentProduct);currentIndex=n;rememberProductInNavigation(products[n]);animateCardChange('next',false);return;}} }
+        if(next>=0){
+            currentIndex=next;
+            currentProduct=products[next];
+            rememberProductInNavigation(currentProduct);
+            animateCardChange('next',false);
+            return;
+        }
+
+        if(activeServerSearch.query && serverSearchHasMore){
+            if(await loadMoreServerProducts()){
+                const n=findNextUnviewedIndex(currentIndex,1);
+                if(n>=0){
+                    currentIndex=n;
+                    currentProduct=products[n];
+                    rememberProductInNavigation(currentProduct);
+                    animateCardChange('next',false);
+                    return;
+                }
+            }
+        }
+
+        if(!activeServerSearch.query && feedHasMore){
+            if(await loadMoreFeedProducts(true)){
+                const n=findNextUnviewedIndex(currentIndex,1);
+                if(n>=0){
+                    currentIndex=n;
+                    currentProduct=products[n];
+                    rememberProductInNavigation(currentProduct);
+                    animateCardChange('next',false);
+                    return;
+                }
+            }
+        }
+
         showToast(activeServerSearch.query?'По этому запросу больше товаров нет':'Ты просмотрел все доступные товары');
     };
 
     window.previousProduct = function () {
-        if(navigationPosition<=0){showToast('Это начало просмотренной ленты');return;}
+        // Свайп вверх НИКОГДА не ищет новый товар.
+        // Он только возвращает предыдущую карточку из текущей истории.
+        if(navigationPosition<=0){
+            showToast('Ты в начале просмотренной истории');
+            return;
+        }
+
         navigationPosition--;
         const id=navigationHistory[navigationPosition];
         const p=findProductById(id);
         if(!p) return;
+
         const idx=products.findIndex(x=>String(x.id)===String(id));
-        if(idx<0){products=[p,...products];currentIndex=0;}else currentIndex=idx;
+        if(idx<0){
+            products=[p,...products];
+            currentIndex=0;
+        }else{
+            currentIndex=idx;
+        }
         currentProduct=p;
         animateCardChange('previous',true);
     };
