@@ -1699,6 +1699,28 @@
             cursor: pointer;
         }
 
+
+/* STYLEFLOW PREMIUM NAVIGATION */
+.screen{display:block!important;visibility:hidden;pointer-events:none;opacity:0;transform:translate3d(8%,0,0) scale(.985);transform-origin:50% 50%;filter:blur(7px);will-change:transform,opacity,filter;transition:transform 520ms cubic-bezier(.22,1,.36,1),opacity 360ms ease,filter 520ms cubic-bezier(.22,1,.36,1),visibility 0s linear 520ms;z-index:1}
+.screen.active{visibility:visible;pointer-events:auto;opacity:1;transform:translate3d(0,0,0) scale(1);filter:blur(0);z-index:2;transition:transform 560ms cubic-bezier(.16,1,.3,1),opacity 380ms ease,filter 560ms cubic-bezier(.16,1,.3,1),visibility 0s linear 0s}
+.screen.tab-enter-from-right{transform:translate3d(100%,0,0) scale(.965);opacity:0;filter:blur(10px)}
+.screen.tab-enter-from-left{transform:translate3d(-100%,0,0) scale(.965);opacity:0;filter:blur(10px)}
+.screen.tab-leave-to-left{transform:translate3d(-18%,0,0) scale(.985);opacity:.18;filter:blur(5px);z-index:1}
+.screen.tab-leave-to-right{transform:translate3d(18%,0,0) scale(.985);opacity:.18;filter:blur(5px);z-index:1}
+.bottom-nav{transform:translate3d(-50%,0,0);will-change:transform,box-shadow;transition:transform 420ms cubic-bezier(.22,1,.36,1),box-shadow 420ms ease;touch-action:pan-x;user-select:none}
+.bottom-nav::before{content:"";position:absolute;inset:5px;border-radius:17px;background:linear-gradient(120deg,rgba(255,255,255,.08),rgba(255,255,255,0) 45%,rgba(255,255,255,.045));opacity:.55;pointer-events:none}
+.bottom-nav.nav-dragging{box-shadow:0 20px 65px rgba(0,0,0,.42),0 0 0 1px rgba(255,255,255,.025)}
+.nav-item{position:relative;overflow:hidden;transform:translate3d(0,0,0) scale(1);will-change:transform,background,color;transition:transform 360ms cubic-bezier(.16,1,.3,1),background 300ms ease,color 260ms ease,opacity 260ms ease}
+.nav-item::after{content:"";position:absolute;left:20%;right:20%;bottom:5px;height:2px;border-radius:99px;background:rgba(255,255,255,.9);transform:scaleX(0);opacity:0;transition:transform 420ms cubic-bezier(.16,1,.3,1),opacity 250ms ease}
+.nav-item.active{transform:translate3d(0,-1px,0) scale(1.015)}
+.nav-item.active::after{transform:scaleX(1);opacity:.75}
+.nav-item .nav-icon{transition:transform 420ms cubic-bezier(.16,1,.3,1),opacity 260ms ease}
+.nav-item.active .nav-icon{transform:translateY(-1px) scale(1.08)}
+.nav-item.nav-press{transform:scale(.92)}
+.nav-swipe-glow{position:absolute;top:5px;bottom:5px;width:72px;border-radius:17px;background:radial-gradient(circle,rgba(255,255,255,.11),transparent 70%);opacity:0;pointer-events:none;transition:opacity 180ms ease}
+.bottom-nav.nav-dragging .nav-swipe-glow{opacity:1}
+@media (prefers-reduced-motion:reduce){.screen,.screen.active,.bottom-nav,.nav-item,.nav-item::after,.nav-item .nav-icon{transition-duration:1ms!important;animation-duration:1ms!important}}
+
 </style>
 </head>
 
@@ -11184,7 +11206,368 @@ setTimeout(
     0
 );
 
+
+
+/* =========================================================
+STYLEFLOW FINAL UX / ACCOUNT PATCH
+========================================================= */
+(function () {
+    const style = document.createElement('style');
+    style.id = 'styleflow-final-patch';
+    style.textContent = `
+        .screen { opacity: 0; transform: translateY(12px); transition: opacity .22s ease, transform .26s ease; pointer-events:none; }
+        .screen.active { opacity:1; transform:translateY(0); pointer-events:auto; }
+        .search-box { position:relative !important; }
+        .search-box input { padding-right:104px !important; }
+        .search-submit { position:absolute !important; right:52px !important; top:7px !important; z-index:4; width:40px !important; height:40px !important; margin:0 !important; }
+        .search-clear { right:8px !important; top:8px !important; z-index:5; width:38px !important; height:38px !important; }
+        .product-details-toggle { top:auto !important; bottom:92px !important; right:14px !important; z-index:20 !important; padding:10px 13px !important; font-size:12px !important; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+        .profile-final-collections { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+        .profile-final-collection { min-height:96px; padding:14px; border:1px solid rgba(255,255,255,.08); border-radius:18px; background:rgba(255,255,255,.045); color:#fff; text-align:left; }
+        .profile-final-reset { width:100%; margin-top:10px; padding:13px 14px; border:1px solid rgba(255,255,255,.1); border-radius:15px; background:rgba(255,255,255,.04); color:rgba(255,255,255,.78); font-weight:800; }
+        .sf-search-progress { padding:48px 16px; text-align:center; }
+        .sf-search-spinner { width:32px;height:32px;margin:0 auto 15px;border:3px solid rgba(255,255,255,.14);border-top-color:#fff;border-radius:50%;animation:sfSpin .8s linear infinite; }
+        .sf-search-step { min-height:20px;color:rgba(255,255,255,.55);font-size:12px;margin-top:7px; }
+        @keyframes sfSpin { to { transform:rotate(360deg); } }
+        .card.sf-changing { transition:transform .18s ease,opacity .18s ease !important; }
+    `;
+    document.head.appendChild(style);
+
+    // ---------- ACCOUNT-AUTH WRAPPER ----------
+    const originalAuth = window.authenticateTelegram;
+    if (typeof originalAuth === 'function' && !window.__sfAuthWrapped) {
+        window.__sfAuthWrapped = true;
+        window.authenticateTelegram = async function () {
+            const ok = await originalAuth.apply(this, arguments);
+            if (ok && typeof window.loadServerFavorites === 'function') {
+                await window.loadServerFavorites();
+            }
+            return ok;
+        };
+    }
+
+    // ---------- SERVER-SOURCE-OF-TRUTH HISTORY ----------
+    window.loadUserHistory = async function () {
+        if (!styleflowAccountId) { userHistoryLoaded = true; return false; }
+        try {
+            const r = await fetch('/api/user/history', {cache:'no-store', credentials:'include'});
+            if (!r.ok) throw new Error('history '+r.status);
+            const data = await r.json();
+            viewedProducts = Array.isArray(data.viewed) ? data.viewed.map(String).slice(-500) : [];
+            openedProducts = Array.isArray(data.opened) ? data.opened.map(String).slice(-500) : [];
+            saveJSON('styleflow_viewed', viewedProducts);
+            saveJSON('styleflow_opened', openedProducts);
+            userHistoryLoaded = true;
+            return true;
+        } catch (e) {
+            console.error('[StyleFlow] history sync:', e);
+            userHistoryLoaded = false;
+            return false;
+        }
+    };
+
+    // ---------- SERVER FAVORITES ----------
+    window.loadServerFavorites = async function () {
+        if (!styleflowAccountId) return false;
+        try {
+            const r = await fetch('/api/user/favorites', {cache:'no-store', credentials:'include'});
+            if (!r.ok) throw new Error('favorites '+r.status);
+            const data = await r.json();
+            if (data.status !== 'ok') throw new Error(data.message || 'favorites error');
+            const server = Array.isArray(data.products) ? data.products.map(normalizeProduct) : [];
+            const local = Array.isArray(favorites) ? favorites.slice() : [];
+            if (!server.length && local.length) {
+                for (const p of local.slice(0,200)) {
+                    await fetch('/api/user/favorite', {
+                        method:'POST', credentials:'include', headers:{'Content-Type':'application/json'},
+                        body:JSON.stringify({action:'add',product:p})
+                    });
+                }
+                favorites = local.map(normalizeProduct);
+            } else {
+                favorites = server;
+            }
+            saveJSON('styleflow_favorites', favorites);
+            updateLikeButton();
+            updateProfile();
+            return true;
+        } catch (e) {
+            console.error('[StyleFlow] favorites sync:', e);
+            return false;
+        }
+    };
+
+    // ---------- LIKE: LOCAL + SERVER ----------
+    window.toggleLike = async function () {
+        if (!currentProduct || !styleflowAccountId) return;
+        const id = String(currentProduct.id);
+        const exists = favorites.some(x => String(x.id) === id);
+        if (exists) {
+            favorites = favorites.filter(x => String(x.id) !== id);
+            showToast('Удалено из избранного');
+        } else {
+            favorites = [currentProduct, ...favorites.filter(x => String(x.id) !== id)];
+            showToast('❤️ Добавлено в избранное');
+            showHeart();
+        }
+        saveJSON('styleflow_favorites', favorites);
+        updateLikeButton(); updateProfile();
+        try {
+            const r = await fetch('/api/user/favorite', {
+                method:'POST', credentials:'include', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({action:exists?'remove':'add', product:currentProduct})
+            });
+            if (!r.ok) throw new Error('favorite '+r.status);
+        } catch (e) {
+            if (exists) favorites = [currentProduct, ...favorites];
+            else favorites = favorites.filter(x => String(x.id) !== id);
+            saveJSON('styleflow_favorites', favorites); updateLikeButton(); updateProfile();
+            showToast('Не удалось синхронизировать избранное');
+        }
+    };
+
+    // ---------- FAVORITES SCREEN ----------
+    window.renderFavorites = function () {
+        const grid = document.getElementById('favoritesGrid');
+        const empty = document.getElementById('favoritesEmpty');
+        if (!grid || !empty) return;
+        grid.innerHTML = '';
+        empty.style.display = favorites.length ? 'none' : 'flex';
+        favorites.forEach(product => {
+            const card = document.createElement('div');
+            card.className = 'favorite-card';
+            card.innerHTML = `<img src="${escapeAttribute(product.image || '')}" alt="${escapeAttribute(product.title || '')}"><div class="favorite-info"><div class="favorite-title">${escapeHTML(product.title || '')}</div><div class="favorite-price">${escapeHTML(formatPrice(product))}</div></div>`;
+            card.onclick = () => openProductFromObject(product);
+            grid.appendChild(card);
+        });
+    };
+
+    // ---------- OPEN FAVORITE: SHOW EXACT CARD, NEVER RANDOM FEED ----------
+    window.openProductFromObject = function (product) {
+        if (!product) return;
+        const normalized = normalizeProduct(product);
+        const id = String(normalized.id);
+        allProducts = [normalized, ...allProducts.filter(p => String(p.id) !== id)];
+        products = [normalized, ...products.filter(p => String(p.id) !== id)];
+        currentIndex = 0;
+        currentProduct = normalized;
+        resetNavigationHistory();
+        rememberProductInNavigation(normalized);
+        renderSingleProductObject(normalized);
+        registerView(normalized);
+        switchTab('feed');
+        updateLikeButton();
+    };
+
+    // ---------- PROFILE COLLECTIONS + RESET ----------
+    window.renderProfileRecommendations = function () {
+        const box = document.getElementById('profileRecommendations');
+        if (!box) return;
+        const section = box.closest('.profile-section');
+        const heading = section ? section.querySelector('.profile-section-title') : null;
+        if (heading) heading.textContent = 'Подборки';
+        box.innerHTML = `
+            <div class="profile-final-collections">
+                <button class="profile-final-collection" onclick="openCollectionSearch('Техника','ноутбук')"><b>💻 Техника</b><br><small>Ноутбуки, телефоны, электроника</small></button>
+                <button class="profile-final-collection" onclick="openCollectionSearch('Одежда','одежда')"><b>👕 Одежда</b><br><small>Вещи и аксессуары</small></button>
+                <button class="profile-final-collection" onclick="openCollectionSearch('Билеты','билеты')"><b>🎟️ Билеты</b><br><small>События и поездки</small></button>
+                <button class="profile-final-collection" onclick="openCollectionSearch('Авто','автомобиль')"><b>🚗 Авто</b><br><small>Машины и запчасти</small></button>
+            </div>
+            <button class="profile-final-reset" onclick="resetRecommendationAlgorithm()">↻ Сбросить алгоритм рекомендаций</button>
+        `;
+    };
+
+    window.updateProfileInterests = function () { renderProfileRecommendations(); };
+
+    window.resetRecommendationAlgorithm = async function () {
+        if (!styleflowAccountId) { showToast('Сначала открой STYLEFLOW через Telegram'); return; }
+        if (!confirm('Сбросить историю сигналов и персональные рекомендации? Избранное останется.')) return;
+        try {
+            const r = await fetch('/api/user/reset-recommendations', {method:'POST', credentials:'include'});
+            if (!r.ok) throw new Error('reset '+r.status);
+            viewedProducts=[]; openedProducts=[];
+            saveJSON('styleflow_viewed', []); saveJSON('styleflow_opened', []);
+            activeServerSearch={query:'',sources:[],minPrice:null,maxPrice:null};
+            serverSearchRequestId++; serverSearchHasMore=true;
+            navigationHistory=[]; navigationPosition=-1; currentProduct=null; currentIndex=0;
+            feedOffset=0; feedHasMore=true;
+            await loadUserHistory();
+            await loadFeed();
+            switchTab('feed');
+            showToast('Алгоритм рекомендаций сброшен');
+            updateProfile();
+        } catch(e) { console.error(e); showToast('Не удалось сбросить алгоритм'); }
+    };
+
+    // ---------- SMOOTH TABS ----------
+    window.switchTab = function (tab) {
+        currentTab = tab;
+        const screens={feed:'feedScreen',favorites:'favoritesScreen',search:'searchScreen',profile:'profileScreen'};
+        const navs={feed:'navFeed',favorites:'navFavorites',search:'navSearch',profile:'navProfile'};
+        Object.values(screens).forEach(id=>{const el=document.getElementById(id); if(el) el.classList.remove('active');});
+        requestAnimationFrame(()=>{const el=document.getElementById(screens[tab]); if(el) el.classList.add('active');});
+        Object.values(navs).forEach(id=>{const el=document.getElementById(id); if(el) el.classList.remove('active');});
+        const nav=document.getElementById(navs[tab]); if(nav) nav.classList.add('active');
+        if(tab==='favorites'){ renderFavorites(); void loadServerFavorites(); }
+        if(tab==='profile'){ updateProfile(); renderProfileRecommendations(); }
+        if(tab==='search'){ setTimeout(()=>document.getElementById('searchInput')?.focus(),100); }
+    };
+
+    // ---------- STRICT CLIENT SEARCH ----------
+    function sfStrictWord(token, text) {
+        token=String(token||'').toLowerCase().trim(); text=String(text||'').toLowerCase();
+        if(!token||!text) return false;
+        const aliases={айфон:['iphone'],iphone:['айфон'],самсунг:['samsung'],samsung:['самсунг'],смартфон:['телефон','iphone','айфон'],телефон:['смартфон','iphone','айфон']};
+        const variants=[token,...(aliases[token]||[])];
+        const words=text.split(/[^a-zа-яё0-9]+/i).filter(Boolean);
+        return variants.some(v=>words.some(w=>w===v||w.startsWith(v)||v.startsWith(w)||(v.length>=5&&w.length>=5&&(w.includes(v)||v.includes(w)))));
+    }
+    function sfStrictProduct(product, query) {
+        const tokens=String(query||'').toLowerCase().trim().split(/\s+/).filter(Boolean);
+        const core=[product.title,product.brand,product.category].join(' ');
+        const desc=product.description||'';
+        return tokens.length && tokens.every(t=>sfStrictWord(t,core)||sfStrictWord(t,desc));
+    }
+
+    // ---------- SEARCH: WAIT HERE, THEN FEED ONLY WITH THIS QUERY ----------
+    window.performSearch = async function (query, options=null) {
+        const home=document.getElementById('searchHome'), results=document.getElementById('searchResults'), list=document.getElementById('resultList'), count=document.getElementById('resultCount');
+        query=String(query||'').trim();
+        if(!home||!results||!list||!count) return;
+        if(!query){ activeServerSearch={query:'',sources:[],minPrice:null,maxPrice:null}; products=[]; currentProduct=null; resetNavigationHistory(); home.style.display='block'; results.classList.remove('active'); return; }
+        const requestId=++serverSearchRequestId;
+        activeServerSearch={query,sources:Array.isArray(options?.sources)?options.sources.slice():[],minPrice:options?.minPrice??null,maxPrice:options?.maxPrice??null};
+        serverSearchHasMore=true; serverSearchLoading=true; products=[]; currentProduct=null; currentIndex=0; resetNavigationHistory(); switchTab('search'); home.style.display='none'; results.classList.add('active');
+        const steps=['Ищем в базе STYLEFLOW…','Проверяем Wildberries…','Проверяем Kufar…','Отбираем точные совпадения…','Готовим выдачу…'];
+        let step=0; clearInterval(window.__sfSearchTimer); list.innerHTML=`<div class="sf-search-progress"><div class="sf-search-spinner"></div><b>Ищем «${escapeHTML(query)}»</b><div id="sfSearchStep" class="sf-search-step">${steps[0]}</div></div>`;
+        count.textContent='Ищем…'; window.__sfSearchTimer=setInterval(()=>{step=(step+1)%steps.length;const n=document.getElementById('sfSearchStep');if(n)n.textContent=steps[step];},700);
+        try{
+            const params=new URLSearchParams({query,limit:'100'});
+            if(activeServerSearch.sources.length) params.set('sources',activeServerSearch.sources.join(','));
+            if(activeServerSearch.minPrice!=null) params.set('min_price',String(activeServerSearch.minPrice));
+            if(activeServerSearch.maxPrice!=null) params.set('max_price',String(activeServerSearch.maxPrice));
+            const r=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include'});
+            if(!r.ok) throw new Error('search '+r.status);
+            const data=await r.json();
+            if(requestId!==serverSearchRequestId) return;
+            const incoming=(Array.isArray(data.products)?data.products:[]).map(normalizeProduct).filter(p=>sfStrictProduct(p,query));
+            mergeProductsIntoCatalog(incoming);
+            list.innerHTML='';
+            count.textContent=incoming.length?`Найдено товаров: ${incoming.length}`:'Ничего точного не найдено';
+            if(!incoming.length){ list.innerHTML=`<div class="search-no-results">По запросу <b>${escapeHTML(query)}</b> точных товаров не нашли.<br><span>Попробуй другое написание или площадку.</span></div>`; return; }
+            incoming.forEach(p=>{const c=document.createElement('div');c.className='search-result-card';c.innerHTML=`<img src="${escapeAttribute(p.image||'')}" alt=""><div class="search-result-info"><div class="search-result-source">${escapeHTML(sourceLabel(p.source))}</div><div class="search-result-title">${escapeHTML(p.title||'')}</div><div class="search-result-price">${escapeHTML(formatPrice(p))}</div></div>`;c.onclick=()=>openProductFromObject(p);list.appendChild(c);});
+            products=incoming.filter(p=>!isProductViewed(p));
+            if(!products.length) products=incoming.slice();
+            currentIndex=0; resetNavigationHistory(); currentProduct=null;
+            rememberProductInNavigation(products[0]);
+            stopSearchProgress();
+            switchTab('feed');
+            showProduct(true);
+            preloadUpcomingImages();
+        }catch(e){
+            console.error('[StyleFlow] search',e);
+            if(requestId===serverSearchRequestId){list.innerHTML='<div class="search-no-results">Не удалось выполнить поиск. Попробуй ещё раз.</div>';count.textContent='Ошибка поиска';}
+        }finally{if(requestId===serverSearchRequestId){serverSearchLoading=false;clearInterval(window.__sfSearchTimer);}}
+    };
+
+    // ---------- NAVIGATION: UP = NEW, DOWN = PREVIOUS VIEWED ----------
+    window.nextProduct = async function () {
+        if(!products.length){ buildPersonalizedFeed(); currentIndex=0; if(products.length){rememberProductInNavigation(products[0]); showProduct();} return; }
+        // If user moved back, going forward returns the exact next viewed card.
+        if(navigationPosition < navigationHistory.length-1){ navigationPosition++; const p=findProductById(navigationHistory[navigationPosition]); if(p){currentProduct=p; currentIndex=Math.max(0,products.findIndex(x=>String(x.id)===String(p.id))); animateCardChange('next',true); return;} }
+        const next=findNextUnviewedIndex(currentIndex,1);
+        if(next>=0){ rememberProductInNavigation(currentProduct); currentIndex=next; rememberProductInNavigation(products[next]); animateCardChange('next',false); return; }
+        if(activeServerSearch.query && serverSearchHasMore){ if(await loadMoreServerProducts()){const n=findNextUnviewedIndex(currentIndex,1);if(n>=0){rememberProductInNavigation(currentProduct);currentIndex=n;rememberProductInNavigation(products[n]);animateCardChange('next',false);return;}} }
+        if(!activeServerSearch.query && feedHasMore){ if(await loadMoreFeedProducts(true)){const n=findNextUnviewedIndex(currentIndex,1);if(n>=0){rememberProductInNavigation(currentProduct);currentIndex=n;rememberProductInNavigation(products[n]);animateCardChange('next',false);return;}} }
+        showToast(activeServerSearch.query?'По этому запросу больше товаров нет':'Ты просмотрел все доступные товары');
+    };
+
+    window.previousProduct = function () {
+        if(navigationPosition<=0){showToast('Это начало просмотренной ленты');return;}
+        navigationPosition--;
+        const id=navigationHistory[navigationPosition];
+        const p=findProductById(id);
+        if(!p) return;
+        const idx=products.findIndex(x=>String(x.id)===String(id));
+        if(idx<0){products=[p,...products];currentIndex=0;}else currentIndex=idx;
+        currentProduct=p;
+        animateCardChange('previous',true);
+    };
+
+    // ---------- PRELOAD 50, NOT 10 ----------
+    window.preloadUpcomingImages = function () {
+        const start=Math.max(0,currentIndex+1), end=Math.min(products.length,start+50);
+        for(let i=start;i<end;i++){const src=products[i]?.image;if(src){const img=new Image();img.decoding='async';img.src=src;}}
+    };
+
+    // Keep old threshold variable behaviour, but make it 50 cards.
+    window.FEED_PREFETCH_THRESHOLD = 50;
+
+    // Initial server favorites can be loaded even when the original boot listener
+    // was registered before this patch.
+    window.addEventListener('load', async ()=>{ if(styleflowAccountId) await loadServerFavorites(); });
+})();
+
 </script>
 
+<script>
+/* =========================================================
+   STYLEFLOW PREMIUM TAB NAVIGATION / GESTURES
+   ========================================================= */
+(function(){
+    const tabs=["feed","favorites","search","profile"];
+    const screens={feed:"feedScreen",favorites:"favoritesScreen",search:"searchScreen",profile:"profileScreen"};
+    const navs={feed:"navFeed",favorites:"navFavorites",search:"navSearch",profile:"navProfile"};
+    let animating=false;
+
+    const indexOfTab=t=>Math.max(0,tabs.indexOf(t));
+    const clearMotion=el=>el&&el.classList.remove("tab-enter-from-right","tab-enter-from-left","tab-leave-to-left","tab-leave-to-right");
+
+    function premiumSwitchTab(tab,opts={}){
+        if(!screens[tab])return;
+        const oldTab=currentTab;
+        if(oldTab===tab&&!opts.force)return;
+        const direction=typeof opts.direction==="number"?opts.direction:(indexOfTab(tab)>indexOfTab(oldTab)?1:-1);
+        const oldScreen=document.getElementById(screens[oldTab]);
+        const newScreen=document.getElementById(screens[tab]);
+        animating=true;
+        if(oldScreen){clearMotion(oldScreen);oldScreen.classList.add(direction>0?"tab-leave-to-left":"tab-leave-to-right");}
+        if(newScreen){clearMotion(newScreen);newScreen.classList.add(direction>0?"tab-enter-from-right":"tab-enter-from-left");newScreen.classList.add("active");requestAnimationFrame(()=>requestAnimationFrame(()=>clearMotion(newScreen)));}
+        currentTab=tab;
+        Object.entries(navs).forEach(([name,id])=>{const el=document.getElementById(id);if(el)el.classList.toggle("active",name===tab);});
+        if(tab==="favorites"&&typeof renderFavorites==="function")renderFavorites();
+        if(tab==="profile"&&typeof updateProfile==="function")updateProfile();
+        if(tab==="search"&&opts.focusSearch!==false)setTimeout(()=>{const input=document.getElementById("searchInput");if(input)input.focus();},260);
+        setTimeout(()=>{if(oldScreen)clearMotion(oldScreen);animating=false;},590);
+    }
+    window.switchTab=premiumSwitchTab;
+
+    function boot(){
+        const nav=document.querySelector(".bottom-nav");
+        if(nav&&!nav.dataset.premiumNav){
+            nav.dataset.premiumNav="1";
+            let glow=document.createElement("div");glow.className="nav-swipe-glow";nav.appendChild(glow);
+            let sx=0,sy=0,drag=false,moved=false;
+            const start=(x,y)=>{sx=x;sy=y;drag=true;moved=false;nav.classList.add("nav-dragging");nav.style.transition="none";};
+            const move=(x,y)=>{if(!drag)return;const dx=x-sx,dy=y-sy;if(Math.abs(dx)<=Math.abs(dy)*1.1)return;if(Math.abs(dx)>8)moved=true;const resistance=Math.max(-24,Math.min(24,dx*.1));nav.style.transform=`translate3d(calc(-50% + ${resistance}px),0,0)`;glow.style.left=`${Math.max(5,Math.min(nav.clientWidth-77,nav.clientWidth/2+dx*.32-36))}px`;};
+            const end=x=>{if(!drag)return;drag=false;nav.classList.remove("nav-dragging");nav.style.transition="";nav.style.transform="translate3d(-50%,0,0)";const dx=x-sx;if(Math.abs(dx)<55||!moved)return;const i=indexOfTab(currentTab),n=dx<0?i+1:i-1;if(n>=0&&n<tabs.length)premiumSwitchTab(tabs[n],{direction:dx<0?1:-1});else nav.animate([{transform:"translate3d(-50%,0,0)"},{transform:`translate3d(calc(-50% + ${dx<0?-9:9}px),0,0)`},{transform:"translate3d(-50%,0,0)"}],{duration:330,easing:"cubic-bezier(.16,1,.3,1)"});};
+            nav.addEventListener("touchstart",e=>{if(e.touches[0])start(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
+            nav.addEventListener("touchmove",e=>{if(e.touches[0])move(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
+            nav.addEventListener("touchend",e=>{if(e.changedTouches[0])end(e.changedTouches[0].clientX);},{passive:true});
+            nav.querySelectorAll(".nav-item").forEach(item=>{item.addEventListener("pointerdown",()=>item.classList.add("nav-press"));["pointerup","pointercancel","pointerleave"].forEach(t=>item.addEventListener(t,()=>item.classList.remove("nav-press")));});
+        }
+
+        const app=document.getElementById("app");
+        if(app&&!app.dataset.premiumTabSwipe){
+            app.dataset.premiumTabSwipe="1";
+            let sx=0,sy=0,active=false;
+            const ignored=t=>!t||!!t.closest("input,textarea,button,a,select,.product-card,#productCard,.bottom-nav,.search-results,.favorites-grid");
+            app.addEventListener("touchstart",e=>{if(!e.touches[0]||ignored(e.target))return;sx=e.touches[0].clientX;sy=e.touches[0].clientY;active=true;},{passive:true});
+            app.addEventListener("touchend",e=>{if(!active||!e.changedTouches[0])return;active=false;if(animating)return;const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;if(Math.abs(dx)<85||Math.abs(dx)<Math.abs(dy)*1.35)return;const i=indexOfTab(currentTab),n=dx<0?i+1:i-1;if(n>=0&&n<tabs.length)premiumSwitchTab(tabs[n],{direction:dx<0?1:-1});},{passive:true});
+        }
+    }
+    if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot,{once:true});else boot();
+})();
+</script>
 </body>
 </html>
