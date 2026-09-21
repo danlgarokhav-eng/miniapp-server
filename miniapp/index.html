@@ -1801,8 +1801,8 @@
                             class="product-details-toggle"
                             type="button"
                             onclick="toggleProductDetails()"
-                            aria-label="Свернуть информацию о товаре"
-                            title="Свернуть информацию"
+                            aria-label="Скрыть описание"
+                            title="Скрыть описание"
                         >
                             ⌃
                         </button>
@@ -8860,17 +8860,13 @@ function setupSwipe() {
                 80
             ) {
 
-                // Свайп пальцем ВНИЗ = следующий новый товар.
-                // Свайп пальцем ВВЕРХ = предыдущий уже просмотренный товар.
-                if (
-                    deltaY < 0
-                ) {
-
-                    previousProduct();
-
-                } else {
-
+                // КАК В TIKTOK:
+                // палец ВВЕРХ = следующий новый товар;
+                // палец ВНИЗ = назад к только что просмотренному.
+                if (deltaY < 0) {
                     nextProduct();
+                } else {
+                    previousProduct();
                 }
 
 
@@ -9246,39 +9242,41 @@ function animateCardChange(
     direction,
     allowViewed = false
 ) {
+    const card = document.getElementById("productCard");
+    if (!card) return;
 
-    const card =
-        document.getElementById(
-            "productCard"
-        );
+    const next = direction === "next";
+    card.classList.add("sf-card-switching");
+    card.classList.toggle("sf-card-next", next);
+    card.classList.toggle("sf-card-previous", !next);
 
-    if (!card) {
-        return;
-    }
-
+    // Текущая карточка физически уходит в ту же сторону, куда
+    // пользователь сделал жест. Новая карточка приходит с противоположной стороны.
+    card.style.transition = "transform .28s cubic-bezier(.22,.8,.25,1), opacity .22s ease";
+    card.style.transform = next ? "translate3d(0,-108vh,0)" : "translate3d(0,108vh,0)";
     card.style.opacity = "0";
 
-    card.style.transform =
-        direction === "next"
-            ? "translateY(-20px)"
-            : "translateY(20px)";
+    setTimeout(() => {
+        showProduct(allowViewed);
 
-    setTimeout(
-        () => {
+        card.style.transition = "none";
+        card.style.transform = next ? "translate3d(0,108vh,0)" : "translate3d(0,-108vh,0)";
+        card.style.opacity = "0";
 
-            showProduct(allowViewed);
-
-            requestAnimationFrame(
-                () => {
-
-                    card.style.opacity = "1";
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                card.style.transition = "transform .30s cubic-bezier(.22,.8,.25,1), opacity .26s ease";
+                card.style.transform = "translate3d(0,0,0)";
+                card.style.opacity = "1";
+                setTimeout(() => {
+                    card.classList.remove("sf-card-switching","sf-card-next","sf-card-previous");
+                    card.style.transition = "";
                     card.style.transform = "";
-                }
-            );
-
-        },
-        100
-    );
+                    card.style.opacity = "";
+                }, 320);
+            });
+        });
+    }, 285);
 }
 
 function resetCardPosition() {
@@ -11156,8 +11154,13 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         .card.details-collapsed .product-info { opacity:1 !important; transform:none !important; pointer-events:auto !important; }
         .card.details-collapsed .product-info > :not(.price-row) { display:none !important; }
         .card.details-collapsed .price-row { position:absolute !important; left:0 !important; bottom:0 !important; }
-        .card.details-collapsed .price-row .price, .card.details-collapsed .price-row .old-price { display:none !important; }
+        .card.details-collapsed .price-row .price { display:inline-block !important; }
+        .card.details-collapsed .price-row .old-price { display:none !important; }
         .card.details-collapsed .product-details-toggle { display:inline-flex !important; }
+        .card.details-collapsed .open-product { display:none !important; }
+        .card.details-collapsed .product-info > .source-badge, .card.details-collapsed .product-info > .brand, .card.details-collapsed .product-info > .title, .card.details-collapsed .product-info > .meta { display:none !important; }
+        .sf-card-switching { will-change:transform,opacity; overflow:hidden !important; }
+        .sf-card-next, .sf-card-previous { backface-visibility:hidden; }
         .search-home-panel { margin-top:6px; }
         .search-home-subtitle { margin-top:-6px; color:rgba(255,255,255,.42); font-size:12px; line-height:1.45; }
         .search-help-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; margin-top:14px; }
@@ -11463,7 +11466,7 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
             'Почти готово…'
         ];
         let step=0;
-        const minProgressMs=2600;
+        const minProgressMs=3600;
         const progressStarted=Date.now();
         clearInterval(window.__sfSearchTimer);
 
@@ -11486,7 +11489,7 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
                 node.classList.remove('sf-step-out');
                 node.classList.add('sf-step-in');
             },480);
-        },1500);
+        },1800);
 
         const params=new URLSearchParams({query,limit:'100'});
         if(activeServerSearch.sources.length) params.set('sources',activeServerSearch.sources.join(','));
@@ -11494,7 +11497,10 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         if(activeServerSearch.maxPrice!=null) params.set('max_price',String(activeServerSearch.maxPrice));
 
         const localFallback=()=>{
-            const local=(Array.isArray(allProducts)?allProducts:[])
+            const sourceCatalog=(Array.isArray(allProducts)&&allProducts.length)
+                ? allProducts
+                : loadJSON('styleflow_main_feed', []);
+            const local=(Array.isArray(sourceCatalog)?sourceCatalog:[])
                 .map(normalizeProduct)
                 .filter(p=>sfStrictProduct(p,query))
                 .filter(p=>!activeServerSearch.sources.length || activeServerSearch.sources.includes(String(p.source||'').toLowerCase()))
@@ -11504,12 +11510,18 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         };
 
         const fetchSearch=async()=>{
-            let response=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include'});
+            let response=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include',headers:{'Accept':'application/json'}});
             if(response.status===401 && typeof authenticateTelegram==='function'){
-                try { await authenticateTelegram(); } catch(e) {}
-                response=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include'});
+                const ok=await authenticateTelegram().catch(()=>false);
+                if(ok){
+                    response=await fetch('/api/search?'+params.toString(),{cache:'no-store',credentials:'include',headers:{'Accept':'application/json'}});
+                }
             }
-            if(!response.ok) throw new Error('search '+response.status);
+            if(!response.ok){
+                let body='';
+                try{ body=await response.text(); }catch(e){}
+                throw new Error('search '+response.status+(body?': '+body.slice(0,180):''));
+            }
             return response.json();
         };
 
