@@ -1761,16 +1761,6 @@
 
             <div id="productCard" class="card">
 
-                <button
-                    id="productDetailsToggle"
-                    class="product-details-toggle"
-                    type="button"
-                    onclick="toggleProductDetails()"
-                    aria-label="Свернуть информацию о товаре"
-                >
-                    ⌄ Свернуть
-                </button>
-
                 <div class="product-media">
                     <img id="productImage" src="" alt="Товар">
                 </div>
@@ -1799,12 +1789,23 @@
                         </span>
                     </div>
 
-                    <div>
+                    <div class="price-row">
                         <span id="productPrice" class="price">
                             —
                         </span>
 
                         <span id="productOldPrice" class="old-price"></span>
+
+                        <button
+                            id="productDetailsToggle"
+                            class="product-details-toggle"
+                            type="button"
+                            onclick="toggleProductDetails()"
+                            aria-label="Свернуть информацию о товаре"
+                            title="Свернуть информацию"
+                        >
+                            ⌃
+                        </button>
                     </div>
 
                     <button
@@ -2004,20 +2005,29 @@
 
         <div id="searchSuggestions" class="search-suggestions"></div>
 
-        <div id="searchHome">
+        <div id="searchHome" class="search-home-panel">
 
-            <div class="section-title">
-                Попробуй поиск
+            <div class="search-home-head">
+                <div>
+                    <div class="section-title">Поиск по товарам и услугам</div>
+                    <div class="search-home-subtitle">Пиши обычным запросом: название, бренд, модель или услуга.</div>
+                </div>
             </div>
 
-            <div class="chips universal-chips">
+            <div class="search-help-grid">
+                <button type="button" class="search-help-card" onclick="focusSearchInput()">
+                    <span class="search-help-icon">⌕</span>
+                    <span><b>Начать поиск</b><small>Введи любой запрос</small></span>
+                </button>
+                <button type="button" class="search-help-card" onclick="openFilters()">
+                    <span class="search-help-icon">⚙</span>
+                    <span><b>Уточнить поиск</b><small>Цена и сортировка</small></span>
+                </button>
+            </div>
 
-                <button class="chip" onclick="quickSearch('BMW')">🚗 BMW</button>
-                <button class="chip" onclick="quickSearch('ноутбук')">💻 ноутбук</button>
-                <button class="chip" onclick="quickSearch('iPhone')">📱 iPhone</button>
-                <button class="chip" onclick="quickSearch('квартира')">🏠 квартира</button>
-                <button class="chip" onclick="quickSearch('ремонт')">🔧 ремонт</button>
-
+            <div id="recentSearchesBlock" class="recent-searches-block">
+                <div class="section-title">Последние запросы</div>
+                <div id="recentSearches" class="chips recent-searches"></div>
             </div>
 
         </div>
@@ -7248,6 +7258,8 @@ function setupSearch() {
         return;
     }
 
+    renderRecentSearches();
+
 
     input.addEventListener(
         "input",
@@ -7302,6 +7314,45 @@ function setupSearch() {
     );
 }
 
+
+function focusSearchInput() {
+    switchTab("search");
+    setTimeout(() => {
+        const input = document.getElementById("searchInput");
+        if (input) input.focus();
+    }, 80);
+}
+
+function renderRecentSearches() {
+    const block = document.getElementById("recentSearchesBlock");
+    const container = document.getElementById("recentSearches");
+    if (!block || !container) return;
+
+    const history = loadJSON("styleflow_search_history", []);
+    const items = Array.isArray(history)
+        ? history
+            .slice()
+            .reverse()
+            .map(item => typeof item === "string" ? item : item && item.query)
+            .filter(Boolean)
+            .map(String)
+            .filter((value, index, arr) => arr.findIndex(v => normalizeText(v) === normalizeText(value)) === index)
+            .slice(0, 6)
+        : [];
+
+    if (!items.length) {
+        container.innerHTML = "";
+        block.style.display = "none";
+        return;
+    }
+
+    block.style.display = "block";
+    container.innerHTML = items.map(query => `
+        <button type="button" class="chip recent-search-chip" onclick="quickSearch(${JSON.stringify(query).replace(/</g, "\\u003c")})">
+            🕘 ${escapeHTML(query)}
+        </button>
+    `).join("");
+}
 
 function quickSearch(
     query
@@ -7622,24 +7673,16 @@ function buildDynamicSearchSuggestions(query) {
     const used = new Set();
 
     function add(icon, text, meta, score) {
-        const key = normalizeText(text);
+        const cleanText = String(text || "").trim();
+        const key = normalizeText(cleanText);
         if (!key || used.has(key)) return;
         used.add(key);
-        result.push({ icon, text, meta, score });
+        result.push({ icon, text: cleanText, meta, score });
     }
 
-    UNIVERSAL_SEARCH_SUGGESTIONS.forEach(([icon, text, meta]) => {
-        const n = normalizeText(text);
-        let score = 0;
-
-        if (n === normalized) score = 100;
-        else if (n.startsWith(normalized)) score = 85;
-        else if (n.includes(normalized)) score = 70;
-        else if (searchTokenMatches(normalized, n)) score = 55;
-
-        if (score) add(icon, text, meta, score);
-    });
-
+    // В подсказках больше НЕ показываем общий каталог вроде BMW/ноутбуков/
+    // грузоперевозок и т.п. Подсказка должна быть связана именно с тем,
+    // что пользователь уже написал.
     const queryTokens = normalized.split(/\s+/).filter(Boolean);
 
     allProducts.forEach(product => {
@@ -7652,15 +7695,13 @@ function buildDynamicSearchSuggestions(query) {
         candidates.forEach(candidate => {
             const clean = String(candidate).trim();
             const candidateNormalized = normalizeText(clean);
-
             if (!candidateNormalized || candidateNormalized.length < 2) return;
 
             let score = 0;
-            if (candidateNormalized.startsWith(normalized)) score = 80;
-            else if (candidateNormalized.includes(normalized)) score = 65;
-            else if (queryTokens.some(token =>
-                searchTokenMatches(token, candidateNormalized)
-            )) score = 50;
+            if (candidateNormalized === normalized) score = 100;
+            else if (candidateNormalized.startsWith(normalized)) score = 88;
+            else if (candidateNormalized.includes(normalized)) score = 76;
+            else if (queryTokens.some(token => searchTokenMatches(token, candidateNormalized))) score = 58;
 
             if (score) {
                 add(
@@ -7680,19 +7721,27 @@ function buildDynamicSearchSuggestions(query) {
             if (!text) return;
 
             const n = normalizeText(text);
-            let score = 0;
+            if (!n) return;
 
-            if (n.startsWith(normalized)) score = 90;
-            else if (n.includes(normalized)) score = 72;
-            else if (searchTokenMatches(normalized, n)) score = 55;
+            let score = 0;
+            if (n === normalized) score = 98;
+            else if (n.startsWith(normalized)) score = 92;
+            else if (n.includes(normalized)) score = 80;
+            else if (searchTokenMatches(normalized, n)) score = 64;
 
             if (score) add("🕘", text, "твой прошлый поиск", score);
         });
     }
 
+    // Если релевантных подсказок нет, показываем только сам запрос.
+    // Никаких случайных популярных слов.
+    if (!result.length) {
+        add("🔎", query.trim(), "искать этот запрос", 1);
+    }
+
     return result
         .sort((a, b) => b.score - a.score)
-        .slice(0, 7);
+        .slice(0, 6);
 }
 
 function renderSearchSuggestions(query) {
@@ -7756,6 +7805,7 @@ async function selectSearchSuggestion(index) {
 
     // Сохраняем именно выбранную подсказку как запрос пользователя.
     rememberSearchQuery(selectedQuery);
+    renderRecentSearches();
 
     // Передаём запрос напрямую в серверный поиск и не используем
     // старое значение фильтра/предыдущего поиска.
@@ -8788,7 +8838,7 @@ function toggleProductDetails() {
 
     const button = document.getElementById("productDetailsToggle");
     if (button) {
-        button.textContent = productDetailsCollapsed ? "⌃ Показать" : "⌄ Свернуть";
+        button.textContent = productDetailsCollapsed ? "⌄" : "⌃";
     }
 }
 
@@ -11214,7 +11264,25 @@ STYLEFLOW FINAL UX / ACCOUNT PATCH
         .search-box input { padding-right:104px !important; }
         .search-submit { position:absolute !important; right:52px !important; top:7px !important; z-index:4; width:40px !important; height:40px !important; margin:0 !important; }
         .search-clear { right:8px !important; top:8px !important; z-index:5; width:38px !important; height:38px !important; }
-        .product-details-toggle { top:auto !important; bottom:92px !important; right:14px !important; z-index:20 !important; padding:10px 13px !important; font-size:12px !important; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+        .price-row { display:flex !important; align-items:center !important; flex-wrap:wrap !important; gap:0 !important; }
+        .product-details-toggle { position:relative !important; top:auto !important; right:auto !important; bottom:auto !important; z-index:20 !important; width:24px !important; height:24px !important; min-width:24px !important; margin-left:7px !important; padding:0 !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border:1px solid rgba(255,255,255,.18) !important; border-radius:50% !important; background:rgba(0,0,0,.38) !important; color:rgba(255,255,255,.86) !important; font-size:13px !important; line-height:1 !important; box-shadow:none !important; backdrop-filter:blur(10px) !important; }
+        .product-details-toggle:active { transform:scale(.9); }
+        .card.details-collapsed .product-info { opacity:1 !important; transform:none !important; pointer-events:auto !important; }
+        .card.details-collapsed .product-info > :not(.price-row) { display:none !important; }
+        .card.details-collapsed .price-row { position:absolute !important; left:0 !important; bottom:0 !important; }
+        .card.details-collapsed .price-row .price, .card.details-collapsed .price-row .old-price { display:none !important; }
+        .card.details-collapsed .product-details-toggle { display:inline-flex !important; }
+        .search-home-panel { margin-top:6px; }
+        .search-home-subtitle { margin-top:-6px; color:rgba(255,255,255,.42); font-size:12px; line-height:1.45; }
+        .search-help-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; margin-top:14px; }
+        .search-help-card { min-width:0; min-height:72px; display:flex; align-items:center; gap:10px; padding:12px; border:1px solid rgba(255,255,255,.07); border-radius:16px; background:rgba(255,255,255,.045); color:#fff; text-align:left; cursor:pointer; }
+        .search-help-card:active { transform:scale(.98); }
+        .search-help-icon { width:34px; height:34px; flex:0 0 34px; display:flex; align-items:center; justify-content:center; border-radius:11px; background:rgba(155,124,255,.14); font-size:19px; }
+        .search-help-card b { display:block; font-size:12px; }
+        .search-help-card small { display:block; margin-top:3px; color:rgba(255,255,255,.4); font-size:10px; }
+        .recent-searches-block { margin-top:8px; }
+        .recent-searches:empty, #recentSearchesBlock:has(.recent-searches:empty) { display:none; }
+        .recent-search-chip { display:inline-flex; align-items:center; gap:6px; max-width:100%; }
         .profile-final-collections { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
         .profile-final-collection { min-height:96px; padding:14px; border:1px solid rgba(255,255,255,.08); border-radius:18px; background:rgba(255,255,255,.045); color:#fff; text-align:left; }
         .profile-final-reset { width:100%; margin-top:10px; padding:13px 14px; border:1px solid rgba(255,255,255,.1); border-radius:15px; background:rgba(255,255,255,.04); color:rgba(255,255,255,.78); font-weight:800; }
